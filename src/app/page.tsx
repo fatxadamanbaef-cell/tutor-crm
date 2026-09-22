@@ -1,69 +1,375 @@
-import Image from "next/image";
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { Student, Lesson, Payment, MakeupLesson } from '@/types';
+import {
+  getStudents,
+  saveStudent,
+  deleteStudent,
+  getLessons,
+  saveLesson,
+  saveBatchLessons,
+  updateLessonStatus,
+  deleteLesson,
+  getPayments,
+  addPayment,
+  getMakeups,
+  resolveMakeup,
+} from '@/lib/storage';
+import { isSupabaseConfigured } from '@/lib/supabase';
+import { initTelegramApp } from '@/lib/telegram';
+
+import { Header } from '@/components/Header';
+import { BottomNav, TabType } from '@/components/BottomNav';
+import { ScheduleView } from '@/components/ScheduleView';
+import { StudentsView } from '@/components/StudentsView';
+import { MakeupsView } from '@/components/MakeupsView';
+import { FinancesView } from '@/components/FinancesView';
+
+import { AddLessonModal } from '@/components/modals/AddLessonModal';
+import { ConductLessonModal } from '@/components/modals/ConductLessonModal';
+import { GenerateScheduleModal } from '@/components/modals/GenerateScheduleModal';
+import { AddStudentModal } from '@/components/modals/AddStudentModal';
+import { AddPaymentModal } from '@/components/modals/AddPaymentModal';
+import { MissedLessonModal } from '@/components/modals/MissedLessonModal';
+import { ParentReportModal } from '@/components/modals/ParentReportModal';
+import { SupabaseConfigModal } from '@/components/modals/SupabaseConfigModal';
+import { Loader2 } from 'lucide-react';
 
 export default function Home() {
+  const [mounted, setMounted] = useState(false);
+  const [activeTab, setActiveTab] = useState<TabType>('schedule');
+  const [loading, setLoading] = useState(true);
+
+  // Data states
+  const [students, setStudents] = useState<Student[]>([]);
+  const [lessons, setLessons] = useState<Lesson[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [makeups, setMakeups] = useState<MakeupLesson[]>([]);
+
+  // Modal states
+  const [isAddLessonOpen, setIsAddLessonOpen] = useState(false);
+  const [lessonModalDate, setLessonModalDate] = useState<string | undefined>();
+  const [lessonModalStudentId, setLessonModalStudentId] = useState<string | undefined>();
+
+  const [isAutoScheduleOpen, setIsAutoScheduleOpen] = useState(false);
+  const [autoScheduleStudentId, setAutoScheduleStudentId] = useState<string | undefined>();
+
+  const [isConductLessonOpen, setIsConductLessonOpen] = useState(false);
+  const [conductStudentId, setConductStudentId] = useState<string | undefined>();
+
+  const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
+  const [studentToEdit, setStudentToEdit] = useState<Student | null>(null);
+
+  const [isAddPaymentOpen, setIsAddPaymentOpen] = useState(false);
+  const [paymentStudentId, setPaymentStudentId] = useState<string | undefined>();
+
+  const [isMissedModalOpen, setIsMissedModalOpen] = useState(false);
+  const [missedTargetLesson, setMissedTargetLesson] = useState<Lesson | null>(null);
+
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [reportStudent, setReportStudent] = useState<Student | null>(null);
+
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+
+  // Load data on mount
+  useEffect(() => {
+    setMounted(true);
+    initTelegramApp();
+    refreshData();
+  }, []);
+
+  const refreshData = async () => {
+    try {
+      const [sData, lData, pData, mData] = await Promise.all([
+        getStudents(),
+        getLessons(),
+        getPayments(),
+        getMakeups(),
+      ]);
+      setStudents(sData);
+      setLessons(lData);
+      setPayments(pData);
+      setMakeups(mData);
+    } catch (e) {
+      console.error('Failed to load data', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // --- Handlers ---
+  const handleCompleteLesson = async (lessonId: string) => {
+    await updateLessonStatus(lessonId, 'completed');
+    await refreshData();
+  };
+
+  const handleRevertLesson = async (lessonId: string) => {
+    await updateLessonStatus(lessonId, 'scheduled');
+    await refreshData();
+  };
+
+  const handleMissLesson = (lesson: Lesson) => {
+    setMissedTargetLesson(lesson);
+    setIsMissedModalOpen(true);
+  };
+
+  const handleConfirmMissLesson = async (options: {
+    needsMakeup: boolean;
+    reason: string;
+  }) => {
+    if (!missedTargetLesson) return;
+    const newStatus = options.needsMakeup ? 'missed_makeup' : 'cancelled';
+    await updateLessonStatus(missedTargetLesson.id, newStatus, {
+      reason: options.reason,
+    });
+    await refreshData();
+  };
+
+  const handleDeleteLesson = async (lessonId: string) => {
+    if (confirm('Вы уверены, что хотите удалить этот урок?')) {
+      await deleteLesson(lessonId);
+      await refreshData();
+    }
+  };
+
+  const handleSaveLesson = async (lessonData: any) => {
+    await saveLesson(lessonData);
+    await refreshData();
+  };
+
+  const handleSaveBatchLessons = async (batch: Lesson[]) => {
+    await saveBatchLessons(batch);
+    await refreshData();
+  };
+
+  const handleConductLesson = async (data: {
+    student_id: string;
+    lesson_date: string;
+    start_time: string;
+    notes?: string;
+  }) => {
+    const student = students.find((s) => s.id === data.student_id);
+    const createdLesson = await saveLesson({
+      student_id: data.student_id,
+      lesson_date: data.lesson_date,
+      start_time: data.start_time,
+      price: student?.price_per_lesson || 150000,
+      status: 'scheduled',
+      notes: data.notes || 'Проведенный урок',
+    });
+    // Mark as completed immediately to deduct package
+    await updateLessonStatus(createdLesson.id, 'completed');
+    await refreshData();
+  };
+
+  const handleSaveStudent = async (studentData: any, generatedLessons?: Lesson[]) => {
+    await saveStudent(studentData);
+    if (generatedLessons && generatedLessons.length > 0) {
+      await saveBatchLessons(generatedLessons);
+    }
+    await refreshData();
+  };
+
+  const handleDeleteStudent = async (studentId: string) => {
+    if (confirm('Удалить ученика и все связанные данные?')) {
+      await deleteStudent(studentId);
+      await refreshData();
+    }
+  };
+
+  const handleSavePayment = async (paymentData: any) => {
+    await addPayment(paymentData);
+    await refreshData();
+  };
+
+  const handleResolveMakeup = async (makeupId: string) => {
+    await resolveMakeup(makeupId);
+    await refreshData();
+  };
+
+  const handleScheduleMakeup = (makeup: MakeupLesson) => {
+    setLessonModalStudentId(makeup.student_id);
+    setIsAddLessonOpen(true);
+  };
+
+  const pendingMakeupsCount = makeups.filter(
+    (m) => m.status === 'pending' || m.status === 'scheduled'
+  ).length;
+
+  if (!mounted || loading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400 gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+        <span className="text-xs font-medium">Загрузка расписания...</span>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
+      {/* Top Header */}
+      <Header
+        onAddLesson={() => {
+          setLessonModalDate(undefined);
+          setLessonModalStudentId(undefined);
+          setIsAddLessonOpen(true);
+        }}
+        onConductLesson={() => {
+          setConductStudentId(undefined);
+          setIsConductLessonOpen(true);
+        }}
+        onOpenSync={() => setIsSyncModalOpen(true)}
+        isCloudConnected={isSupabaseConfigured}
+      />
+
+      {/* Main Content View */}
+      <main className="flex-1 max-w-md w-full mx-auto p-4">
+        {activeTab === 'schedule' && (
+          <ScheduleView
+            lessons={lessons}
+            students={students}
+            onCompleteLesson={handleCompleteLesson}
+            onMissLesson={handleMissLesson}
+            onDeleteLesson={handleDeleteLesson}
+            onRevertLesson={handleRevertLesson}
+            onOpenAutoSchedule={() => {
+              setAutoScheduleStudentId(undefined);
+              setIsAutoScheduleOpen(true);
+            }}
+            onAddLessonForDate={(dateStr) => {
+              setLessonModalDate(dateStr);
+              setLessonModalStudentId(undefined);
+              setIsAddLessonOpen(true);
+            }}
+          />
+        )}
+
+        {activeTab === 'students' && (
+          <StudentsView
+            students={students}
+            onAddStudent={() => {
+              setStudentToEdit(null);
+              setIsAddStudentOpen(true);
+            }}
+            onEditStudent={(s) => {
+              setStudentToEdit(s);
+              setIsAddStudentOpen(true);
+            }}
+            onDeleteStudent={handleDeleteStudent}
+            onAddPaymentForStudent={(s) => {
+              setPaymentStudentId(s.id);
+              setIsAddPaymentOpen(true);
+            }}
+            onScheduleLessonForStudent={(s) => {
+              setLessonModalStudentId(s.id);
+              setLessonModalDate(undefined);
+              setIsAddLessonOpen(true);
+            }}
+            onConductLessonForStudent={(s) => {
+              setConductStudentId(s.id);
+              setIsConductLessonOpen(true);
+            }}
+            onAutoScheduleForStudent={(s) => {
+              setAutoScheduleStudentId(s.id);
+              setIsAutoScheduleOpen(true);
+            }}
+            onOpenReportForStudent={(s) => {
+              setReportStudent(s);
+              setIsReportModalOpen(true);
+            }}
+          />
+        )}
+
+        {activeTab === 'makeups' && (
+          <MakeupsView
+            makeups={makeups}
+            students={students}
+            onResolveMakeup={handleResolveMakeup}
+            onScheduleMakeup={handleScheduleMakeup}
+          />
+        )}
+
+        {activeTab === 'finances' && (
+          <FinancesView
+            payments={payments}
+            students={students}
+            lessons={lessons}
+            onAddPayment={() => {
+              setPaymentStudentId(undefined);
+              setIsAddPaymentOpen(true);
+            }}
+          />
+        )}
       </main>
+
+      {/* Bottom Navigation */}
+      <BottomNav
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        pendingMakeupsCount={pendingMakeupsCount}
+      />
+
+      {/* Modals */}
+      <ParentReportModal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        student={reportStudent}
+        lessons={lessons}
+      />
+
+      <GenerateScheduleModal
+        isOpen={isAutoScheduleOpen}
+        onClose={() => setIsAutoScheduleOpen(false)}
+        students={students}
+        initialStudentId={autoScheduleStudentId}
+        onSaveBatch={handleSaveBatchLessons}
+      />
+
+      <ConductLessonModal
+        isOpen={isConductLessonOpen}
+        onClose={() => setIsConductLessonOpen(false)}
+        students={students}
+        initialStudentId={conductStudentId}
+        onConfirm={handleConductLesson}
+      />
+
+      <AddLessonModal
+        isOpen={isAddLessonOpen}
+        onClose={() => setIsAddLessonOpen(false)}
+        students={students}
+        initialDate={lessonModalDate}
+        initialStudentId={lessonModalStudentId}
+        onSave={handleSaveLesson}
+      />
+
+      <AddStudentModal
+        isOpen={isAddStudentOpen}
+        onClose={() => setIsAddStudentOpen(false)}
+        studentToEdit={studentToEdit}
+        onSave={handleSaveStudent}
+      />
+
+      <AddPaymentModal
+        isOpen={isAddPaymentOpen}
+        onClose={() => setIsAddPaymentOpen(false)}
+        students={students}
+        initialStudentId={paymentStudentId}
+        onSave={handleSavePayment}
+      />
+
+      <MissedLessonModal
+        isOpen={isMissedModalOpen}
+        onClose={() => setIsMissedModalOpen(false)}
+        lesson={missedTargetLesson}
+        onConfirm={handleConfirmMissLesson}
+      />
+
+      <SupabaseConfigModal
+        isOpen={isSyncModalOpen}
+        onClose={() => setIsSyncModalOpen(false)}
+        isCloudConnected={isSupabaseConfigured}
+      />
     </div>
   );
 }
