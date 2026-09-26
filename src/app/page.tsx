@@ -17,7 +17,7 @@ import { AddLessonModal } from '@/components/modals/AddLessonModal';
 import { EditLessonModal } from '@/components/modals/EditLessonModal';
 
 export default function Dashboard() {
-  const [activeTab, setActiveTab] = useState<TabType>('clients');
+  const [activeTab, setActiveTab] = useState<TabType>('schedule');
   const [students, setStudents] = useState<Student[]>([]);
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [financeSummary, setFinanceSummary] = useState<FinanceSummary>({ earnedThisMonthUzs: 0, completedLessonsCount: 0 });

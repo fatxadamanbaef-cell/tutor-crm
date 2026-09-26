@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Student } from '@/types';
-import { Search, Plus, MoreHorizontal, Settings, Lock, CheckCircle2 } from 'lucide-react';
+import { Search, Plus, MoreHorizontal, Settings, CheckCircle2 } from 'lucide-react';
 
 interface ClientsTabProps {
   students: Student[];
@@ -117,20 +117,22 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ students, onOpenStudent,
 
               {/* Stats Bar */}
               <div className="grid grid-cols-3 border-t border-gray-200 h-16">
-                <div className="flex flex-col items-center justify-center bg-[#f0f0f0] border-r border-gray-200">
-                  <Lock className="w-3.5 h-3.5 text-gray-400 mb-1" />
-                  <span className="text-gray-400 font-extrabold text-[13px] leading-none">—</span>
+                <div className="flex flex-col items-center justify-center bg-gray-50 border-r border-gray-200">
+                  <span className={`font-extrabold text-[15px] leading-none ${student.prepaid_balance <= 1 ? 'text-red-500' : 'text-black'}`}>
+                    {student.prepaid_balance}
+                  </span>
                   <span className="text-[9px] font-bold text-gray-400 mt-1">Баланс</span>
                 </div>
-                <div className="flex flex-col items-center justify-center bg-[#f0f0f0] border-r border-gray-200">
-                  <Lock className="w-3.5 h-3.5 text-gray-400 mb-1" />
-                  <span className="text-gray-400 font-extrabold text-[13px] leading-none">—</span>
-                  <span className="text-[9px] font-bold text-gray-400 mt-1">Оплаты</span>
+                <div className="flex flex-col items-center justify-center bg-gray-50 border-r border-gray-200">
+                  <span className="text-black font-extrabold text-[15px] leading-none">
+                    {Math.floor(student.price_per_lesson / 1000)}к
+                  </span>
+                  <span className="text-[9px] font-bold text-gray-400 mt-1">Цена</span>
                 </div>
                 <div className="flex flex-col items-center justify-center bg-[#e8f7e8]">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-green-500 mb-1" />
+                  <CheckCircle2 className="w-3.5 h-3.5 text-green-500 mb-0.5" />
                   <span className="text-black font-extrabold text-[13px] leading-none">{student.prepaid_balance > 0 ? student.prepaid_balance : 0}</span>
-                  <span className="text-[9px] font-bold text-green-600 mt-1">Занятия</span>
+                  <span className="text-[9px] font-bold text-green-600 mt-0.5">Занятия</span>
                 </div>
               </div>
             </div>
