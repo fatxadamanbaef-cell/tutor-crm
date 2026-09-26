@@ -96,7 +96,7 @@ export default function Dashboard() {
 
   const handleUpdateBillingDay = async (studentId: string, day: number) => {
     try {
-      await updateStudentBillingDay(studentId, day);
+      await updateStudentBillingDay(studentId, String(day));
       await refreshData();
       if (selectedStudent) setSelectedStudent(prev => prev ? { ...prev, billing_day: day } : null);
     } catch (e) {

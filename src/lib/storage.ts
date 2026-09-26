@@ -963,8 +963,6 @@ export async function updateStudentBillingDay(studentId: string, billingDay: str
     .eq('id', studentId);
   if (error) throw error;
 }
-}
-
 export async function updateStudentColor(studentId: string, color: string): Promise<void> {
   if (!supabase) throw new Error('Supabase is not initialized');
   const { error } = await supabase

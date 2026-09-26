@@ -3,7 +3,7 @@
 import React, { useState, useRef } from 'react';
 import { Student, Lesson, LessonStatus } from '@/types';
 import { ChevronLeft, ChevronRight, CreditCard, MessageSquare, Trash2, Check, FileText } from 'lucide-react';
-import { formatUZS, getStudentBillingPeriod, getTashkentNow, getTashkentTodayStr, getTutorSettings } from '@/lib/formatters';
+import { formatUZS, getStudentBillingPeriod, getTashkentNow, getTashkentTodayStr } from '@/lib/formatters';
 import { hapticImpact, hapticNotification, hapticSelection } from '@/lib/telegram';
 import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval, format, addMonths, isSameDay } from 'date-fns';
 import { toggleStudentCalendarDate } from '@/lib/storage';
