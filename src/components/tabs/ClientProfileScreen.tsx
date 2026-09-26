@@ -68,10 +68,17 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     const existingLesson = periodLessons.find((l) => l.date.substring(0, 10) === dateStr);
     const currentStatus = existingLesson?.status;
 
-    let nextStatus: 'completed' | null = null;
-    if (!existingLesson || currentStatus !== 'completed') {
+    let nextStatus: 'completed' | 'missed_penalty' | null = null;
+    let nextNotes = '';
+    
+    if (!existingLesson || (currentStatus !== 'completed' && currentStatus !== 'missed_penalty')) {
       nextStatus = 'completed';
+      nextNotes = 'Проведенный урок';
       hapticNotification('success');
+    } else if (currentStatus === 'completed') {
+      nextStatus = 'missed_penalty';
+      nextNotes = 'Пропуск (сгорел)';
+      hapticImpact('heavy');
     } else {
       nextStatus = null;
       hapticSelection();
@@ -89,7 +96,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
       setLocalLessons((prev) =>
         prev.map((l) =>
           l.student_id === student.id && l.date.substring(0, 10) === dateStr
-            ? { ...l, status: nextStatus!, notes: 'Проведенный урок' }
+            ? { ...l, status: nextStatus!, notes: nextNotes }
             : l
         )
       );
@@ -102,7 +109,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
         date: `${dateStr}T18:00:00+05:00`,
         time_str: '18:00 - 19:30',
         status: nextStatus,
-        notes: 'Проведенный урок',
+        notes: nextNotes,
         created_at: new Date().toISOString(),
       };
       setLocalLessons((prev) => [...prev, optimisticLesson]);
@@ -283,6 +290,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                   const isInsidePeriod = dateStr >= period.startDate && dateStr <= period.endDate;
                   const lesson = isInsidePeriod ? periodLessons.find((l) => l.date.substring(0, 10) === dateStr) : undefined;
                   const isCompleted = lesson?.status === 'completed';
+                  const isBurned = lesson?.status === 'missed_penalty';
                   const isToday = isSameDay(day, getTashkentNow());
 
                   let cellClass = 'h-12 rounded-2xl flex flex-col items-center justify-center font-bold text-sm transition-all border ';
@@ -290,6 +298,8 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                     cellClass += 'bg-gray-50/50 text-gray-300 border-transparent opacity-50 cursor-default';
                   } else if (isCompleted) {
                     cellClass += 'bg-blue-500 text-white border-blue-400 shadow-md shadow-blue-500/30';
+                  } else if (isBurned) {
+                    cellClass += 'bg-red-500 text-white border-red-400 shadow-md shadow-red-500/30';
                   } else if (isToday) {
                     cellClass += 'bg-white text-blue-500 border-blue-500 ring-1 ring-blue-500/20';
                   } else {
@@ -306,6 +316,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                     >
                       {day.getDate()}
                       {isCompleted && <div className="w-1 h-1 rounded-full bg-white mt-0.5" />}
+                      {isBurned && <div className="w-1 h-1 rounded-full bg-white mt-0.5" />}
                     </button>
                   );
                 })}

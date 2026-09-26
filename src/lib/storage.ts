@@ -653,79 +653,70 @@ export async function toggleStudentCalendarDate(
   const studentPrice = Number(stData?.price_per_lesson) || 150000;
   const studentName = stData?.name || 'Ученик';
 
-  if (!existing || existing.status !== 'completed') {
-    // 1st click: NONE / PLANNED -> COMPLETED (🟢)
-    if (existing) {
-      const { error: upErr } = await supabase
-        .from('tutor_lessons')
-        .update({ status: 'completed', notes: 'Проведенный урок' })
-        .eq('id', existing.id);
-      if (upErr) throw upErr;
+  if (!existing) {
+    // Empty -> COMPLETED (🟢)
+    const newId = generateUUID();
+    const newLessonObj = {
+      id: newId,
+      student_id: studentId,
+      lesson_date: cleanDate,
+      start_time: '18:00',
+      end_time: '19:30',
+      status: 'completed',
+      price: studentPrice,
+      notes: 'Проведенный урок',
+    };
 
-      await supabase
-        .from('tutor_students')
-        .update({ package_remaining_lessons: currentRemaining - 1 })
-        .eq('id', studentId);
+    await supabase.from('tutor_lessons').insert([newLessonObj]);
+    await supabase.from('tutor_students').update({ package_remaining_lessons: currentRemaining - 1 }).eq('id', studentId);
 
-      const updated: Lesson = {
-        id: existing.id,
-        student_id: studentId,
-        student_name: studentName,
-        price_per_lesson: Number(existing.price) || studentPrice,
-        date: `${cleanDate}T18:00:00+05:00`,
-        time_str: '18:00 - 19:30',
-        status: 'completed',
-        notes: 'Проведенный урок',
-        created_at: existing.created_at,
-      };
-      return { status: 'completed', lesson: updated };
-    } else {
-      const newId = generateUUID();
-      const newLessonObj = {
-        id: newId,
-        student_id: studentId,
-        lesson_date: cleanDate,
-        start_time: '18:00',
-        end_time: '19:30',
-        status: 'completed',
-        price: studentPrice,
-        notes: 'Проведенный урок',
-      };
+    const saved: Lesson = {
+      id: newId,
+      student_id: studentId,
+      student_name: studentName,
+      price_per_lesson: studentPrice,
+      date: `${cleanDate}T18:00:00+05:00`,
+      time_str: '18:00 - 19:30',
+      status: 'completed',
+      notes: 'Проведенный урок',
+      created_at: new Date().toISOString(),
+    };
+    return { status: 'completed', lesson: saved };
+  } else if (existing.status === 'planned' || existing.status === 'scheduled') {
+    // Planned -> COMPLETED (🟢)
+    await supabase.from('tutor_lessons').update({ status: 'completed', notes: 'Проведенный урок' }).eq('id', existing.id);
+    await supabase.from('tutor_students').update({ package_remaining_lessons: currentRemaining - 1 }).eq('id', studentId);
 
-      const { error: insErr } = await supabase.from('tutor_lessons').insert([newLessonObj]);
-      if (insErr) {
-        console.error('Supabase insert error in toggle:', insErr);
-        throw insErr;
-      }
+    const updated: Lesson = {
+      id: existing.id,
+      student_id: studentId,
+      student_name: studentName,
+      price_per_lesson: Number(existing.price) || studentPrice,
+      date: `${cleanDate}T18:00:00+05:00`,
+      time_str: '18:00 - 19:30',
+      status: 'completed',
+      notes: 'Проведенный урок',
+      created_at: existing.created_at,
+    };
+    return { status: 'completed', lesson: updated };
+  } else if (existing.status === 'completed') {
+    // COMPLETED (🟢) -> MISSED_PENALTY (🔴) (Balance stays the same because penalty still consumes 1 lesson)
+    await supabase.from('tutor_lessons').update({ status: 'missed_penalty', notes: 'Пропуск (сгорел)' }).eq('id', existing.id);
 
-      await supabase
-        .from('tutor_students')
-        .update({ package_remaining_lessons: currentRemaining - 1 })
-        .eq('id', studentId);
-
-      const saved: Lesson = {
-        id: newId,
-        student_id: studentId,
-        student_name: studentName,
-        price_per_lesson: studentPrice,
-        date: `${cleanDate}T18:00:00+05:00`,
-        time_str: '18:00 - 19:30',
-        status: 'completed',
-        notes: 'Проведенный урок',
-        created_at: new Date().toISOString(),
-      };
-
-      return { status: 'completed', lesson: saved };
-    }
+    const updated: Lesson = {
+      ...existing,
+      student_name: studentName,
+      price_per_lesson: Number(existing.price) || studentPrice,
+      date: `${cleanDate}T18:00:00+05:00`,
+      time_str: '18:00 - 19:30',
+      status: 'missed_penalty',
+      notes: 'Пропуск (сгорел)',
+    };
+    return { status: 'missed_penalty', lesson: updated };
   } else {
-    // 2nd click: COMPLETED -> REMOVED (⚪)
-    const { error: delErr } = await supabase.from('tutor_lessons').delete().eq('id', existing.id);
-    if (delErr) throw delErr;
-
-    await supabase
-      .from('tutor_students')
-      .update({ package_remaining_lessons: currentRemaining + 1 })
-      .eq('id', studentId);
+    // MISSED_PENALTY (🔴) -> REMOVED (⚪)
+    await supabase.from('tutor_lessons').delete().eq('id', existing.id);
+    await supabase.from('tutor_students').update({ package_remaining_lessons: currentRemaining + 1 }).eq('id', studentId);
 
     return { status: null };
   }
