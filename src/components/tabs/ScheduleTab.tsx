@@ -66,8 +66,62 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({ students, lessons, onA
     setCurrentWeekStart(prev => addWeeks(prev, 1));
   };
 
+  // --- Drag and Drop Logic ---
+  const [draggingLesson, setDraggingLesson] = useState<string | null>(null);
+  const [dragY, setDragY] = useState(0);
+  const [initialY, setInitialY] = useState(0);
+  const [initialTop, setInitialTop] = useState(0);
+
+  const handleTouchStart = (e: React.TouchEvent, lessonId: string, currentTop: number) => {
+    // e.stopPropagation();
+    hapticImpact('medium');
+    setDraggingLesson(lessonId);
+    setInitialY(e.touches[0].clientY);
+    setDragY(e.touches[0].clientY);
+    setInitialTop(currentTop);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!draggingLesson) return;
+    // e.preventDefault(); // React synthetic events might warn here, but it helps stop scroll
+    setDragY(e.touches[0].clientY);
+  };
+
+  const handleTouchEnd = async (lesson: Lesson) => {
+    if (!draggingLesson) return;
+    setDraggingLesson(null);
+    hapticImpact('light');
+
+    const deltaY = dragY - initialY;
+    if (Math.abs(deltaY) < 10) {
+      // It was just a tap
+      onOpenLesson(lesson);
+      return;
+    }
+
+    // Calculate new time based on snap to 15 mins (15px = 15 mins since 60px = 60 mins)
+    const newTop = Math.max(0, initialTop + deltaY);
+    const snappedTop = Math.round(newTop / 15) * 15;
+    
+    const newTotalMinutes = snappedTop;
+    const newH = START_HOUR + Math.floor(newTotalMinutes / 60);
+    const newM = newTotalMinutes % 60;
+    
+    const { durationMinutes } = parseTimeStr(lesson.time_str);
+    const endTotal = newTotalMinutes + durationMinutes;
+    const endH = START_HOUR + Math.floor(endTotal / 60);
+    const endM = endTotal % 60;
+
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const newTimeStr = `${pad(newH)}:${pad(newM)} - ${pad(endH)}:${pad(endM)}`;
+    
+    if (window.confirm(`Перенести урок на ${newTimeStr}?`)) {
+      await onUpdateLessonTime(lesson.id, newTimeStr);
+    }
+  };
+
   return (
-    <div className="flex flex-col h-full bg-white pb-safe">
+    <div className="flex flex-col h-full bg-white pb-safe overscroll-none">
       {/* Header */}
       <div className="px-4 py-3 flex items-center justify-between bg-white z-20">
         <button className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-gray-800">
@@ -174,17 +228,24 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({ students, lessons, onA
                     const baseColor = student?.color || '#3B82F6';
                     const bgColor = hexToRgba(baseColor, 0.4);
                     
+                    const isDragging = draggingLesson === lesson.id;
+                    const displayTop = isDragging ? initialTop + (dragY - initialY) : topPos;
+
                     return (
                       <div
                         key={lesson.id}
-                        onClick={() => { hapticImpact('light'); onOpenLesson(lesson); }}
-                        className="absolute left-0.5 right-0.5 rounded shadow-sm overflow-hidden cursor-pointer active:scale-95 transition-transform"
+                        onTouchStart={(e) => handleTouchStart(e, lesson.id, topPos)}
+                        onTouchMove={handleTouchMove}
+                        onTouchEnd={() => handleTouchEnd(lesson)}
+                        onClick={() => { if (!isDragging) { hapticImpact('light'); onOpenLesson(lesson); } }}
+                        className={`absolute left-0.5 right-0.5 rounded shadow-sm overflow-hidden cursor-pointer transition-transform ${isDragging ? 'z-50 scale-105 opacity-90' : 'z-20 active:scale-95'}`}
                         style={{ 
-                          top: topPos, 
+                          top: displayTop, 
                           height: durationMinutes,
                           backgroundColor: bgColor,
                           borderLeft: `3px solid ${baseColor}`,
-                          opacity: lesson.status === 'completed' ? 0.6 : 1
+                          opacity: isDragging ? 0.9 : (lesson.status === 'completed' ? 0.6 : 1),
+                          touchAction: 'none' // Crucial to prevent page scroll while dragging
                         }}
                       >
                         <div className="p-1 flex flex-col h-full">
