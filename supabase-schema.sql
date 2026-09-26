@@ -1,77 +1,59 @@
 -- =========================================================
--- ТАБЛИЦЫ ДЛЯ ПРИЛОЖЕНИЯ РЕПЕТИТОРА (TUTOR TRACKER)
--- Запустите этот скрипт в Supabase -> SQL Editor -> New query
+-- Supabase Schema for Tutor Tracker (Single Page CRM)
+-- Timezone: Asia/Tashkent (UTC+5)
 -- =========================================================
 
--- 1. Таблица учеников (students)
-CREATE TABLE IF NOT EXISTS public.tutor_students (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL,
-    phone TEXT,
-    telegram TEXT,
-    price_per_lesson NUMERIC(10, 2) NOT NULL DEFAULT 1000.00,
-    payment_type TEXT NOT NULL CHECK (payment_type IN ('per_lesson', 'package')) DEFAULT 'package',
-    package_total_lessons INT NOT NULL DEFAULT 8,
-    package_remaining_lessons INT NOT NULL DEFAULT 8,
-    color TEXT DEFAULT '#3B82F6',
-    notes TEXT,
-    is_active BOOLEAN NOT NULL DEFAULT true,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+-- Enable UUID extension
+create extension if not exists "uuid-ossp";
+
+-- 1. STUDENTS TABLE
+create table if not exists public.students (
+    id uuid primary key default uuid_generate_v4(),
+    name text not null,
+    price_per_lesson numeric not null default 150000,
+    prepaid_balance integer not null default 0,
+    makeup_debt integer not null default 0,
+    phone text,
+    created_at timestamptz not null default timezone('Asia/Tashkent', now())
 );
 
--- 2. Таблица уроков (lessons)
-CREATE TABLE IF NOT EXISTS public.tutor_lessons (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    student_id UUID NOT NULL REFERENCES public.tutor_students(id) ON DELETE CASCADE,
-    lesson_date DATE NOT NULL,
-    start_time TIME NOT NULL,
-    end_time TIME NOT NULL,
-    price NUMERIC(10, 2) NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('scheduled', 'completed', 'missed_makeup', 'made_up', 'cancelled')) DEFAULT 'scheduled',
-    is_paid BOOLEAN NOT NULL DEFAULT false,
-    notes TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+-- 2. LESSONS TABLE
+create table if not exists public.lessons (
+    id uuid primary key default uuid_generate_v4(),
+    student_id uuid not null references public.students(id) on delete cascade,
+    date timestamptz not null,
+    status text not null default 'planned' check (status in ('planned', 'completed', 'missed_excused', 'missed_penalty')),
+    created_at timestamptz not null default timezone('Asia/Tashkent', now())
 );
 
--- 3. Таблица платежей (payments)
-CREATE TABLE IF NOT EXISTS public.tutor_payments (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    student_id UUID NOT NULL REFERENCES public.tutor_students(id) ON DELETE CASCADE,
-    amount NUMERIC(10, 2) NOT NULL,
-    lessons_count INT NOT NULL DEFAULT 1,
-    payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
-    payment_method TEXT DEFAULT 'СБП / Перевод',
-    notes TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+-- 3. PAYMENTS TABLE (Ledger)
+create table if not exists public.payments (
+    id uuid primary key default uuid_generate_v4(),
+    student_id uuid not null references public.students(id) on delete cascade,
+    amount_uzs numeric not null default 0,
+    lessons_added integer not null default 0,
+    created_at timestamptz not null default timezone('Asia/Tashkent', now())
 );
 
--- 4. Таблица отработок (makeups)
-CREATE TABLE IF NOT EXISTS public.tutor_makeups (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    student_id UUID NOT NULL REFERENCES public.tutor_students(id) ON DELETE CASCADE,
-    missed_lesson_id UUID REFERENCES public.tutor_lessons(id) ON DELETE SET NULL,
-    makeup_lesson_id UUID REFERENCES public.tutor_lessons(id) ON DELETE SET NULL,
-    status TEXT NOT NULL CHECK (status IN ('pending', 'scheduled', 'completed')) DEFAULT 'pending',
-    reason TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
-);
+-- Indexes for lightning fast queries
+create index if not exists idx_lessons_student_id on public.lessons(student_id);
+create index if not exists idx_lessons_date on public.lessons(date);
+create index if not exists idx_payments_student_id on public.payments(student_id);
 
--- Индексы для быстрой выборки расписания
-CREATE INDEX IF NOT EXISTS idx_tutor_lessons_date ON public.tutor_lessons(lesson_date);
-CREATE INDEX IF NOT EXISTS idx_tutor_lessons_student ON public.tutor_lessons(student_id);
-CREATE INDEX IF NOT EXISTS idx_tutor_payments_student ON public.tutor_payments(student_id);
-CREATE INDEX IF NOT EXISTS idx_tutor_makeups_student ON public.tutor_makeups(student_id);
+-- Enable RLS
+alter table public.students enable row level security;
+alter table public.lessons enable row level security;
+alter table public.payments enable row level security;
 
--- Отключение RLS или разрешение публичного доступа по anon-ключу (для личного использования)
-ALTER TABLE public.tutor_students ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.tutor_lessons ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.tutor_payments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.tutor_makeups ENABLE ROW LEVEL SECURITY;
+-- Public access policies for Telegram Mini App
+create policy "Allow all operations for students" on public.students for all using (true) with check (true);
+create policy "Allow all operations for lessons" on public.lessons for all using (true) with check (true);
+create policy "Allow all operations for payments" on public.payments for all using (true) with check (true);
 
-CREATE POLICY "Allow full access for authenticated and anon" ON public.tutor_students FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow full access for authenticated and anon" ON public.tutor_lessons FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow full access for authenticated and anon" ON public.tutor_payments FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Allow full access for authenticated and anon" ON public.tutor_makeups FOR ALL USING (true) WITH CHECK (true);
+-- Insert Seed Data (Mock)
+insert into public.students (id, name, price_per_lesson, prepaid_balance, makeup_debt, phone)
+values
+  ('11111111-1111-4111-8111-111111111111', 'Сахиб Рахимов', 150000, 6, 0, '+998901234567'),
+  ('22222222-2222-4222-8222-222222222222', 'Малика Каримова', 180000, 0, 1, '+998977654321'),
+  ('33333333-3333-4333-8333-333333333333', 'Алишер Усманов', 120000, 2, 2, '+998935551122')
+on conflict (id) do nothing;

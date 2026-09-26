@@ -1,37 +1,27 @@
 'use client';
 
 import React from 'react';
-import { Calendar, Users, RefreshCw, DollarSign } from 'lucide-react';
-import { hapticSelection } from '@/lib/telegram';
+import { Calendar, Users, BarChart3, Settings } from 'lucide-react';
+import { hapticImpact } from '@/lib/telegram';
 
-export type TabType = 'schedule' | 'students' | 'makeups' | 'finances';
+export type TabType = 'schedule' | 'clients' | 'stats' | 'settings';
 
 interface BottomNavProps {
   activeTab: TabType;
-  setActiveTab: (tab: TabType) => void;
-  pendingMakeupsCount: number;
+  onChangeTab: (tab: TabType) => void;
 }
 
-export const BottomNav: React.FC<BottomNavProps> = ({
-  activeTab,
-  setActiveTab,
-  pendingMakeupsCount,
-}) => {
+export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onChangeTab }) => {
   const tabs = [
-    { id: 'schedule' as TabType, label: 'Расписание', icon: Calendar },
-    { id: 'students' as TabType, label: 'Ученики', icon: Users },
-    {
-      id: 'makeups' as TabType,
-      label: 'Отработки',
-      icon: RefreshCw,
-      badge: pendingMakeupsCount > 0 ? pendingMakeupsCount : null,
-    },
-    { id: 'finances' as TabType, label: 'Финансы', icon: DollarSign },
-  ];
+    { id: 'schedule', label: 'Расписание', icon: Calendar },
+    { id: 'clients', label: 'Клиенты', icon: Users },
+    { id: 'stats', label: 'Статистика', icon: BarChart3 },
+    { id: 'settings', label: 'Настройки', icon: Settings },
+  ] as const;
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-slate-900/90 backdrop-blur-md border-t border-slate-800/80 px-2 py-2 pb-safe">
-      <div className="max-w-md mx-auto flex items-center justify-around">
+    <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-gray-200 pb-safe z-40">
+      <div className="flex items-center justify-around max-w-md mx-auto px-2 py-2">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -39,35 +29,19 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             <button
               key={tab.id}
               onClick={() => {
-                hapticSelection();
-                setActiveTab(tab.id);
+                if (!isActive) hapticImpact('light');
+                onChangeTab(tab.id);
               }}
-              className={`relative flex flex-col items-center justify-center flex-1 py-1.5 px-1 rounded-xl transition-all duration-200 active:scale-95 ${
-                isActive
-                  ? 'text-blue-400 font-semibold'
-                  : 'text-slate-400 hover:text-slate-200'
+              className={`flex flex-col items-center justify-center w-16 h-12 transition-colors ${
+                isActive ? 'text-blue-500' : 'text-gray-400 hover:text-gray-500'
               }`}
             >
-              <div className="relative">
-                <Icon
-                  className={`w-5 h-5 transition-transform duration-200 ${
-                    isActive ? 'scale-110 text-blue-400' : ''
-                  }`}
-                />
-                {tab.badge && (
-                  <span className="absolute -top-1.5 -right-2.5 bg-amber-500 text-slate-950 text-[10px] font-bold px-1.5 py-0.2 rounded-full min-w-[16px] text-center shadow-md animate-pulse">
-                    {tab.badge}
-                  </span>
-                )}
-              </div>
-              <span className="text-[11px] mt-1 tracking-tight">{tab.label}</span>
-              {isActive && (
-                <span className="absolute bottom-0 w-8 h-1 bg-blue-500 rounded-full" />
-              )}
+              <Icon className={`w-6 h-6 mb-1 ${isActive ? 'fill-blue-500/10' : ''}`} strokeWidth={isActive ? 2.5 : 2} />
+              <span className="text-[10px] font-semibold tracking-tight">{tab.label}</span>
             </button>
           );
         })}
       </div>
-    </nav>
+    </div>
   );
 };

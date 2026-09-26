@@ -1,25 +1,23 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Student } from '@/types';
-import { X, Calendar, Clock, DollarSign, BookOpen } from 'lucide-react';
+import { Student, LessonStatus } from '@/types';
+import { X, CalendarPlus, Clock } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
-import { formatCurrency } from '@/lib/formatters';
+import { getTashkentTodayStr, formatUZS } from '@/lib/formatters';
 import { format } from 'date-fns';
 
 interface AddLessonModalProps {
   isOpen: boolean;
   onClose: () => void;
   students: Student[];
-  initialDate?: string;
-  initialStudentId?: string;
+  initialDate?: Date;
   onSave: (lesson: {
     student_id: string;
-    lesson_date: string;
-    start_time: string;
-    end_time: string;
-    price: number;
+    date: string;
+    time_str: string;
     notes?: string;
+    status?: LessonStatus;
   }) => void;
 }
 
@@ -28,68 +26,93 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({
   onClose,
   students,
   initialDate,
-  initialStudentId,
   onSave,
 }) => {
-  const [studentId, setStudentId] = useState(initialStudentId || (students[0]?.id || ''));
-  const [lessonDate, setLessonDate] = useState(initialDate || format(new Date(), 'yyyy-MM-dd'));
-  const [startTime, setStartTime] = useState('19:00');
-  const [duration, setDuration] = useState(60); // minutes
-  const [price, setPrice] = useState(150000);
+  const [studentId, setStudentId] = useState(students[0]?.id || '');
+  const [lessonDate, setLessonDate] = useState(getTashkentTodayStr());
+  const [startTime, setStartTime] = useState('18:00');
+  const [duration, setDuration] = useState<number | string>(90);
   const [notes, setNotes] = useState('');
+  const [lessonStatus, setLessonStatus] = useState<LessonStatus>('planned');
 
+  // Sync state whenever modal opens or students load
   useEffect(() => {
-    if (initialDate) setLessonDate(initialDate);
-    if (initialStudentId) setStudentId(initialStudentId);
-  }, [initialDate, initialStudentId]);
-
-  useEffect(() => {
-    const student = students.find((s) => s.id === studentId);
-    if (student) {
-      setPrice(student.price_per_lesson);
+    if (isOpen) {
+      if (students.length > 0) {
+        if (!studentId || !students.some((s) => s.id === studentId)) {
+          setStudentId(students[0].id);
+        }
+      }
+      if (initialDate) {
+        try {
+          const dateFormatted = format(initialDate, 'yyyy-MM-dd');
+          setLessonDate(dateFormatted);
+          if (dateFormatted < getTashkentTodayStr()) {
+            setLessonStatus('completed');
+          } else {
+            setLessonStatus('planned');
+          }
+        } catch {
+          setLessonDate(getTashkentTodayStr());
+        }
+      } else {
+        setLessonDate(getTashkentTodayStr());
+      }
     }
-  }, [studentId, students]);
+  }, [isOpen, students, initialDate]);
 
   if (!isOpen) return null;
 
-  const calculateEndTime = (start: string, durationMinutes: number): string => {
+  const calculateEndTime = (start: string, durationMinutes: number | string): string => {
     try {
       const [h, m] = start.split(':').map(Number);
-      const date = new Date();
-      date.setHours(h, m, 0, 0);
-      date.setMinutes(date.getMinutes() + durationMinutes);
-      return format(date, 'HH:mm');
+      const total = h * 60 + m + (Number(durationMinutes) || 90);
+      const eh = Math.floor(total / 60) % 24;
+      const em = total % 60;
+      const pad = (n: number) => n.toString().padStart(2, '0');
+      return `${pad(eh)}:${pad(em)}`;
     } catch {
-      return '20:00';
+      return '19:30';
+    }
+  };
+
+  const handleDateChange = (newDate: string) => {
+    setLessonDate(newDate);
+    if (newDate < getTashkentTodayStr()) {
+      setLessonStatus('completed');
     }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!studentId) {
-      alert('Пожалуйста, выберите ученика');
+    const effectiveStudentId = studentId || students[0]?.id;
+    if (!effectiveStudentId) {
+      alert('Сначала добавьте ученика');
       return;
     }
 
-    const endTime = calculateEndTime(startTime, duration);
+    const timeStr = `${startTime} - ${calculateEndTime(startTime, Number(duration) || 90)}`;
+    const fullIso = `${lessonDate}T${startTime}:00+05:00`;
+
     onSave({
-      student_id: studentId,
-      lesson_date: lessonDate,
-      start_time: startTime,
-      end_time: endTime,
-      price: Number(price),
-      notes,
+      student_id: effectiveStudentId,
+      date: fullIso,
+      time_str: timeStr,
+      notes: notes.trim(),
+      status: lessonStatus,
     });
+
     hapticNotification('success');
+    setNotes('');
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="w-full max-w-md bg-slate-900 border border-slate-800 rounded-t-3xl sm:rounded-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom duration-200">
-        <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-          <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-            <Calendar className="w-4 h-4 text-blue-400" />
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-150">
+      <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-t-3xl sm:rounded-3xl p-5 space-y-4 max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom duration-200 text-xs text-zinc-200 shadow-2xl">
+        <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
+          <h3 className="text-base font-extrabold text-zinc-100 flex items-center gap-2">
+            <CalendarPlus className="w-4 h-4 text-teal-400" />
             <span>Запланировать урок</span>
           </h3>
           <button
@@ -97,119 +120,160 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({
               hapticImpact('light');
               onClose();
             }}
-            className="p-1 rounded-full text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+            className="p-1.5 rounded-full text-zinc-400 hover:text-zinc-200 bg-zinc-800"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-3.5 text-xs">
-          {/* Student selection */}
+        <form onSubmit={handleSubmit} className="space-y-3.5">
           <div>
-            <label className="block text-slate-400 mb-1 font-medium">
-              Ученик
+            <label className="block text-zinc-400 font-medium mb-1">
+              Ученик: <span className="text-rose-400">*</span>
             </label>
-            <select
-              value={studentId}
-              onChange={(e) => setStudentId(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-slate-200 focus:outline-none focus:border-blue-500 font-semibold"
-            >
-              {students.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name} ({s.payment_type === 'package' ? `Абонемент: ${s.package_remaining_lessons} ур.` : 'Поурочно'})
-                </option>
-              ))}
-            </select>
+            {students.length === 0 ? (
+              <div className="p-2.5 rounded-xl bg-amber-950/40 border border-amber-800/60 text-amber-300 text-xs">
+                Список учеников пуст. Сначала добавьте ученика кнопкой «+ Ученик».
+              </div>
+            ) : (
+              <select
+                value={studentId || students[0]?.id}
+                onChange={(e) => setStudentId(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-100 font-bold focus:outline-none focus:border-teal-500"
+              >
+                {students.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} (баланс: {s.prepaid_balance > 0 ? `+${s.prepaid_balance}` : s.prepaid_balance} ур.)
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
 
-          {/* Date & Start time */}
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="block text-slate-400 mb-1 font-medium">
-                Дата
+              <label className="block text-zinc-400 font-medium mb-1">
+                Дата урока:
               </label>
               <input
                 type="date"
+                required
                 value={lessonDate}
-                onChange={(e) => setLessonDate(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-blue-500"
+                onChange={(e) => handleDateChange(e.target.value)}
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-100 font-semibold focus:outline-none focus:border-teal-500"
               />
             </div>
+
             <div>
-              <label className="block text-slate-400 mb-1 font-medium">
-                Время начала
+              <label className="block text-zinc-400 font-medium mb-1">
+                Время начала:
               </label>
               <input
                 type="time"
+                required
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-blue-500 font-bold"
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-100 font-semibold focus:outline-none focus:border-teal-500"
               />
             </div>
           </div>
 
-          {/* Duration Chips */}
           <div>
-            <label className="block text-slate-400 mb-1.5 font-medium">
-              Длительность
+            <label className="block text-zinc-400 font-medium mb-1">
+              Статус урока:
             </label>
-            <div className="flex items-center gap-2">
-              {[45, 60, 90, 120].map((mins) => (
-                <button
-                  key={mins}
-                  type="button"
-                  onClick={() => setDuration(mins)}
-                  className={`flex-1 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
-                    duration === mins
-                      ? 'bg-blue-600 text-white border-blue-500'
-                      : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  {mins} мин
-                </button>
-              ))}
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => setLessonStatus('completed')}
+                className={`py-2 px-2 rounded-xl font-bold text-xs border transition-all ${
+                  lessonStatus === 'completed'
+                    ? 'bg-emerald-600 border-emerald-400 text-zinc-100 shadow-md'
+                    : 'bg-zinc-950 border-zinc-800 text-zinc-400'
+                }`}
+              >
+                ✓ Уже проведен (-1 с баланса)
+              </button>
+              <button
+                type="button"
+                onClick={() => setLessonStatus('planned')}
+                className={`py-2 px-2 rounded-xl font-bold text-xs border transition-all ${
+                  lessonStatus === 'planned'
+                    ? 'bg-teal-600 border-teal-400 text-zinc-100 shadow-md'
+                    : 'bg-zinc-950 border-zinc-800 text-zinc-400'
+                }`}
+              >
+                ⏳ Запланирован
+              </button>
             </div>
           </div>
 
-          {/* Price */}
           <div>
-            <label className="block text-slate-400 mb-1 font-medium">
-              Стоимость урока (сум)
-            </label>
-            <input
-              type="number"
-              step="5000"
-              value={price}
-              onChange={(e) => setPrice(Number(e.target.value))}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-bold focus:outline-none focus:border-blue-500"
-            />
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-zinc-400 font-medium">
+                Длительность урока:
+              </label>
+              <span className="text-[11px] font-mono text-teal-400 font-bold">
+                {startTime} → {calculateEndTime(startTime, duration)} ({duration} мин)
+              </span>
+            </div>
+            
+            <div className="grid grid-cols-4 gap-1.5 mb-2">
+              {[45, 60, 90, 120].map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => setDuration(d)}
+                  className={`py-1.5 px-1 rounded-xl text-xs font-bold border transition-all ${
+                    duration === d
+                      ? 'bg-teal-600 border-teal-400 text-zinc-100 shadow-md'
+                      : 'bg-zinc-950 border-zinc-800 text-zinc-300 hover:border-zinc-800'
+                  }`}
+                >
+                  {d} мин
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-2 bg-zinc-950/80 border border-zinc-800 rounded-xl px-3 py-1.5">
+              <span className="text-zinc-400 text-[11px]">Другая длительность:</span>
+              <input
+                type="number"
+                min="15"
+                max="300"
+                step="5"
+                value={duration}
+                onChange={(e) => setDuration(e.target.value === '' ? '' : Math.max(15, Number(e.target.value)))}
+                className="w-16 bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-0.5 text-center text-zinc-100 font-bold focus:outline-none focus:border-teal-500 text-xs"
+              />
+              <span className="text-zinc-400 text-[11px]">минут</span>
+            </div>
           </div>
 
-          {/* Notes */}
           <div>
-            <label className="block text-slate-400 mb-1 font-medium">
-              Тема / Заметки к уроку
+            <label className="block text-zinc-400 font-medium mb-1">
+              Тема / Домашнее задание / Заметка:
             </label>
             <input
               type="text"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Например: Разбор квадратных уравнений, ДЗ"
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 placeholder-slate-600 focus:outline-none focus:border-blue-500"
+              placeholder="Например: Алгебра: Квадратные уравнения"
+              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-zinc-200 focus:outline-none focus:border-teal-500"
             />
           </div>
 
-          {/* Submit */}
-          <div className="pt-2">
-            <button
-              type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg shadow-blue-600/30 transition-all active:scale-95 text-xs"
-            >
-              Запланировать урок
-            </button>
-          </div>
+          <button
+            type="submit"
+            disabled={students.length === 0}
+            className="w-full bg-teal-600 hover:bg-teal-500 disabled:opacity-50 text-zinc-100 font-bold py-3 px-4 rounded-xl shadow-lg active:scale-95 transition-all text-xs"
+          >
+            + Добавить в расписание
+          </button>
         </form>
       </div>
     </div>
   );
 };
+
+

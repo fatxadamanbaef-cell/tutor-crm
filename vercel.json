@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/bot/cron?mode=digest",
+      "schedule": "30 3 * * *"
+    }
+  ]
+}
