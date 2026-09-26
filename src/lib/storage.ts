@@ -286,6 +286,23 @@ export async function updateLessonTime(lessonId: string, timeStr: string, newDat
   if (error) throw error;
 }
 
+export async function updateLessonDetails(lessonId: string, updates: Partial<Lesson>): Promise<void> {
+  if (!supabase) throw new Error('Supabase is not initialized');
+  const payload: any = {};
+  
+  if (updates.date) payload.lesson_date = updates.date.substring(0, 10);
+  if (updates.time_str) {
+    const parts = updates.time_str.split('-').map(s => s.trim());
+    payload.start_time = parts[0] || '18:00';
+    payload.end_time = parts[1] || '19:30';
+  }
+  if (updates.notes !== undefined) payload.notes = updates.notes;
+  if (updates.status) payload.status = updates.status === 'completed' ? 'completed' : (updates.status === 'missed_penalty' ? 'cancelled' : 'scheduled'); // Simplification for now
+
+  const { error } = await supabase.from('tutor_lessons').update(payload).eq('id', lessonId);
+  if (error) throw error;
+}
+
 export async function saveLesson(lessonData: {
   student_id: string;
   date: string;

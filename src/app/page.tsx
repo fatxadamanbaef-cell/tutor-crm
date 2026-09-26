@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Student, Lesson, FinanceSummary } from '@/types';
-import { getStudents, getLessons, getFinanceSummary, addPayment, deleteStudent, saveStudent, updateStudentBillingDay, updateStudentColor, updateLessonTime, saveLesson } from '@/lib/storage';
+import { getStudents, getLessons, getFinanceSummary, addPayment, deleteStudent, saveStudent, updateStudentBillingDay, updateStudentColor, updateLessonTime, saveLesson, deleteLesson, updateLessonDetails } from '@/lib/storage';
 import { initTelegramApp } from '@/lib/telegram';
 import { Loader2 } from 'lucide-react';
 
@@ -14,6 +14,7 @@ import { SettingsTab } from '@/components/tabs/SettingsTab';
 import { ClientProfileScreen } from '@/components/tabs/ClientProfileScreen';
 import { AddStudentModal } from '@/components/modals/AddStudentModal';
 import { AddLessonModal } from '@/components/modals/AddLessonModal';
+import { EditLessonModal } from '@/components/modals/EditLessonModal';
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<TabType>('clients');
@@ -26,6 +27,7 @@ export default function Dashboard() {
   const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
   const [isAddLessonOpen, setIsAddLessonOpen] = useState(false);
   const [selectedDateForNewLesson, setSelectedDateForNewLesson] = useState<Date | undefined>(undefined);
+  const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
 
   useEffect(() => {
     initTelegramApp();
@@ -147,7 +149,7 @@ export default function Dashboard() {
               setIsAddLessonOpen(true);
             }}
             onOpenLesson={(lesson) => {
-              // TODO: link to edit lesson
+              setSelectedLesson(lesson);
             }}
             onUpdateLessonTime={handleUpdateLessonTime}
           />
@@ -199,6 +201,29 @@ export default function Dashboard() {
             setIsAddLessonOpen(false);
           } catch (e) {
             console.error('Failed to save lesson:', e);
+          }
+        }}
+      />
+
+      <EditLessonModal
+        isOpen={Boolean(selectedLesson)}
+        onClose={() => setSelectedLesson(null)}
+        lesson={selectedLesson}
+        student={selectedLesson ? students.find(s => s.id === selectedLesson.student_id) || null : null}
+        onSave={async (lessonId, updates) => {
+          try {
+            await updateLessonDetails(lessonId, updates);
+            await refreshData();
+          } catch (e) {
+            console.error('Update failed:', e);
+          }
+        }}
+        onDelete={async (lessonId) => {
+          try {
+            await deleteLesson(lessonId);
+            await refreshData();
+          } catch (e) {
+            console.error('Delete failed:', e);
           }
         }}
       />
