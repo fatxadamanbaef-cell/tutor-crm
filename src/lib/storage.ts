@@ -270,6 +270,22 @@ export async function getLessons(): Promise<Lesson[]> {
   });
 }
 
+export async function updateLessonTime(lessonId: string, timeStr: string, newDateStr?: string): Promise<void> {
+  if (!supabase) throw new Error('Supabase is not initialized');
+  const parts = timeStr.split('-').map(s => s.trim());
+  const startTime = parts[0] || '18:00';
+  const endTime = parts[1] || '19:30';
+
+  const updatePayload: any = {
+    start_time: startTime,
+    end_time: endTime
+  };
+  if (newDateStr) updatePayload.lesson_date = newDateStr;
+
+  const { error } = await supabase.from('tutor_lessons').update(updatePayload).eq('id', lessonId);
+  if (error) throw error;
+}
+
 export async function saveLesson(lessonData: {
   student_id: string;
   date: string;

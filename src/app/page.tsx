@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Student, Lesson, FinanceSummary } from '@/types';
-import { getStudents, getLessons, getFinanceSummary, addPayment, deleteStudent, saveStudent, updateStudentBillingDay, updateStudentColor } from '@/lib/storage';
+import { getStudents, getLessons, getFinanceSummary, addPayment, deleteStudent, saveStudent, updateStudentBillingDay, updateStudentColor, updateLessonTime, saveLesson } from '@/lib/storage';
 import { initTelegramApp } from '@/lib/telegram';
 import { Loader2 } from 'lucide-react';
 
@@ -13,6 +13,7 @@ import { StatsTab } from '@/components/tabs/StatsTab';
 import { SettingsTab } from '@/components/tabs/SettingsTab';
 import { ClientProfileScreen } from '@/components/tabs/ClientProfileScreen';
 import { AddStudentModal } from '@/components/modals/AddStudentModal';
+import { AddLessonModal } from '@/components/modals/AddLessonModal';
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<TabType>('clients');
@@ -23,6 +24,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
+  const [isAddLessonOpen, setIsAddLessonOpen] = useState(false);
+  const [selectedDateForNewLesson, setSelectedDateForNewLesson] = useState<Date | undefined>(undefined);
 
   useEffect(() => {
     initTelegramApp();
@@ -114,6 +117,15 @@ export default function Dashboard() {
     }
   };
 
+  const handleUpdateLessonTime = async (lessonId: string, timeStr: string, dateStr?: string) => {
+    try {
+      await updateLessonTime(lessonId, timeStr, dateStr);
+      await refreshData();
+    } catch (e) {
+      console.error('Failed to update lesson time:', e);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -126,7 +138,20 @@ export default function Dashboard() {
     <div className="h-screen bg-gray-50 overflow-hidden relative selection:bg-blue-100">
       {/* Main Tab Content */}
       <div className="h-full overflow-y-auto">
-        {activeTab === 'schedule' && <ScheduleTab />}
+        {activeTab === 'schedule' && (
+          <ScheduleTab 
+            students={students} 
+            lessons={lessons}
+            onAddLesson={() => {
+              setSelectedDateForNewLesson(new Date());
+              setIsAddLessonOpen(true);
+            }}
+            onOpenLesson={(lesson) => {
+              // TODO: link to edit lesson
+            }}
+            onUpdateLessonTime={handleUpdateLessonTime}
+          />
+        )}
         {activeTab === 'clients' && (
           <ClientsTab 
             students={students} 
@@ -160,6 +185,22 @@ export default function Dashboard() {
         isOpen={isAddStudentOpen}
         onClose={() => setIsAddStudentOpen(false)}
         onSave={handleSaveStudent}
+      />
+      
+      <AddLessonModal
+        isOpen={isAddLessonOpen}
+        onClose={() => setIsAddLessonOpen(false)}
+        students={students}
+        initialDate={selectedDateForNewLesson}
+        onSave={async (data) => {
+          try {
+            await saveLesson(data);
+            await refreshData();
+            setIsAddLessonOpen(false);
+          } catch (e) {
+            console.error('Failed to save lesson:', e);
+          }
+        }}
       />
     </div>
   );
