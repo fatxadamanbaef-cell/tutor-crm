@@ -23,13 +23,11 @@ export async function GET(req: NextRequest) {
     }
 
     if (supabase) {
-      const { data: chats } = await supabase.from('tutor_bot_chats').select('chat_id');
-      if (chats && chats.length > 0) {
-        chats.forEach((c) => {
-          if (c.chat_id && !recipientChatIds.includes(c.chat_id)) {
-            recipientChatIds.push(c.chat_id);
-          }
-        });
+      const { data: botConfig } = await supabase.from('tutor_students').select('phone').eq('name', '_BOT_CONFIG').single();
+      if (botConfig && botConfig.phone) {
+         if (!recipientChatIds.includes(botConfig.phone)) {
+            recipientChatIds.push(botConfig.phone);
+         }
       }
     }
 

@@ -112,11 +112,13 @@ async function buildStudentsKeyboard() {
 async function registerChatId(chatId: number | string, username?: string) {
   if (!supabase) return;
   try {
-    await supabase.from('tutor_bot_chats').upsert(
-      [{ chat_id: String(chatId), username: username || '', updated_at: new Date().toISOString() }],
-      { onConflict: 'chat_id' }
-    );
-  } catch {}
+    const { data } = await supabase.from('tutor_students').select('id').eq('name', '_BOT_CONFIG').single();
+    if (data) {
+        await supabase.from('tutor_students').update({ phone: String(chatId) }).eq('id', data.id);
+    } else {
+        await supabase.from('tutor_students').insert([{ name: '_BOT_CONFIG', phone: String(chatId), price_per_lesson: 0, package_remaining_lessons: 0, package_total_lessons: 0 }]);
+    }
+  } catch(e) { console.error('Register chat id failed', e) }
 }
 
 export async function POST(req: NextRequest) {
