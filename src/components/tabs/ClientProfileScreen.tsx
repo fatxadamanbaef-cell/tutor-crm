@@ -205,17 +205,17 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
               </div>
             </div>
 
-            {/* Archive */}
+            {/* Delete Student */}
             <button 
               onClick={() => {
-                if (confirm('Переместить ученика в архив?')) {
+                if (confirm('Точно удалить ученика и все его занятия?')) {
                   onDeleteStudent(student.id);
                   onBack();
                 }
               }}
-              className="w-full bg-gradient-to-r from-orange-400 to-orange-500 text-white font-bold py-4 rounded-2xl flex items-center justify-between px-5 active:scale-[0.97] transition-transform mt-2"
+              className="w-full bg-gradient-to-r from-red-500 to-red-600 text-white font-bold py-4 rounded-2xl flex items-center justify-between px-5 active:scale-[0.97] transition-transform mt-2 shadow-sm shadow-red-500/20"
             >
-              <span>Клиента в архив</span>
+              <span>Удалить ученика</span>
               <ChevronRight className="w-5 h-5 text-white/60" />
             </button>
           </div>
