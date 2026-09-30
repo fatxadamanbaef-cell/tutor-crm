@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLessons, getStudents } from '@/lib/storage';
 import { getTashkentNow, getTashkentTodayStr, formatUZS } from '@/lib/formatters';
-import { sendTelegramMessage, buildMorningDigestText } from '../route';
+import { sendTelegramMessage, buildMorningDigest } from '../route';
 import { supabase } from '@/lib/supabase';
 
 const TEACHER_TELEGRAM_CHAT_ID = process.env.TEACHER_TELEGRAM_CHAT_ID || '';
@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
 
       if (mode === 'digest' || (isMorningWindow && !notifiedLessonsMap.has(digestKey))) {
         notifiedLessonsMap.add(digestKey);
-        const digestText = await buildMorningDigestText('Фархад');
+        const { text: digestText } = await buildMorningDigest('Фархад');
         const replyMarkup = {
           inline_keyboard: [
             [{ text: '🚀 Открыть Tutor Tracker', web_app: { url: APP_URL } }],

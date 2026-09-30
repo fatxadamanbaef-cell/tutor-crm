@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { buildMorningDigestText, sendTelegramMessage } from '../route';
+import { buildMorningDigest, sendTelegramMessage } from '../route';
 
 const TEACHER_TELEGRAM_CHAT_ID = process.env.TEACHER_TELEGRAM_CHAT_ID || '';
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://tutor-tracker.vercel.app';
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
       }, { status: 400 });
     }
 
-    const digestText = await buildMorningDigestText('Преподаватель');
+    const { text: digestText } = await buildMorningDigest('Преподаватель');
 
     const replyMarkup = {
       inline_keyboard: [

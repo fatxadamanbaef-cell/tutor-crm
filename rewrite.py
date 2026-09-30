@@ -1,4 +1,6 @@
-import { NextRequest, NextResponse } from 'next/server';
+import sys
+
+new_content = """import { NextRequest, NextResponse } from 'next/server';
 import { getLessons, getStudents, setLessonStatusDirect, saveStudent, addPayment } from '@/lib/storage';
 import { formatTashkentHeaderDate, isTashkentToday } from '@/lib/formatters';
 import { generateStudentReport, findStudentsByName } from '@/lib/reports';
@@ -58,34 +60,34 @@ export async function buildMorningDigest(firstName: string = 'Фархад') {
   const [lessons, students] = await Promise.all([getLessons(), getStudents()]);
   const todayLessons = lessons.filter((l) => isTashkentToday(l.date)).sort((a,b) => (a.time_str||'').localeCompare(b.time_str||''));
 
-  let message = `☀️ <b>Здравствуйте, ${firstName}!</b>\n`;
-  message += `📚 <b>Ваш план занятий на сегодня (${todayFormatted}):</b>\n\n`;
+  let message = `☀️ <b>Здравствуйте, ${firstName}!</b>\\n`;
+  message += `📚 <b>Ваш план занятий на сегодня (${todayFormatted}):</b>\\n\\n`;
 
   const keyboard: any[] = [];
 
   if (todayLessons.length === 0) {
-    message += `<i>На сегодня уроков не запланировано. Отличного отдыха!</i>\n\n`;
+    message += `<i>На сегодня уроков не запланировано. Отличного отдыха!</i>\\n\\n`;
   } else {
-    message += `Всего уроков: <b>${todayLessons.length}</b>\n\n`;
+    message += `Всего уроков: <b>${todayLessons.length}</b>\\n\\n`;
     todayLessons.forEach((l, i) => {
       const student = students.find((s) => s.id === l.student_id);
       const isCompleted = l.status === 'completed';
       const statusIcon = isCompleted ? '✅' : (l.status === 'missed_penalty' ? '❌' : (l.status === 'missed_excused' ? '⚠️' : '⏳'));
-      message += `<b>${i + 1}. ${l.time_str?.split(' - ')[0] || '18:00'}</b> | <b>${student?.name || l.student_name}</b> ${statusIcon}\n`;
+      message += `<b>${i + 1}. ${l.time_str?.split(' - ')[0] || '18:00'}</b> | <b>${student?.name || l.student_name}</b> ${statusIcon}\\n`;
       
       keyboard.push([{ text: `${statusIcon} ${l.time_str?.split(' - ')[0]} ${student?.name}`, callback_data: `lesson:${l.id}` }]);
     });
-    message += `\n<i>Нажмите на урок ниже, чтобы отметить его статус:</i>\n\n`;
+    message += `\\n<i>Нажмите на урок ниже, чтобы отметить его статус:</i>\\n\\n`;
   }
 
   // Pending makeups
   const studentsWithMakeups = students.filter((s) => s.makeup_debt > 0);
   if (studentsWithMakeups.length > 0) {
-    message += `🔄 <b>Долги по отработкам (${studentsWithMakeups.length}):</b>\n`;
+    message += `🔄 <b>Долги по отработкам (${studentsWithMakeups.length}):</b>\\n`;
     studentsWithMakeups.forEach((s) => {
-      message += `• <b>${s.name}</b>: ${s.makeup_debt} ур.\n`;
+      message += `• <b>${s.name}</b>: ${s.makeup_debt} ур.\\n`;
     });
-    message += `\n`;
+    message += `\\n`;
   }
 
   keyboard.push([
@@ -176,10 +178,10 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({ ok: true });
         }
         await answerCallbackQuery(cq.id);
-        const text = `Управление уроком:\n👤 <b>${lesson.student_name}</b>\n🕒 ${lesson.time_str}\nТекущий статус: <b>${lesson.status === 'completed' ? 'Проведен ✅' : (lesson.status === 'missed_penalty' ? 'Отмена ❌' : (lesson.status === 'missed_excused' ? 'Долг ⚠️' : 'Запланирован ⏳'))}</b>`;
+        const text = `Управление уроком:\\n👤 <b>${lesson.student_name}</b>\\n🕒 ${lesson.time_str}\\nТекущий статус: <b>${lesson.status === 'completed' ? 'Проведен ✅' : (lesson.status === 'missed_penalty' ? 'Отмена ❌' : (lesson.status === 'missed_excused' ? 'Долг ⚠️' : 'Запланирован ⏳'))}</b>`;
         const markup = {
           inline_keyboard: [
-            [{ text: lesson.status === 'planned'  ? '🔹 Запланирован' : 'Запланирован', callback_data: `status:${lesson.id}:planned` }],
+            [{ text: lesson.status === 'planned' || lesson.status === 'scheduled' ? '🔹 Запланирован' : 'Запланирован', callback_data: `status:${lesson.id}:planned` }],
             [{ text: lesson.status === 'completed' ? '✅ Проведен' : 'Проведен', callback_data: `status:${lesson.id}:completed` }],
             [{ text: lesson.status === 'missed_excused' ? '⚠️ Пропуск (долг)' : 'Пропуск (долг)', callback_data: `status:${lesson.id}:missed_excused` }],
             [{ text: lesson.status === 'missed_penalty' ? '❌ Отмена (списание)' : 'Отмена (списание)', callback_data: `status:${lesson.id}:missed_penalty` }],
@@ -203,10 +205,10 @@ export async function POST(req: NextRequest) {
         const lessons = await getLessons();
         const lesson = lessons.find(l => l.id === lessonId);
         if (lesson) {
-            const text = `Управление уроком:\n👤 <b>${lesson.student_name}</b>\n🕒 ${lesson.time_str}\nТекущий статус: <b>${lesson.status === 'completed' ? 'Проведен ✅' : (lesson.status === 'missed_penalty' ? 'Отмена ❌' : (lesson.status === 'missed_excused' ? 'Долг ⚠️' : 'Запланирован ⏳'))}</b>`;
+            const text = `Управление уроком:\\n👤 <b>${lesson.student_name}</b>\\n🕒 ${lesson.time_str}\\nТекущий статус: <b>${lesson.status === 'completed' ? 'Проведен ✅' : (lesson.status === 'missed_penalty' ? 'Отмена ❌' : (lesson.status === 'missed_excused' ? 'Долг ⚠️' : 'Запланирован ⏳'))}</b>`;
             const markup = {
             inline_keyboard: [
-                [{ text: lesson.status === 'planned'  ? '🔹 Запланирован' : 'Запланирован', callback_data: `status:${lesson.id}:planned` }],
+                [{ text: lesson.status === 'planned' || lesson.status === 'scheduled' ? '🔹 Запланирован' : 'Запланирован', callback_data: `status:${lesson.id}:planned` }],
                 [{ text: lesson.status === 'completed' ? '✅ Проведен' : 'Проведен', callback_data: `status:${lesson.id}:completed` }],
                 [{ text: lesson.status === 'missed_excused' ? '⚠️ Пропуск (долг)' : 'Пропуск (долг)', callback_data: `status:${lesson.id}:missed_excused` }],
                 [{ text: lesson.status === 'missed_penalty' ? '❌ Отмена (списание)' : 'Отмена (списание)', callback_data: `status:${lesson.id}:missed_penalty` }],
@@ -224,7 +226,7 @@ export async function POST(req: NextRequest) {
         const student = students.find(s => s.id === studentId);
         await answerCallbackQuery(cq.id);
         if (student) {
-            await sendTelegramMessage(chatId, `💰 Чтобы внести оплату за <b>${student.name}</b>, отправьте сообщение:\n\n<code>/pay ${student.name} 8</code>\n\nГде 8 - это количество оплаченных уроков (можно указать любую цифру).`);
+            await sendTelegramMessage(chatId, `💰 Чтобы внести оплату за <b>${student.name}</b>, отправьте сообщение:\\n\\n<code>/pay ${student.name} 8</code>\\n\\nГде 8 - это количество оплаченных уроков (можно указать любую цифру).`);
         }
         return NextResponse.json({ ok: true });
       }
@@ -246,7 +248,7 @@ export async function POST(req: NextRequest) {
       };
 
       if (text.startsWith('/start') || text.startsWith('/help')) {
-        const welcomeText = `🚀 <b>Tutor Tracker Bot</b>\n\n<b>Команды бота:</b>\n/today - Расписание на сегодня (с кнопками)\n/students - Список учеников\n/add ИМЯ 150000 - Быстро добавить ученика\n/pay ИМЯ 8 - Внести оплату (на 8 уроков)\n\nЛибо просто напишите имя ученика, чтобы найти его!`;
+        const welcomeText = `🚀 <b>Tutor Tracker Bot</b>\\n\\n<b>Команды бота:</b>\\n/today - Расписание на сегодня (с кнопками)\\n/students - Список учеников\\n/add ИМЯ 150000 - Быстро добавить ученика\\n/pay ИМЯ 8 - Внести оплату (на 8 уроков)\\n\\nЛибо просто напишите имя ученика, чтобы найти его!`;
         await sendTelegramMessage(chatId, welcomeText, defaultMarkup);
       } else if (text.startsWith('/add ')) {
         const parts = rawText.split(' ');
@@ -254,13 +256,13 @@ export async function POST(req: NextRequest) {
             const price = parseInt(parts.pop() || '150000');
             const name = parts.slice(1).join(' ');
             try {
-                await saveStudent({ name, price_per_lesson: price, prepaid_balance: 8, billing_day: '10' });
-                await sendTelegramMessage(chatId, `✅ Ученик <b>${name}</b> (${price} UZS) успешно добавлен!\nЗайдите в CRM чтобы настроить ему расписание.`, defaultMarkup);
+                await saveStudent({ name, price_per_lesson: price, prepaid_balance: 8, billing_day: 10 });
+                await sendTelegramMessage(chatId, `✅ Ученик <b>${name}</b> (${price} UZS) успешно добавлен!\\nЗайдите в CRM чтобы настроить ему расписание.`, defaultMarkup);
             } catch(e) {
                 await sendTelegramMessage(chatId, '❌ Ошибка при добавлении ученика.');
             }
         } else {
-            await sendTelegramMessage(chatId, '❌ Формат команды: /add Имя Цена\nПример: <code>/add Алина 150000</code>');
+            await sendTelegramMessage(chatId, '❌ Формат команды: /add Имя Цена\\nПример: <code>/add Алина 150000</code>');
         }
       } else if (text.startsWith('/pay ')) {
         const parts = rawText.split(' ');
@@ -273,7 +275,7 @@ export async function POST(req: NextRequest) {
                     const student = matched[0];
                     const amount = (student.price_per_lesson || 150000) * lessonsCount;
                     await addPayment(student.id, amount, lessonsCount);
-                    await sendTelegramMessage(chatId, `💰 Оплата успешно добавлена!\n👤 <b>${student.name}</b>\nКол-во уроков: +${lessonsCount}\nСумма: ${amount} UZS`);
+                    await sendTelegramMessage(chatId, `💰 Оплата успешно добавлена!\\n👤 <b>${student.name}</b>\\nКол-во уроков: +${lessonsCount}\\nСумма: ${amount} UZS`);
                 } catch(e) {
                     await sendTelegramMessage(chatId, '❌ Ошибка при добавлении оплаты.');
                 }
@@ -281,7 +283,7 @@ export async function POST(req: NextRequest) {
                 await sendTelegramMessage(chatId, `❌ Ученик с именем "${name}" не найден или найдено несколько.`);
             }
         } else {
-            await sendTelegramMessage(chatId, '❌ Формат команды: /pay Имя Кол-во_уроков\nПример: <code>/pay Алина 8</code>');
+            await sendTelegramMessage(chatId, '❌ Формат команды: /pay Имя Кол-во_уроков\\nПример: <code>/pay Алина 8</code>');
         }
       } else if (text.startsWith('/today') || text.startsWith('/digest')) {
         const { text: msgText, markup } = await buildMorningDigest(firstName);
@@ -307,7 +309,7 @@ export async function POST(req: NextRequest) {
           await sendTelegramMessage(chatId, `Найдено несколько учеников по запросу "${rawText}":`, { inline_keyboard: buttons });
         } else {
           const { text: msgText, markup } = await buildMorningDigest(firstName);
-          await sendTelegramMessage(chatId, `Я не понял команду 😔\n\nВот ваше расписание:\n\n` + msgText, markup);
+          await sendTelegramMessage(chatId, `Я не понял команду 😔\\n\\nВот ваше расписание:\\n\\n` + msgText, markup);
         }
       }
     }
@@ -322,3 +324,7 @@ export async function POST(req: NextRequest) {
 export async function GET() {
   return NextResponse.json({ status: 'Tutor Tracker Bot Webhook is active' });
 }
+"""
+
+with open(r'd:\mathvibe project\tutor-crm\src\app\api\bot\route.ts', 'w', encoding='utf-8') as f:
+    f.write(new_content)
