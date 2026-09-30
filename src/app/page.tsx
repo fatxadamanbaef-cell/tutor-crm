@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Student, Lesson, FinanceSummary } from '@/types';
-import { getStudents, getLessons, getFinanceSummary, addPayment, deleteStudent, saveStudent, updateStudentBillingDay, updateStudentColor, updateLessonTime, saveLesson, deleteLesson, updateLessonDetails, saveBatchLessons, updateStudentInfo } from '@/lib/storage';
+import { getStudents, getLessons, getFinanceSummary, addPayment, deleteStudent, saveStudent, updateStudentBillingDay, updateStudentColor, updateLessonTime, saveLesson, deleteLesson, updateLessonDetails, saveBatchLessons, updateStudentInfo, setLessonStatusDirect } from '@/lib/storage';
 import { initTelegramApp } from '@/lib/telegram';
 import { Loader2 } from 'lucide-react';
 
@@ -233,6 +233,10 @@ export default function Dashboard() {
         student={selectedLesson ? students.find(s => s.id === selectedLesson.student_id) || null : null}
         onSave={async (lessonId, updates) => {
           try {
+            const originalLesson = lessons.find(l => l.id === lessonId);
+            if (updates.status && originalLesson && originalLesson.status !== updates.status) {
+              await setLessonStatusDirect(lessonId, updates.status);
+            }
             await updateLessonDetails(lessonId, updates);
             await refreshData();
           } catch (e) {

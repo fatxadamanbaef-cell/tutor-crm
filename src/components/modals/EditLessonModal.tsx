@@ -30,7 +30,7 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
   const [endTime, setEndTime] = useState('');
   const [price, setPrice] = useState<number>(150000);
   const [notes, setNotes] = useState('');
-  const [isCancelled, setIsCancelled] = useState(false);
+  const [currentStatus, setCurrentStatus] = useState<LessonStatus>('planned');
 
   useEffect(() => {
     if (isOpen && lesson) {
@@ -40,7 +40,7 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
       setEndTime(parts[1]);
       setPrice(lesson.price_per_lesson || student?.price_per_lesson || 150000);
       setNotes(lesson.notes || '');
-      setIsCancelled(lesson.status === 'missed_penalty');
+      setCurrentStatus(lesson.status || 'planned');
     }
   }, [isOpen, lesson, student]);
 
@@ -49,14 +49,13 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
   const handleSave = async () => {
     hapticImpact('light');
     const timeStr = `${startTime} - ${endTime}`;
-    const status: LessonStatus = isCancelled ? 'missed_penalty' : (lesson.status === 'missed_penalty' ? 'planned' : lesson.status);
     
     await onSave(lesson.id, {
       date: `${lessonDate}T${startTime}:00+05:00`,
       time_str: timeStr,
       price_per_lesson: price,
       notes,
-      status,
+      status: currentStatus,
     });
     hapticNotification('success');
     onClose();
@@ -140,12 +139,34 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
             <ChevronRight className="w-4 h-4 text-gray-400" />
           </button>
           <hr className="border-gray-100" />
-          <div className="flex items-center justify-between">
-            <span className="text-black font-semibold">Клиент отменил занятие</span>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" className="sr-only peer" checked={isCancelled} onChange={() => setIsCancelled(!isCancelled)} />
-              <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
-            </label>
+          <div className="pt-2">
+            <span className="text-black font-semibold mb-3 block">Статус занятия</span>
+            <div className="grid grid-cols-2 gap-2">
+              <button 
+                onClick={() => { hapticImpact('light'); setCurrentStatus('planned'); }}
+                className={`py-2 px-2 text-xs font-bold rounded-xl border transition-all ${currentStatus === 'planned' ? 'bg-blue-500 text-white border-blue-500 shadow-md shadow-blue-500/20' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
+              >
+                Запланирован
+              </button>
+              <button 
+                onClick={() => { hapticImpact('light'); setCurrentStatus('completed'); }}
+                className={`py-2 px-2 text-xs font-bold rounded-xl border transition-all ${currentStatus === 'completed' ? 'bg-green-500 text-white border-green-500 shadow-md shadow-green-500/20' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
+              >
+                Проведен
+              </button>
+              <button 
+                onClick={() => { hapticImpact('light'); setCurrentStatus('missed_excused'); }}
+                className={`py-2 px-2 text-xs font-bold rounded-xl border transition-all ${currentStatus === 'missed_excused' ? 'bg-orange-500 text-white border-orange-500 shadow-md shadow-orange-500/20' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
+              >
+                Пропуск (долг)
+              </button>
+              <button 
+                onClick={() => { hapticImpact('light'); setCurrentStatus('missed_penalty'); }}
+                className={`py-2 px-2 text-xs font-bold rounded-xl border transition-all ${currentStatus === 'missed_penalty' ? 'bg-red-500 text-white border-red-500 shadow-md shadow-red-500/20' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
+              >
+                Отмена (списание)
+              </button>
+            </div>
           </div>
         </div>
 

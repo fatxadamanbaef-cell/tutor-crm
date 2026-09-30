@@ -243,7 +243,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({ students, lessons, onA
                           height: durationMinutes,
                           backgroundColor: bgColor,
                           borderLeft: `3px solid ${baseColor}`,
-                          opacity: isDragging ? 0.9 : (lesson.status === 'completed' ? 0.6 : 1),
+                          opacity: isDragging ? 0.9 : (lesson.status === 'completed' || lesson.status.startsWith('missed_') ? 0.5 : 1),
                           touchAction: 'none' // Crucial to prevent page scroll while dragging
                         }}
                       >
@@ -256,6 +256,16 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({ students, lessons, onA
                         {lesson.status === 'completed' && (
                           <div className="absolute top-1 right-1 bg-white/50 rounded-full p-0.5">
                             <svg className="w-2 h-2 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>
+                          </div>
+                        )}
+                        {lesson.status === 'missed_penalty' && (
+                          <div className="absolute top-1 right-1 bg-red-100 rounded-full p-0.5">
+                            <svg className="w-2 h-2 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12"></path></svg>
+                          </div>
+                        )}
+                        {lesson.status === 'missed_excused' && (
+                          <div className="absolute top-1 right-1 bg-orange-100 rounded-full p-0.5">
+                            <svg className="w-2 h-2 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                           </div>
                         )}
                       </div>

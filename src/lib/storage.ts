@@ -183,7 +183,7 @@ export async function updateLessonDetails(lessonId: string, updates: Partial<Les
     payload.end_time = parts[1] || '19:30';
   }
   if (updates.notes !== undefined) payload.notes = updates.notes;
-  if (updates.status) payload.status = updates.status === 'completed' ? 'completed' : (updates.status === 'missed_penalty' ? 'cancelled' : 'scheduled'); // Simplification for now
+
 
   const { error } = await supabase.from('tutor_lessons').update(payload).eq('id', lessonId);
   if (error) throw error;
