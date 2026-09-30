@@ -400,7 +400,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                 const date = parseISO(lesson.date);
                 const isPaid = lesson.status === 'completed';
                 const isMissed = lesson.status === 'missed_penalty';
-                const isPlanned = lesson.status === 'planned' || lesson.status === 'scheduled';
+                const isPlanned = lesson.status === 'planned';
                 
                 return (
                   <div key={lesson.id} className="bg-white rounded-2xl shadow-sm overflow-hidden">
