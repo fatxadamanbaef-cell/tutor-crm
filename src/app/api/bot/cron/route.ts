@@ -95,7 +95,7 @@ export async function GET(req: NextRequest) {
         const reminderKey = `reminder_15m_${lesson.id}_${todayStr}`;
 
         // If lesson starts in 5 to 20 minutes (approx. 15 minutes before)
-        if (minutesUntilStart >= 5 && minutesUntilStart <= 20 && !notifiedLessonsMap.has(reminderKey)) {
+        if (minutesUntilStart >= 5 && minutesUntilStart < 15 && !notifiedLessonsMap.has(reminderKey)) {
           notifiedLessonsMap.add(reminderKey);
 
           const student = students.find((s) => s.id === lesson.student_id);
