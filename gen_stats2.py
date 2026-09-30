@@ -1,4 +1,6 @@
-'use client';
+import sys
+
+new_content = """'use client';
 
 import React, { useMemo } from 'react';
 import { FinanceSummary, Lesson, Student } from '@/types';
@@ -163,3 +165,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({ summary, lessons, students }
     </div>
   );
 };
+"""
+
+with open(r'd:\mathvibe project\tutor-crm\src\components\tabs\StatsTab.tsx', 'w', encoding='utf-8') as f:
+    f.write(new_content)

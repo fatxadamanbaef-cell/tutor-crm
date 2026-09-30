@@ -181,7 +181,7 @@ export default function Dashboard() {
             onAddStudent={() => setIsAddStudentOpen(true)} 
           />
         )}
-        {activeTab === 'stats' && <StatsTab summary={financeSummary} />}
+        {activeTab === 'stats' && <StatsTab summary={financeSummary} lessons={lessons} students={students} />}
         {activeTab === 'settings' && <SettingsTab />}
       </div>
 
