@@ -32,7 +32,7 @@ export async function getStudents(): Promise<Student[]> {
     makeupsCountMap[m.student_id] = (makeupsCountMap[m.student_id] || 0) + 1;
   });
 
-  return (studentsData || []).map((s) => ({
+  return (studentsData || []).filter((s) => s.name !== '_BOT_CONFIG').map((s) => ({
     id: s.id,
     name: s.name,
     price_per_lesson: Number(s.price_per_lesson) || 150000,
