@@ -87,8 +87,9 @@ export default function Dashboard() {
       
       await refreshData();
       setIsAddStudentOpen(false);
-    } catch (e) {
+    } catch (e: any) {
       console.error('Save error:', e);
+      alert('Ошибка при сохранении: ' + (e.message || String(e)));
     }
   };
 
