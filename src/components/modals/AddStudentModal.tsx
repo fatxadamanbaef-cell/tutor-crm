@@ -46,8 +46,8 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({
   const [initialBalance, setInitialBalance] = useState<number | string>(8);
   const [billingDay, setBillingDay] = useState('');
 
-  // Collapsed by default as requested
-  const [enableSchedule, setEnableSchedule] = useState(false);
+  // Expanded by default so users see schedule creation
+  const [enableSchedule, setEnableSchedule] = useState(true);
   const [selectedDays, setSelectedDays] = useState<number[]>([1, 3, 5]); // Mon, Wed, Fri
   const [startTime, setStartTime] = useState('18:00');
   const [duration, setDuration] = useState(90);
