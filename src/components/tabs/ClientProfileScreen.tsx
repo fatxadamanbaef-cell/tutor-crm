@@ -16,6 +16,7 @@ interface ClientProfileScreenProps {
   onUpdateBillingDay: (studentId: string, day: number) => void;
   onUpdateColor: (studentId: string, color: string) => void;
   onToggleCalendarDate: (studentId: string, dateStr: string) => void;
+  onSaveStudentInfo?: (studentId: string, updates: { name?: string; phone?: string }) => void;
 }
 
 export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
@@ -26,9 +27,11 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
   onDeleteStudent,
   onUpdateColor,
   onUpdateBillingDay,
+  onSaveStudentInfo,
 }) => {
   const [activeTab, setActiveTab] = useState<'info' | 'subscription' | 'payments' | 'lessons'>('info');
   const [studentName, setStudentName] = useState(student.name);
+  const [studentPhone, setStudentPhone] = useState(student.phone || '');
   const [showColorPicker, setShowColorPicker] = useState(false);
   
   // Subscription form state
@@ -69,7 +72,14 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
           <X className="w-5 h-5" strokeWidth={2.5} />
         </button>
         <button 
-          onClick={() => { hapticNotification('success'); onBack(); }} 
+          onClick={() => { 
+            hapticNotification('success'); 
+            // Save changes
+            if (onSaveStudentInfo && (studentName !== student.name || studentPhone !== (student.phone || ''))) {
+              onSaveStudentInfo(student.id, { name: studentName, phone: studentPhone });
+            }
+            onBack(); 
+          }} 
           className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-50 text-blue-500 active:scale-90 transition-transform"
         >
           <Check className="w-5 h-5" strokeWidth={3} />
@@ -183,7 +193,8 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
               <div className="p-4">
                 <input
                   type="tel"
-                  defaultValue={student.phone || ''}
+                  value={studentPhone}
+                  onChange={e => setStudentPhone(e.target.value)}
                   placeholder="Номер телефона"
                   className="w-full text-[15px] font-medium text-black focus:outline-none bg-transparent placeholder-gray-400"
                 />
@@ -389,6 +400,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                 const date = parseISO(lesson.date);
                 const isPaid = lesson.status === 'completed';
                 const isMissed = lesson.status === 'missed_penalty';
+                const isPlanned = lesson.status === 'planned' || lesson.status === 'scheduled';
                 
                 return (
                   <div key={lesson.id} className="bg-white rounded-2xl shadow-sm overflow-hidden">
@@ -408,9 +420,9 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                           ? 'bg-green-50 text-green-600'
                           : isMissed 
                             ? 'bg-orange-50 text-orange-600' 
-                            : 'bg-red-50 text-red-500'
+                            : 'bg-blue-50 text-blue-500'
                       }`}>
-                        {isPaid ? 'Проведён' : isMissed ? 'Пропуск' : 'Не оплачено'}
+                        {isPaid ? 'Проведён' : isMissed ? 'Пропуск' : 'Запланирован'}
                       </span>
                     </div>
                   </div>

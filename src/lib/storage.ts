@@ -995,3 +995,16 @@ export async function updateStudentColor(studentId: string, color: string): Prom
     .eq('id', studentId);
   if (error) throw error;
 }
+
+export async function updateStudentInfo(studentId: string, updates: { name?: string; phone?: string }): Promise<void> {
+  if (!supabase) throw new Error('Supabase is not initialized');
+  const payload: Record<string, string> = {};
+  if (updates.name !== undefined) payload.name = updates.name.trim();
+  if (updates.phone !== undefined) payload.phone = updates.phone.trim();
+  if (Object.keys(payload).length === 0) return;
+  const { error } = await supabase
+    .from('tutor_students')
+    .update(payload)
+    .eq('id', studentId);
+  if (error) throw error;
+}

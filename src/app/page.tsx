@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Student, Lesson, FinanceSummary } from '@/types';
-import { getStudents, getLessons, getFinanceSummary, addPayment, deleteStudent, saveStudent, updateStudentBillingDay, updateStudentColor, updateLessonTime, saveLesson, deleteLesson, updateLessonDetails } from '@/lib/storage';
+import { getStudents, getLessons, getFinanceSummary, addPayment, deleteStudent, saveStudent, updateStudentBillingDay, updateStudentColor, updateLessonTime, saveLesson, deleteLesson, updateLessonDetails, saveBatchLessons, updateStudentInfo } from '@/lib/storage';
 import { initTelegramApp } from '@/lib/telegram';
 import { Loader2 } from 'lucide-react';
 
@@ -77,10 +77,16 @@ export default function Dashboard() {
   const handleSaveStudent = async (data: any, generatedLessons?: Lesson[]) => {
     try {
       const saved = await saveStudent(data);
-      // Wait, we need saveBatchLessons imported if we keep this logic, but for now we'll just save student
       setStudents(prev => [...prev, saved]);
+      
+      // Save generated schedule lessons if any
+      if (generatedLessons && generatedLessons.length > 0) {
+        const lessonsWithStudentId = generatedLessons.map(l => ({ ...l, student_id: saved.id }));
+        await saveBatchLessons(lessonsWithStudentId);
+      }
+      
+      await refreshData();
       setIsAddStudentOpen(false);
-      // NOTE: We'll restore batch saving logic in Step 2 when we rebuild the schedule generation
     } catch (e) {
       console.error('Save error:', e);
     }
@@ -125,6 +131,19 @@ export default function Dashboard() {
       await refreshData();
     } catch (e) {
       console.error('Failed to update lesson time:', e);
+    }
+  };
+
+  const handleSaveStudentInfo = async (studentId: string, updates: { name?: string; phone?: string }) => {
+    try {
+      await updateStudentInfo(studentId, updates);
+      await refreshData();
+      if (selectedStudent) {
+        const refreshed = (await getStudents()).find(s => s.id === studentId);
+        if (refreshed) setSelectedStudent(refreshed);
+      }
+    } catch (e) {
+      console.error('Failed to save student info:', e);
     }
   };
 
@@ -179,6 +198,7 @@ export default function Dashboard() {
           onToggleCalendarDate={handleToggleCalendarDate}
           onUpdateBillingDay={handleUpdateBillingDay}
           onUpdateColor={handleUpdateColor}
+          onSaveStudentInfo={handleSaveStudentInfo}
         />
       )}
 
