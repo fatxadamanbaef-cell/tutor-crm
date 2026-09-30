@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Student, Lesson } from '@/types';
 import { format, addDays, startOfWeek, isSameDay, parseISO, addWeeks, subWeeks } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { Plus, Settings, CircleDollarSign, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Settings, CircleDollarSign, ChevronLeft, ChevronRight, List, LayoutGrid, Clock } from 'lucide-react';
 import { hapticImpact } from '@/lib/telegram';
 import { getTashkentNow } from '@/lib/formatters';
 
@@ -19,6 +19,7 @@ interface ScheduleTabProps {
 export const ScheduleTab: React.FC<ScheduleTabProps> = ({ students, lessons, onAddLesson, onOpenLesson, onUpdateLessonTime }) => {
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(startOfWeek(getTashkentNow(), { weekStartsOn: 1 }));
   const [selectedDate, setSelectedDate] = useState<Date>(getTashkentNow());
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('list'); // Defaulting to list since user requested it
   const gridRef = useRef<HTMLDivElement>(null);
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(currentWeekStart, i));
@@ -137,11 +138,11 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({ students, lessons, onA
         </div>
 
         <div className="flex gap-2">
+          <button onClick={() => { hapticImpact('light'); setViewMode(viewMode === 'grid' ? 'list' : 'grid'); }} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-black">
+            {viewMode === 'grid' ? <List className="w-4 h-4" /> : <LayoutGrid className="w-4 h-4" />}
+          </button>
           <button onClick={() => { hapticImpact('light'); onAddLesson(); }} className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-black">
             <Plus className="w-5 h-5" />
-          </button>
-          <button className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-black">
-            <Settings className="w-5 h-5" />
           </button>
         </div>
       </div>
@@ -169,7 +170,8 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({ students, lessons, onA
         })}
       </div>
 
-      {/* 7-Day Time Grid */}
+      {/* 7-Day Time Grid / List View */}
+      {viewMode === 'grid' ? (
       <div ref={gridRef} className="flex-1 overflow-y-auto relative bg-white">
         <div className="relative min-w-full flex" style={{ height: hours.length * HOUR_HEIGHT }}>
           
@@ -278,6 +280,65 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({ students, lessons, onA
         </div>
         <div className="h-24"></div> {/* Bottom padding */}
       </div>
+      ) : (
+        <div className="flex-1 overflow-y-auto bg-gray-50 p-4 space-y-6 pb-32">
+          {weekDays.map(day => {
+             const dayStr = format(day, 'yyyy-MM-dd');
+             const dayLessons = lessons.filter(l => l.date.startsWith(dayStr)).sort((a, b) => (a.time_str || '').localeCompare(b.time_str || ''));
+             if (dayLessons.length === 0) return null;
+             
+             return (
+               <div key={dayStr}>
+                  <h2 className="text-[11px] font-black text-gray-500 uppercase mb-3 flex items-center gap-2">
+                   <span className={`w-7 h-7 rounded-[9px] flex items-center justify-center ${isSameDay(day, getTashkentNow()) ? 'bg-blue-600 text-white' : 'bg-gray-200 text-black'}`}>
+                     {format(day, 'd')}
+                   </span>
+                   <span>{format(day, 'EEEE', { locale: ru })}</span>
+                 </h2>
+                 <div className="space-y-2">
+                   {dayLessons.map(lesson => {
+                     const student = students.find(s => s.id === lesson.student_id);
+                     const baseColor = student?.color || '#3B82F6';
+                     const isCompleted = lesson.status === 'completed';
+                     const isMissed = lesson.status?.startsWith('missed_');
+                     return (
+                       <div
+                         key={lesson.id}
+                         onClick={() => { hapticImpact('light'); onOpenLesson(lesson); }}
+                         className={`bg-white rounded-2xl p-4 shadow-sm border-l-4 flex items-center gap-4 cursor-pointer active:scale-[0.98] transition-transform ${isCompleted || isMissed ? "opacity-60" : ""}`}
+                         style={{ borderLeftColor: baseColor }}
+                       >
+                         <div className="flex flex-col text-center min-w-[50px]">
+                           <span className="font-extrabold text-black text-[15px]">{lesson.time_str?.split(' - ')[0]}</span>
+                           <span className="text-[10px] font-bold text-gray-400 mt-0.5">{lesson.time_str?.split(' - ')[1]}</span>
+                         </div>
+                         
+                         <div className="flex-1">
+                           <h3 className="font-extrabold text-black text-base leading-tight">{lesson.student_name}</h3>
+                           <p className="text-[11px] font-bold text-gray-500 line-clamp-1 mt-0.5">{lesson.notes || 'Плановый урок'}</p>
+                         </div>
+                         
+                         <div className="flex items-center">
+                           {isCompleted && <div className="w-7 h-7 rounded-full bg-green-100 flex items-center justify-center"><svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg></div>}
+                           {lesson.status === 'missed_penalty' && <div className="w-7 h-7 rounded-full bg-red-100 flex items-center justify-center"><svg className="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12"></path></svg></div>}
+                           {lesson.status === 'missed_excused' && <div className="w-7 h-7 rounded-full bg-orange-100 flex items-center justify-center"><svg className="w-4 h-4 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></div>}
+                         </div>
+                       </div>
+                     );
+                   })}
+                 </div>
+               </div>
+             );
+          })}
+          
+          {weekDays.every(day => lessons.filter(l => l.date.startsWith(format(day, 'yyyy-MM-dd'))).length === 0) && (
+            <div className="flex flex-col items-center justify-center py-20 text-center opacity-50">
+              <Clock className="w-12 h-12 text-gray-400 mb-3" />
+              <p className="text-gray-500 font-bold text-sm">На этой неделе нет занятий</p>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
