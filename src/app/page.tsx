@@ -173,7 +173,7 @@ export default function Dashboard() {
         <ClientProfileScreen
           student={selectedStudent}
           lessons={lessons}
-          onBack={() => setSelectedStudent(null)}
+          onBack={() => { setSelectedStudent(null); refreshData(); }}
           onAddPayment={handleAddPayment}
           onDeleteStudent={handleDeleteStudent}
           onToggleCalendarDate={handleToggleCalendarDate}

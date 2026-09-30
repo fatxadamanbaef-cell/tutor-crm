@@ -26,7 +26,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({ summary }) => {
 
       <div className="flex-1 flex flex-col items-center justify-center text-center opacity-50 mt-10">
         <span className="text-4xl mb-4">📊</span>
-        <p className="text-gray-500 font-semibold">Детальная статистика в разработке (Этап 4)</p>
+        <p className="text-gray-500 font-semibold">Графики и аналитика скоро</p>
       </div>
     </div>
   );

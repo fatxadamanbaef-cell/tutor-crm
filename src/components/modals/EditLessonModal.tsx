@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Student, Lesson, LessonStatus } from '@/types';
-import { X, Check, Lock, ChevronRight } from 'lucide-react';
+import { X, Check, ChevronRight } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
 import { format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -80,7 +80,7 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
         <div className="bg-white rounded-3xl p-4 shadow-sm">
           <h3 className="text-xl font-bold text-black mb-1">{lesson.student_name}</h3>
           <div className="flex items-center text-gray-500 text-sm font-medium">
-            Баланс: <Lock className="w-3.5 h-3.5 ml-1 inline" />
+            Баланс: <span className={`ml-1 font-bold ${(student?.prepaid_balance ?? 0) <= 1 ? 'text-red-500' : 'text-green-600'}`}>{student?.prepaid_balance ?? 0} уроков</span>
           </div>
         </div>
 
@@ -135,10 +135,10 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
             </div>
           </div>
           <hr className="border-gray-100" />
-          <div className="flex items-center justify-between">
+          <button onClick={() => alert(`Перейдите в профиль ${lesson.student_name} → Абонемент, чтобы добавить оплату`)} className="flex items-center justify-between w-full text-left">
             <span className="text-black font-semibold">Добавить оплату</span>
             <ChevronRight className="w-4 h-4 text-gray-400" />
-          </div>
+          </button>
           <hr className="border-gray-100" />
           <div className="flex items-center justify-between">
             <span className="text-black font-semibold">Клиент отменил занятие</span>

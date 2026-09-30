@@ -197,7 +197,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({ students, lessons, onA
             </div>
 
             {/* Current Time Indicator */}
-            {isSameDay(getTashkentNow(), currentWeekStart) || getTashkentNow() >= currentWeekStart && getTashkentNow() <= addDays(currentWeekStart, 7) ? (
+            {(getTashkentNow() >= currentWeekStart && getTashkentNow() <= addDays(currentWeekStart, 7)) ? (
               <div 
                 className="absolute w-full flex items-center z-20 pointer-events-none"
                 style={{ top: ((getTashkentNow().getHours() - START_HOUR) * 60) + getTashkentNow().getMinutes() }}
@@ -237,7 +237,6 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({ students, lessons, onA
                         onTouchStart={(e) => handleTouchStart(e, lesson.id, topPos)}
                         onTouchMove={handleTouchMove}
                         onTouchEnd={() => handleTouchEnd(lesson)}
-                        onClick={() => { if (!isDragging) { hapticImpact('light'); onOpenLesson(lesson); } }}
                         className={`absolute left-0.5 right-0.5 rounded shadow-sm overflow-hidden cursor-pointer transition-transform ${isDragging ? 'z-50 scale-105 opacity-90' : 'z-20 active:scale-95'}`}
                         style={{ 
                           top: displayTop, 
