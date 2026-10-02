@@ -150,6 +150,30 @@ export async function POST(req: NextRequest) {
           }
         }
         return NextResponse.json({ ok: true });
+      } else if (data === 'list_makeups') {
+        const students = await getStudents();
+        const makeups = students.filter(s => s.makeup_debt > 0);
+        let text = '🔄 <b>Список переносов (долги по отработкам):</b>\n\n';
+        if (makeups.length === 0) {
+            text += '<i>Ура! У вас нет невыполненных отработок.</i>';
+        } else {
+            makeups.forEach(s => {
+                text += `🔸 <b>${s.name}</b>: ${s.makeup_debt} ур.\n`;
+            });
+        }
+        
+        const markup = {
+          inline_keyboard: [
+            [{ text: 'Расписание', callback_data: 'daily_schedule' }, { text: 'Ученики', callback_data: 'list_students' }]
+          ]
+        };
+        
+        if (messageId) {
+            await editTelegramMessage(chatId, messageId, text, markup);
+        } else {
+            await sendTelegramMessage(chatId, text, markup);
+        }
+        return NextResponse.json({ ok: true });
       } else if (data === 'list_students') {
         await answerCallbackQuery(cq.id);
         const keyboard = await buildStudentsKeyboard();
