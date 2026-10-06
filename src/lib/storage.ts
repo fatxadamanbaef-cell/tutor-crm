@@ -38,7 +38,7 @@ export async function getStudents(): Promise<Student[]> {
     price_per_lesson: Number(s.price_per_lesson) || 150000,
     prepaid_balance: Number(s.package_remaining_lessons) ?? 0,
     package_total_lessons: Number(s.package_total_lessons) || 8,
-    billing_day: s.notes || '10 число',
+    billing_day: s.billing_day || '10 число',
     makeup_debt: makeupsCountMap[s.id] || 0,
     phone: s.phone || '',
     telegram: s.telegram || '',
@@ -70,7 +70,8 @@ export async function saveStudent(student: {
     telegram: student.telegram ? (student.telegram.startsWith('@') ? student.telegram : `@${student.telegram}`) : '',
     color: student.color || '#3B82F6',
     payment_type: 'package',
-    notes: student.billing_day || '10 число', // Hack: store billing condition in notes
+    billing_day: student.billing_day || '10',
+    notes: '',
     is_active: true,
   };
 
@@ -91,7 +92,7 @@ export async function saveStudent(student: {
     price_per_lesson: Number(data.price_per_lesson),
     prepaid_balance: Number(data.package_remaining_lessons),
     package_total_lessons: Number(data.package_total_lessons) || 8,
-    billing_day: data.notes || '10 число',
+    billing_day: data.billing_day || '10 число',
     makeup_debt: 0,
     phone: data.phone || '',
     telegram: data.telegram || '',
@@ -257,10 +258,7 @@ export async function saveLesson(lessonData: {
   }
 
   if (lessonData.status === 'completed') {
-    await supabase
-      .from('tutor_students')
-      .update({ package_remaining_lessons: remainingLessons - 1 })
-      .eq('id', lessonData.student_id);
+    await supabase.rpc('update_student_balance', { p_student_id: lessonData.student_id, p_delta: -1 });
   }
 
   return {
@@ -418,20 +416,14 @@ export async function toggleLessonStatus(lessonId: string): Promise<LessonStatus
     nextDbStatus = 'completed';
     nextAppStatus = 'completed';
 
-    await supabase
-      .from('tutor_students')
-      .update({ package_remaining_lessons: currentRemaining - 1 })
-      .eq('id', studentId);
+    await supabase.rpc('update_student_balance', { p_student_id: studentId, p_delta: -1 });
   } else {
     // 2nd Tap: Revert to PLANNED -> restore balance
     nextDbStatus = 'scheduled';
     nextAppStatus = 'planned';
 
     if (currStatus === 'completed') {
-      await supabase
-        .from('tutor_students')
-        .update({ package_remaining_lessons: currentRemaining + 1 })
-        .eq('id', studentId);
+      await supabase.rpc('update_student_balance', { p_student_id: studentId, p_delta: 1 });
     }
   }
 
@@ -454,9 +446,7 @@ export async function completeLesson(lessonId: string): Promise<void> {
     .single();
 
   if (lesson && lesson.status !== 'completed') {
-    const studentRel: any = lesson.tutor_students;
-    const cur = Number(Array.isArray(studentRel) ? studentRel[0]?.package_remaining_lessons : studentRel?.package_remaining_lessons) || 0;
-    await supabase.from('tutor_students').update({ package_remaining_lessons: cur - 1 }).eq('id', lesson.student_id);
+    await supabase.rpc('update_student_balance', { p_student_id: lesson.student_id, p_delta: -1 });
     await supabase.from('tutor_lessons').update({ status: 'completed' }).eq('id', lessonId);
   }
 }
@@ -470,11 +460,8 @@ export async function burnLesson(lessonId: string): Promise<void> {
     .single();
 
   if (lesson) {
-    const studentRel: any = lesson.tutor_students;
-    const cur = Number(Array.isArray(studentRel) ? studentRel[0]?.package_remaining_lessons : studentRel?.package_remaining_lessons) || 0;
-
     if (lesson.status === 'missed_makeup' || lesson.status === 'missed_excused' || lesson.status === 'scheduled') {
-      await supabase.from('tutor_students').update({ package_remaining_lessons: cur - 1 }).eq('id', lesson.student_id);
+      await supabase.rpc('update_student_balance', { p_student_id: lesson.student_id, p_delta: -1 });
     }
 
     await supabase.from('tutor_lessons').update({ status: 'missed_penalty' }).eq('id', lessonId);
@@ -511,10 +498,7 @@ export async function setLessonStatusDirect(
   }
 
   if (delta !== 0) {
-    await supabase
-      .from('tutor_students')
-      .update({ package_remaining_lessons: currentRemaining + delta })
-      .eq('id', studentId);
+    await supabase.rpc('update_student_balance', { p_student_id: studentId, p_delta: delta });
   }
 
   let dbStatus = 'scheduled';
@@ -587,7 +571,7 @@ export async function toggleStudentCalendarDate(
     };
 
     await supabase.from('tutor_lessons').insert([newLessonObj]);
-    await supabase.from('tutor_students').update({ package_remaining_lessons: currentRemaining - 1 }).eq('id', studentId);
+    await supabase.rpc('update_student_balance', { p_student_id: studentId, p_delta: -1 });
 
     const saved: Lesson = {
       id: newId,
@@ -604,7 +588,7 @@ export async function toggleStudentCalendarDate(
   } else if (existing.status === 'planned' || existing.status === 'scheduled') {
     // Planned -> COMPLETED (🟢)
     await supabase.from('tutor_lessons').update({ status: 'completed', notes: 'Проведенный урок' }).eq('id', existing.id);
-    await supabase.from('tutor_students').update({ package_remaining_lessons: currentRemaining - 1 }).eq('id', studentId);
+    await supabase.rpc('update_student_balance', { p_student_id: studentId, p_delta: -1 });
 
     const updated: Lesson = {
       id: existing.id,
@@ -635,7 +619,7 @@ export async function toggleStudentCalendarDate(
   } else {
     // MISSED_PENALTY (🔴) -> REMOVED (⚪)
     await supabase.from('tutor_lessons').delete().eq('id', existing.id);
-    await supabase.from('tutor_students').update({ package_remaining_lessons: currentRemaining + 1 }).eq('id', studentId);
+    await supabase.rpc('update_student_balance', { p_student_id: studentId, p_delta: 1 });
 
     return { status: null };
   }
@@ -673,10 +657,8 @@ export async function revertLesson(lessonId: string): Promise<void> {
     .single();
 
   if (lesson) {
-    const studentRel: any = lesson.tutor_students;
-    const cur = Number(Array.isArray(studentRel) ? studentRel[0]?.package_remaining_lessons : studentRel?.package_remaining_lessons) || 0;
     if (lesson.status === 'completed') {
-      await supabase.from('tutor_students').update({ package_remaining_lessons: cur + 1 }).eq('id', lesson.student_id);
+      await supabase.rpc('update_student_balance', { p_student_id: lesson.student_id, p_delta: 1 });
     } else if (lesson.status === 'missed_makeup') {
       await supabase.from('tutor_makeups').delete().eq('missed_lesson_id', lessonId);
     }
@@ -701,17 +683,8 @@ export async function addPayment(
     .eq('id', studentId)
     .single();
 
-  const currentRem = Number(student?.package_remaining_lessons) || 0;
-  const currentTot = Number(student?.package_total_lessons) || 0;
-
-  // Update student prepaid balance
-  await supabase
-    .from('tutor_students')
-    .update({
-      package_remaining_lessons: currentRem + Number(lessonsAdded),
-      package_total_lessons: currentTot + Number(lessonsAdded),
-    })
-    .eq('id', studentId);
+  // Update student prepaid balance and total
+  await supabase.rpc('add_payment_to_student', { p_student_id: studentId, p_lessons_added: Number(lessonsAdded) });
 
   const effectiveDate = paymentDate ? paymentDate.substring(0, 10) : getTashkentTodayStr();
 
@@ -869,7 +842,7 @@ export async function updateStudentBillingDay(studentId: string, billingDay: str
   if (!supabase) throw new Error('Supabase is not initialized');
   const { error } = await supabase
     .from('tutor_students')
-    .update({ notes: billingDay })
+    .update({ billing_day: billingDay })
     .eq('id', studentId);
   if (error) throw error;
 }

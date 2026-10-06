@@ -6,54 +6,87 @@
 -- Enable UUID extension
 create extension if not exists "uuid-ossp";
 
--- 1. STUDENTS TABLE
-create table if not exists public.students (
-    id uuid primary key default uuid_generate_v4(),
+-- 1. Создаем правильные таблицы, если их вдруг нет
+create table if not exists public.tutor_students (
+    id uuid primary key default gen_random_uuid(),
     name text not null,
     price_per_lesson numeric not null default 150000,
-    prepaid_balance integer not null default 0,
-    makeup_debt integer not null default 0,
+    package_remaining_lessons integer not null default 0,
+    package_total_lessons integer not null default 8,
     phone text,
-    created_at timestamptz not null default timezone('Asia/Tashkent', now())
+    telegram text,
+    color text default '#3B82F6',
+    payment_type text default 'package',
+    notes text,
+    billing_day text, -- НОВАЯ КОЛОНКА
+    is_active boolean default true,
+    created_at timestamptz not null default now()
 );
 
--- 2. LESSONS TABLE
-create table if not exists public.lessons (
-    id uuid primary key default uuid_generate_v4(),
-    student_id uuid not null references public.students(id) on delete cascade,
-    date timestamptz not null,
-    status text not null default 'planned' check (status in ('planned', 'completed', 'missed_excused', 'missed_penalty')),
-    created_at timestamptz not null default timezone('Asia/Tashkent', now())
+-- ДОБАВЛЯЕМ КОЛОНКУ, ЕСЛИ ТАБЛИЦА УЖЕ БЫЛА СОЗДАНА РАНЕЕ
+alter table public.tutor_students add column if not exists billing_day text;
+
+create table if not exists public.tutor_lessons (
+    id uuid primary key default gen_random_uuid(),
+    student_id uuid not null references public.tutor_students(id) on delete cascade,
+    lesson_date date not null,
+    start_time time not null,
+    end_time time not null,
+    status text not null,
+    price numeric,
+    notes text,
+    created_at timestamptz not null default now()
 );
 
--- 3. PAYMENTS TABLE (Ledger)
-create table if not exists public.payments (
-    id uuid primary key default uuid_generate_v4(),
-    student_id uuid not null references public.students(id) on delete cascade,
-    amount_uzs numeric not null default 0,
-    lessons_added integer not null default 0,
-    created_at timestamptz not null default timezone('Asia/Tashkent', now())
+create table if not exists public.tutor_payments (
+    id uuid primary key default gen_random_uuid(),
+    student_id uuid not null references public.tutor_students(id) on delete cascade,
+    amount numeric not null default 0,
+    lessons_count integer not null default 0,
+    payment_date date,
+    payment_method text,
+    created_at timestamptz not null default now()
 );
 
--- Indexes for lightning fast queries
-create index if not exists idx_lessons_student_id on public.lessons(student_id);
-create index if not exists idx_lessons_date on public.lessons(date);
-create index if not exists idx_payments_student_id on public.payments(student_id);
+create table if not exists public.tutor_makeups (
+    id uuid primary key default gen_random_uuid(),
+    student_id uuid not null references public.tutor_students(id) on delete cascade,
+    student_name text,
+    missed_lesson_id uuid not null,
+    reason text,
+    status text default 'pending',
+    missed_date date,
+    created_at timestamptz not null default now()
+);
 
--- Enable RLS
-alter table public.students enable row level security;
-alter table public.lessons enable row level security;
-alter table public.payments enable row level security;
+-- ==========================================
+-- 2. БЕЗОПАСНЫЕ ПРОЦЕДУРЫ (RPC) ДЛЯ БАЛАНСА
+-- ==========================================
 
--- Public access policies for Telegram Mini App
-create policy "Allow all operations for students" on public.students for all using (true) with check (true);
-create policy "Allow all operations for lessons" on public.lessons for all using (true) with check (true);
-create policy "Allow all operations for payments" on public.payments for all using (true) with check (true);
+-- Функция для безопасного изменения баланса (декремент/инкремент)
+create or replace function update_student_balance(p_student_id uuid, p_delta integer)
+returns void
+language plpgsql
+security definer
+as $$
+begin
+  update public.tutor_students
+  set package_remaining_lessons = package_remaining_lessons + p_delta
+  where id = p_student_id;
+end;
+$$;
 
--- Insert Seed Data (Mock)
-insert into public.students (id, name, price_per_lesson, prepaid_balance, makeup_debt, phone)
-values
-  ('11111111-1111-4111-8111-111111111111', 'Сахиб Рахимов', 150000, 6, 0, '+998901234567'),
-  ('22222222-2222-4222-8222-222222222222', 'Малика Каримова', 180000, 0, 1, '+998977654321'),
-  ('33333333-3333-4333-8333-333333333333', 'Алишер Усманов', 120000, 2, 2, '+998935551122')
-on conflict (id) do nothing;
+-- Функция для пополнения при оплате (меняет и оставшиеся и всего)
+create or replace function add_payment_to_student(p_student_id uuid, p_lessons_added integer)
+returns void
+language plpgsql
+security definer
+as $$
+begin
+  update public.tutor_students
+  set 
+    package_remaining_lessons = package_remaining_lessons + p_lessons_added,
+    package_total_lessons = package_total_lessons + p_lessons_added
+  where id = p_student_id;
+end;
+$$;
