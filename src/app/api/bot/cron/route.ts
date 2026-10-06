@@ -118,18 +118,14 @@ export async function GET(req: NextRequest) {
           const alertMarkup = {
             inline_keyboard: [
               [
-                { text: 'Был ✅', callback_data: `status:${lesson.id}:completed` },
-                { text: 'Перенос ⚠️', callback_data: `status:${lesson.id}:missed_excused` }
+                { text: '✅ Был', callback_data: `status:${lesson.id}:completed` },
+                { text: '❌ Не был (списать)', callback_data: `status:${lesson.id}:missed_penalty` }
               ],
               [
-                {
-                  text: 'Открыть CRM',
-                  web_app: { url: APP_URL },
-                },
-                {
-                  text: 'Профиль ученика',
-                  callback_data: `report:${lesson.student_id}`,
-                },
+                { text: '🗓 Перенести дату/время', web_app: { url: `${APP_URL}?editLesson=${lesson.id}` } }
+              ],
+              [
+                { text: '👤 Профиль ученика', callback_data: `report:${lesson.student_id}` },
               ],
             ],
           };

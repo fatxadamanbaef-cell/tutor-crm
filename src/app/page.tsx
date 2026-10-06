@@ -45,6 +45,20 @@ export default function Dashboard() {
       setLessons(lData);
       setFinanceSummary(fData);
       setLoading(false);
+
+      // Check for deep link to edit lesson
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const editLessonId = params.get('editLesson');
+        if (editLessonId) {
+          const lessonToEdit = lData.find(l => l.id === editLessonId);
+          if (lessonToEdit) {
+            setSelectedLesson(lessonToEdit);
+            // Optional: clean up the URL without reloading
+            window.history.replaceState({}, '', window.location.pathname);
+          }
+        }
+      }
     } catch (e) {
       console.error('Data load error:', e);
       setLoading(false);
