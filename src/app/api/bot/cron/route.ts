@@ -118,15 +118,17 @@ export async function GET(req: NextRequest) {
           const alertMarkup = {
             inline_keyboard: [
               [
-                { text: '✅ Был', callback_data: `status:${lesson.id}:completed` },
-                { text: '❌ Не был (списать)', callback_data: `status:${lesson.id}:missed_penalty` }
+                { text: '✅ Урок проведен', callback_data: `status:${lesson.id}:completed` }
               ],
               [
-                { text: '🗓 Перенести дату/время', web_app: { url: `${APP_URL}?editLesson=${lesson.id}` } }
+                { text: '⚠️ Отменен (уваж. причина / Долг)', callback_data: `status:${lesson.id}:missed_excused` }
               ],
               [
-                { text: '👤 Профиль ученика', callback_data: `report:${lesson.student_id}` },
+                { text: '❌ Не пришел без предупреждения (Списать)', callback_data: `status:${lesson.id}:missed_penalty` }
               ],
+              [
+                { text: '🗓 Открыть и изменить время ⚡️', web_app: { url: `${APP_URL}?editLesson=${lesson.id}` } }
+              ]
             ],
           };
 
