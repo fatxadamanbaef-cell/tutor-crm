@@ -104,15 +104,15 @@ ${lessonsContext || 'Нет запланированных уроков'}
     // Если ИИ решил вызвать функцию (Tool Call)
     if (message.tool_calls && message.tool_calls.length > 0) {
       const toolCall = message.tool_calls[0];
-      const args = JSON.parse(toolCall.function.arguments);
+      const args = JSON.parse((toolCall as any).function.arguments);
 
-      if (toolCall.function.name === 'addPayment') {
+      if ((toolCall as any).function.name === 'addPayment') {
         const student = students.find(s => s.id === args.studentId);
         const amount = args.amountUzs || (student ? student.price_per_lesson * args.lessonsCount : 0);
         await addPayment(args.studentId, amount, args.lessonsCount);
-      } else if (toolCall.function.name === 'updateLessonStatus') {
+      } else if ((toolCall as any).function.name === 'updateLessonStatus') {
         await setLessonStatusDirect(args.lessonId, args.status);
-      } else if (toolCall.function.name === 'rescheduleLesson') {
+      } else if ((toolCall as any).function.name === 'rescheduleLesson') {
         await updateLessonTime(args.lessonId, args.newTimeStr);
       }
 
