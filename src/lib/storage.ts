@@ -42,6 +42,7 @@ export async function getStudents(): Promise<Student[]> {
     makeup_debt: makeupsCountMap[s.id] || 0,
     phone: s.phone || '',
     telegram: s.telegram || '',
+    schedule_notes: s.notes || '',
     color: s.color || '#3B82F6',
     created_at: s.created_at,
   }));
@@ -54,6 +55,7 @@ export async function saveStudent(student: {
   prepaid_balance: number;
   phone?: string;
   telegram?: string;
+  schedule_notes?: string;
   billing_day?: string;
   color?: string;
 }): Promise<Student> {
@@ -71,7 +73,7 @@ export async function saveStudent(student: {
     color: student.color || '#3B82F6',
     payment_type: 'package',
     billing_day: student.billing_day || '10',
-    notes: '',
+    notes: student.schedule_notes || '',
     is_active: true,
   };
 
@@ -96,6 +98,7 @@ export async function saveStudent(student: {
     makeup_debt: 0,
     phone: data.phone || '',
     telegram: data.telegram || '',
+    schedule_notes: data.notes || '',
     color: data.color || '#3B82F6',
     created_at: data.created_at,
   };
@@ -467,6 +470,44 @@ export async function burnLesson(lessonId: string): Promise<void> {
     await supabase.from('tutor_lessons').update({ status: 'missed_penalty' }).eq('id', lessonId);
     await supabase.from('tutor_makeups').delete().eq('missed_lesson_id', lessonId).eq('status', 'pending');
   }
+}
+
+export async function logPastCompletedLesson(studentId: string, dateStr: string): Promise<void> {
+  if (!supabase) throw new Error('Supabase is not initialized');
+
+  const lessonDate = dateStr.substring(0, 10);
+  const newId = generateUUID();
+
+  // Получаем цену ученика
+  const { data: stData } = await supabase
+    .from('tutor_students')
+    .select('price_per_lesson')
+    .eq('id', studentId)
+    .single();
+
+  const price = Number(stData?.price_per_lesson) || 150000;
+
+  // Создаем завершенный урок в прошлом
+  const { error } = await supabase.from('tutor_lessons').insert([
+    {
+      id: newId,
+      student_id: studentId,
+      lesson_date: lessonDate,
+      start_time: '18:00',
+      end_time: '19:30',
+      status: 'completed',
+      price: price,
+      notes: 'Ретроспективное списание',
+    },
+  ]);
+
+  if (error) {
+    console.error('Error logging past lesson:', error);
+    throw error;
+  }
+
+  // Списываем баланс
+  await supabase.rpc('update_student_balance', { p_student_id: studentId, p_delta: -1 });
 }
 
 export async function setLessonStatusDirect(

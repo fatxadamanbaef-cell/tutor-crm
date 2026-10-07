@@ -10,6 +10,7 @@ export interface Student {
   makeup_debt: number;     // долг по отработкам (пропущено по уваж. причине)
   phone?: string;
   telegram?: string;
+  schedule_notes?: string;
   created_at: string;
   color?: string;
 }
