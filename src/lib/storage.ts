@@ -476,6 +476,33 @@ export async function logPastCompletedLesson(studentId: string, dateStr: string)
   if (!supabase) throw new Error('Supabase is not initialized');
 
   const lessonDate = dateStr.substring(0, 10);
+  const today = getTashkentTodayStr();
+
+  // 1. Prevent logging future lessons retroactively
+  if (lessonDate > today) {
+    console.warn(`Skipping future date ${lessonDate} for retroactive logging`);
+    return;
+  }
+
+  // 2. Prevent duplicates: check if lesson already exists on this date
+  const { data: existingLessons } = await supabase
+    .from('tutor_lessons')
+    .select('id, status')
+    .eq('student_id', studentId)
+    .eq('lesson_date', lessonDate);
+
+  if (existingLessons && existingLessons.length > 0) {
+    const existing = existingLessons[0];
+    if (existing.status === 'completed') {
+      return; // Already completed, skip
+    } else {
+      // Update existing to completed and deduct balance
+      await supabase.from('tutor_lessons').update({ status: 'completed', notes: 'Ретроспективное списание' }).eq('id', existing.id);
+      await supabase.rpc('update_student_balance', { p_student_id: studentId, p_delta: -1 });
+      return;
+    }
+  }
+
   const newId = generateUUID();
 
   // Получаем цену ученика
