@@ -1,5 +1,5 @@
 import OpenAI, { toFile } from 'openai';
-import { getStudents, getLessons, addPayment, setLessonStatusDirect, updateLessonTime, logPastCompletedLesson } from './storage';
+import { getStudents, getLessons, addPayment, setLessonStatusDirect, updateLessonTime, logPastCompletedLesson, planFutureLessons } from './storage';
 import { getTashkentTodayStr, getTashkentNow } from './formatters';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -39,12 +39,14 @@ ${lessonsContext || 'Нет запланированных уроков'}
 Твои обязанности и логика:
 - Отметка проведенных уроков: Если преподаватель говорит, что урок прошел, вызови updateLessonStatus со статусом completed.
 - Перенос уроков: Если просят перенести урок, вычисли точную дату и вызови rescheduleLesson.
+- Автоматическое планирование (НОВАЯ ФУНКЦИЯ): Если преподаватель говорит "запланируй эти 12 уроков", вызови функцию planFutureLessons. Тебе нужно будет проанализировать 'Шаблон расписания' ученика и передать в функцию массив дней недели (где 0=Вс, 1=Пн, ..., 6=Сб) и время.
 - Оплаты и ретроспективное списание: Если ученик оплатил с опозданием (например, "заплатила за 12 уроков. Должна была 5 сентября, но заплатила 10-го"), ты обязан:
   1) Вызвать addPayment на указанное кол-во уроков.
   2) Вычислить даты занятий, прошедшие с момента возникновения долга до оплаты (опираясь на шаблон расписания ученика).
   3) Вызвать logPastCompletedLesson для каждой из этих прошедших дат, чтобы баланс актуализировался.
 
 Правила общения и логики:
+- ВАЖНО: Если после всех твоих действий баланс ученика становится меньше или равен 0, ОБЯЗАТЕЛЬНО напиши в конце ответа жирным шрифтом: "⚠️ Внимание! Ученик ушел в минус. Вы работаете в долг!".
 - ВАЖНО: При ответе на вопросы о расписании конкретного ученика, называй ТОЛЬКО те уроки из списка, где ИМЯ ученика совпадает. НИКОГДА не придумывай уроки и не приписывай чужие уроки (например, Фазилат или Самиры) другому ученику! Если у ученика нет уроков, честно скажи "У [имя] больше нет запланированных уроков".
 - ВАЖНО: При ретроспективном списании никогда не указывай даты из будущего. Списывать можно только прошедшие уроки, дата которых меньше или равна сегодняшней (${today}).
 - Никогда не отказывайся выполнять команду, если у тебя есть нужная функция.
@@ -118,6 +120,33 @@ ${lessonsContext || 'Нет запланированных уроков'}
           required: ["studentId", "dateStr"]
         }
       }
+    },
+    {
+      type: "function",
+      function: {
+        name: "planFutureLessons",
+        description: "Автоматически планирует будущие уроки в календаре на основе расписания ученика (начиная с сегодняшнего дня, либо с даты последнего запланированного урока).",
+        parameters: {
+          type: "object",
+          properties: {
+            studentId: { type: "string", description: "ID ученика" },
+            count: { type: "number", description: "Количество уроков для планирования (например, 8 или 12)" },
+            schedule: {
+              type: "array",
+              description: "Массив дней недели и времени",
+              items: {
+                type: "object",
+                properties: {
+                  dayOfWeek: { type: "number", description: "День недели от 0 до 6 (0=Воскресенье, 1=Понедельник, 2=Вторник, 3=Среда, 4=Четверг, 5=Пятница, 6=Суббота)" },
+                  timeStr: { type: "string", description: "Время урока, например '19:00 - 20:30' или просто '19:00'" }
+                },
+                required: ["dayOfWeek", "timeStr"]
+              }
+            }
+          },
+          required: ["studentId", "count", "schedule"]
+        }
+      }
     }
   ];
 
@@ -153,6 +182,8 @@ ${lessonsContext || 'Нет запланированных уроков'}
             await updateLessonTime(args.lessonId, args.newTimeStr, args.newDateStr);
           } else if (functionName === 'logPastCompletedLesson') {
             await logPastCompletedLesson(args.studentId, args.dateStr);
+          } else if (functionName === 'planFutureLessons') {
+            await planFutureLessons(args.studentId, args.count, args.schedule);
           }
 
           toolResponses.push({

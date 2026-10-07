@@ -472,6 +472,87 @@ export async function burnLesson(lessonId: string): Promise<void> {
   }
 }
 
+export async function planFutureLessons(
+  studentId: string,
+  count: number,
+  schedule: { dayOfWeek: number; timeStr: string }[] // 0=Sun, 1=Mon, ..., 6=Sat
+): Promise<void> {
+  if (!supabase) throw new Error('Supabase is not initialized');
+  if (count <= 0 || schedule.length === 0) return;
+
+  const { data: stData } = await supabase
+    .from('tutor_students')
+    .select('price_per_lesson')
+    .eq('id', studentId)
+    .single();
+  const price = Number(stData?.price_per_lesson) || 150000;
+
+  // Find the highest existing planned date for this student
+  const { data: existingLessons } = await supabase
+    .from('tutor_lessons')
+    .select('lesson_date')
+    .eq('student_id', studentId)
+    .eq('status', 'scheduled')
+    .order('lesson_date', { ascending: false })
+    .limit(1);
+
+  let startDate = new Date(); // Start from today
+  if (existingLessons && existingLessons.length > 0) {
+    const lastDate = new Date(existingLessons[0].lesson_date);
+    if (lastDate > startDate) {
+      startDate = new Date(lastDate);
+      startDate.setDate(startDate.getDate() + 1); // Start from the day after the last planned lesson
+    }
+  }
+
+  const newLessons = [];
+  let currentDate = new Date(startDate);
+  
+  // Sort schedule by dayOfWeek to easily find the next day
+  const scheduleDays = schedule.map(s => s.dayOfWeek);
+
+  let lessonsCreated = 0;
+  let safetyCounter = 0; // Prevent infinite loops
+
+  while (lessonsCreated < count && safetyCounter < 365) {
+    safetyCounter++;
+    const currentDayOfWeek = currentDate.getDay(); // 0-6
+    
+    const scheduleMatch = schedule.find(s => s.dayOfWeek === currentDayOfWeek);
+    
+    if (scheduleMatch) {
+      const lessonDateStr = format(currentDate, 'yyyy-MM-dd');
+      
+      const parts = scheduleMatch.timeStr.split('-').map(s => s.trim());
+      const startTime = parts[0] || '18:00';
+      const endTime = parts[1] || '19:30';
+
+      newLessons.push({
+        id: generateUUID(),
+        student_id: studentId,
+        lesson_date: lessonDateStr,
+        start_time: startTime,
+        end_time: endTime,
+        status: 'scheduled',
+        price: price,
+        notes: 'Сгенерировано автоматически'
+      });
+      lessonsCreated++;
+    }
+    
+    // Move to next day
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+
+  if (newLessons.length > 0) {
+    const { error } = await supabase.from('tutor_lessons').insert(newLessons);
+    if (error) {
+      console.error('Error planning future lessons:', error);
+      throw error;
+    }
+  }
+}
+
 export async function logPastCompletedLesson(studentId: string, dateStr: string): Promise<void> {
   if (!supabase) throw new Error('Supabase is not initialized');
 
