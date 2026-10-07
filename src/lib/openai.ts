@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import OpenAI, { toFile } from 'openai';
 import { getStudents, getLessons, addPayment, setLessonStatusDirect, updateLessonTime, logPastCompletedLesson } from './storage';
 import { getTashkentTodayStr, getTashkentNow } from './formatters';
 
@@ -187,5 +187,34 @@ ${lessonsContext || 'Нет запланированных уроков'}
   } catch (e: any) {
     console.error("OpenAI AI Error:", e);
     return "❌ Произошла ошибка при обращении к ИИ: " + e.message;
+  }
+}
+
+export async function transcribeVoice(fileId: string): Promise<string> {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!botToken || !process.env.OPENAI_API_KEY) return '';
+
+  try {
+    const fileRes = await fetch(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
+    const fileData = await fileRes.json();
+    if (!fileData.ok) throw new Error('Telegram getFile failed');
+
+    const audioUrl = `https://api.telegram.org/file/bot${botToken}/${fileData.result.file_path}`;
+    const audioRes = await fetch(audioUrl);
+    
+    const arrayBuffer = await audioRes.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+    
+    const file = await toFile(buffer, 'voice.oga', { type: 'audio/ogg' });
+
+    const transcription = await openai.audio.transcriptions.create({
+      file: file,
+      model: 'whisper-1',
+    });
+
+    return transcription.text;
+  } catch (e) {
+    console.error('Whisper transcription error:', e);
+    return '';
   }
 }

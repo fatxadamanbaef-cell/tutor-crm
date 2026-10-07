@@ -256,11 +256,25 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Handle Text Messages and Commands
-    if (update.message && update.message.text) {
+    // 2. Handle Text Messages, Commands and Voice
+    if (update.message && (update.message.text || update.message.voice)) {
       const chatId = update.message.chat.id;
       if (chatId) registerChatId(chatId, update.message.from?.username);
-      const rawText = update.message.text.trim();
+      
+      let rawText = '';
+      if (update.message.text) {
+        rawText = update.message.text.trim();
+      } else if (update.message.voice) {
+        const { transcribeVoice } = await import('@/lib/openai');
+        await sendTelegramMessage(chatId, '🎤 <i>Слушаю...</i>');
+        rawText = await transcribeVoice(update.message.voice.file_id);
+        if (!rawText) {
+          await sendTelegramMessage(chatId, '❌ Не удалось распознать голосовое сообщение.');
+          return NextResponse.json({ ok: true });
+        }
+        await sendTelegramMessage(chatId, `💬 <i>"${rawText}"</i>`);
+      }
+
       const text = rawText.toLowerCase();
       const firstName = update.message.from?.first_name || 'Фархад';
 
