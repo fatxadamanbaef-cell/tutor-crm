@@ -1,5 +1,5 @@
 import OpenAI, { toFile } from 'openai';
-import { getStudents, getLessons, addPayment, setLessonStatusDirect, updateLessonTime, logPastCompletedLesson, planFutureLessons } from './storage';
+import { getStudents, getLessons, addPayment, setLessonStatusDirect, updateLessonTime, logPastCompletedLesson, planFutureLessons, setupNewStudent } from './storage';
 import { getTashkentTodayStr, getTashkentNow } from './formatters';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -40,6 +40,7 @@ ${lessonsContext || 'Нет запланированных уроков'}
 - Отметка проведенных уроков: Если преподаватель говорит, что урок прошел, вызови updateLessonStatus со статусом completed.
 - Перенос уроков: Если просят перенести урок, вычисли точную дату и вызови rescheduleLesson.
 - Автоматическое планирование (НОВАЯ ФУНКЦИЯ): Если преподаватель говорит "запланируй эти 12 уроков", вызови функцию planFutureLessons. Тебе нужно будет проанализировать 'Шаблон расписания' ученика и передать в функцию массив дней недели (где 0=Вс, 1=Пн, ..., 6=Сб) и время.
+- Добавление нового ученика (МЕГА-ФУНКЦИЯ): Если преподаватель диктует все данные нового ученика (имя, расписание, количество оплаченных уроков, дни оплаты, даты УЖЕ проведенных уроков), используй функцию setupNewStudent, чтобы за один вызов создать ученика, внести оплату, списать прошедшие уроки и запланировать будущие!
 - Оплаты и ретроспективное списание: Если ученик оплатил с опозданием (например, "заплатила за 12 уроков. Должна была 5 сентября, но заплатила 10-го"), ты обязан:
   1) Вызвать addPayment на указанное кол-во уроков.
   2) Вычислить даты занятий, прошедшие с момента возникновения долга до оплаты (опираясь на шаблон расписания ученика).
@@ -147,6 +148,40 @@ ${lessonsContext || 'Нет запланированных уроков'}
           required: ["studentId", "count", "schedule"]
         }
       }
+    },
+    {
+      type: "function",
+      function: {
+        name: "setupNewStudent",
+        description: "Комплексно добавляет нового ученика в систему: создает профиль, вносит оплату, списывает прошедшие уроки и планирует будущие уроки по расписанию.",
+        parameters: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Имя ученика" },
+            scheduleNotes: { type: "string", description: "Текстовое описание расписания, например 'ПН, СР, ПТ в 19:00'" },
+            billingDay: { type: "string", description: "День оплаты, например '1-е число' или '10-е число'" },
+            lessonsPaid: { type: "number", description: "Количество оплаченных уроков (например 12)" },
+            pastCompletedDates: {
+              type: "array",
+              description: "Список дат УЖЕ проведенных уроков в формате 'YYYY-MM-DD'",
+              items: { type: "string" }
+            },
+            scheduleDays: {
+              type: "array",
+              description: "Массив дней недели и времени для планирования БУДУЩИХ уроков",
+              items: {
+                type: "object",
+                properties: {
+                  dayOfWeek: { type: "number", description: "День недели от 0 до 6 (0=Воскресенье, 1=Понедельник, 2=Вторник, 3=Среда, 4=Четверг, 5=Пятница, 6=Суббота)" },
+                  timeStr: { type: "string", description: "Время урока, например '19:00 - 20:30' или просто '19:00'" }
+                },
+                required: ["dayOfWeek", "timeStr"]
+              }
+            }
+          },
+          required: ["name", "scheduleNotes", "billingDay", "lessonsPaid", "pastCompletedDates", "scheduleDays"]
+        }
+      }
     }
   ];
 
@@ -184,6 +219,8 @@ ${lessonsContext || 'Нет запланированных уроков'}
             await logPastCompletedLesson(args.studentId, args.dateStr);
           } else if (functionName === 'planFutureLessons') {
             await planFutureLessons(args.studentId, args.count, args.schedule);
+          } else if (functionName === 'setupNewStudent') {
+            await setupNewStudent(args.name, args.scheduleNotes, args.billingDay, args.lessonsPaid, args.pastCompletedDates, args.scheduleDays);
           }
 
           toolResponses.push({

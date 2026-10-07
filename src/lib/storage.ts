@@ -472,6 +472,43 @@ export async function burnLesson(lessonId: string): Promise<void> {
   }
 }
 
+export async function setupNewStudent(
+  name: string,
+  scheduleNotes: string,
+  billingDay: string,
+  lessonsPaid: number,
+  pastCompletedDates: string[],
+  scheduleDays: { dayOfWeek: number; timeStr: string }[]
+): Promise<void> {
+  if (!supabase) throw new Error('Supabase is not initialized');
+
+  // 1. Create the student with initial prepaid balance
+  const student = await saveStudent({
+    name,
+    price_per_lesson: 150000, // Default or parsed
+    prepaid_balance: lessonsPaid,
+    schedule_notes: scheduleNotes,
+    billing_day: billingDay
+  });
+
+  // 2. Log payment in history (since saveStudent just sets the balance but doesn't create a payment record)
+  await supabase.from('tutor_students').update({ package_remaining_lessons: 0 }).eq('id', student.id);
+  await addPayment(student.id, 150000 * lessonsPaid, lessonsPaid);
+
+  // 3. Log past completed lessons (this will deduct from the balance)
+  for (const dateStr of pastCompletedDates) {
+    await logPastCompletedLesson(student.id, dateStr);
+  }
+
+  // 4. Plan future lessons based on remaining balance
+  const { data: stData } = await supabase.from('tutor_students').select('package_remaining_lessons').eq('id', student.id).single();
+  const currentBalance = Number(stData?.package_remaining_lessons) || 0;
+
+  if (currentBalance > 0 && scheduleDays.length > 0) {
+    await planFutureLessons(student.id, currentBalance, scheduleDays);
+  }
+}
+
 export async function planFutureLessons(
   studentId: string,
   count: number,
