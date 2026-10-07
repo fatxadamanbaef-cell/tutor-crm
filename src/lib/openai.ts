@@ -191,7 +191,7 @@ ${lessonsContext || 'Нет запланированных уроков'}
 }
 
 export async function transcribeVoice(fileId: string): Promise<string> {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  const botToken = process.env.TELEGRAM_BOT_TOKEN || '8520814142:AAF1jZQZ9WQX6Hv4QRGOizoEwv2GRChtiPw';
   if (!botToken || !process.env.OPENAI_API_KEY) return '';
 
   try {
