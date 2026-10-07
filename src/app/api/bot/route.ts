@@ -332,8 +332,10 @@ export async function POST(req: NextRequest) {
           const buttons = matchedStudents.map((s) => [{ text: `👤 ${s.name} (${s.prepaid_balance} ур.)`, callback_data: `report:${s.id}` }]);
           await sendTelegramMessage(chatId, `Найдено несколько учеников по запросу "${rawText}":`, { inline_keyboard: buttons });
         } else {
-          const { text: msgText, markup } = await buildMorningDigest(firstName);
-          await sendTelegramMessage(chatId, `Я не понял команду 😔\n\nВот ваше расписание:\n\n` + msgText, markup);
+          // Если это не точная команда и не точное имя ученика - отдаем текст на обработку ИИ
+          const { processWithAI } = await import('@/lib/openai');
+          const aiReply = await processWithAI(rawText);
+          await sendTelegramMessage(chatId, aiReply, defaultMarkup);
         }
       }
     }
