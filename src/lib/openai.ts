@@ -14,8 +14,9 @@ export async function processWithAI(text: string): Promise<string> {
   const lessons = await getLessons();
   const today = getTashkentTodayStr();
   
-  // Берем сегодняшние уроки + все будущие запланированные, чтобы ИИ мог двигать и завтрашние
-  const upcomingLessons = lessons.filter(l => l.date >= today || l.status === 'planned');
+  // Берем все запланированные уроки, а также ВСЕ уроки за текущий месяц (чтобы ИИ видел статистику)
+  const currentMonthPrefix = today.substring(0, 7); // например "2026-10"
+  const upcomingLessons = lessons.filter(l => l.status === 'planned' || l.date.startsWith(currentMonthPrefix) || l.date >= today);
 
   const studentsContext = students.map(s => {
     const notesStr = s.schedule_notes ? ` Шаблон расписания: ${s.schedule_notes}.` : '';
