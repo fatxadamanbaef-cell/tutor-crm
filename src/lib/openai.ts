@@ -14,10 +14,11 @@ export async function processWithAI(text: string): Promise<string> {
   const lessons = await getLessons();
   const today = getTashkentTodayStr();
   
-  const todayLessons = lessons.filter(l => l.date.startsWith(today));
+  // Берем сегодняшние уроки + все будущие запланированные, чтобы ИИ мог двигать и завтрашние
+  const upcomingLessons = lessons.filter(l => l.date >= today || l.status === 'planned');
 
   const studentsContext = students.map(s => `${s.name} (ID: ${s.id}, Баланс: ${s.prepaid_balance} уроков)`).join('\n');
-  const lessonsContext = todayLessons.map(l => `Урок с ${l.student_name} в ${l.time_str} (ID урока: ${l.id}, Статус: ${l.status})`).join('\n');
+  const lessonsContext = upcomingLessons.map(l => `Урок с ${l.student_name} дата ${l.date.substring(0, 10)} в ${l.time_str} (ID урока: ${l.id}, Статус: ${l.status})`).join('\n');
 
   const systemPrompt = `
 Ты - умный ассистент репетитора (Tutor Tracker). Твоя задача помогать управлять CRM системой.
@@ -26,7 +27,7 @@ export async function processWithAI(text: string): Promise<string> {
 Список учеников (ID и балансы):
 ${studentsContext || 'Нет учеников'}
 
-Уроки на сегодня:
+Предстоящие уроки:
 ${lessonsContext || 'Нет запланированных уроков'}
 
 Инструкции:
@@ -75,12 +76,13 @@ ${lessonsContext || 'Нет запланированных уроков'}
       type: "function",
       function: {
         name: "rescheduleLesson",
-        description: "Изменяет время сегодняшнего урока.",
+        description: "Изменяет время (и при необходимости дату) запланированного урока.",
         parameters: {
           type: "object",
           properties: {
             lessonId: { type: "string", description: "ID урока" },
-            newTimeStr: { type: "string", description: "Новое время в формате 'HH:MM - HH:MM', например '15:00 - 16:30'" }
+            newTimeStr: { type: "string", description: "Новое время в формате 'HH:MM - HH:MM', например '15:00 - 16:30'" },
+            newDateStr: { type: "string", description: "Новая дата в формате 'YYYY-MM-DD', если требуется перенос на другой день. Оставь пустым, если меняется только время." }
           },
           required: ["lessonId", "newTimeStr"]
         }
@@ -113,7 +115,7 @@ ${lessonsContext || 'Нет запланированных уроков'}
       } else if ((toolCall as any).function.name === 'updateLessonStatus') {
         await setLessonStatusDirect(args.lessonId, args.status);
       } else if ((toolCall as any).function.name === 'rescheduleLesson') {
-        await updateLessonTime(args.lessonId, args.newTimeStr);
+        await updateLessonTime(args.lessonId, args.newTimeStr, args.newDateStr);
       }
 
       // Отправляем результат выполнения обратно в ИИ, чтобы он сформировал человечный ответ
