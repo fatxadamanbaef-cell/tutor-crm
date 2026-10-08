@@ -32,7 +32,7 @@ export async function getStudents(): Promise<Student[]> {
     makeupsCountMap[m.student_id] = (makeupsCountMap[m.student_id] || 0) + 1;
   });
 
-  return (studentsData || []).filter((s) => s.name !== '_BOT_CONFIG').map((s) => ({
+  return (studentsData || []).filter((s) => !String(s.name).startsWith('_BOT_')).map((s) => ({
     id: s.id,
     name: s.name,
     price_per_lesson: Number(s.price_per_lesson) || 150000,
@@ -135,7 +135,7 @@ export async function getLessons(): Promise<Lesson[]> {
     const status: LessonStatus =
       l.status === 'completed'
         ? 'completed'
-        : l.status === 'missed_penalty'
+        : l.status === 'missed_penalty' || l.status === 'missed_burned' || l.status === 'burned'
         ? 'missed_penalty'
         : l.status === 'missed_makeup' || l.status === 'missed_excused'
         ? 'missed_excused'
@@ -472,50 +472,140 @@ export async function burnLesson(lessonId: string): Promise<void> {
   }
 }
 
-export async function setupNewStudent(
-  name: string,
-  scheduleNotes: string,
-  billingDay: string,
-  lessonsPaid: number,
-  pastCompletedDates: string[],
-  scheduleDays: { dayOfWeek: number; timeStr: string }[]
-): Promise<void> {
-  if (!supabase) throw new Error('Supabase is not initialized');
-
-  // 1. Create the student with initial prepaid balance
-  const student = await saveStudent({
-    name,
-    price_per_lesson: 150000, // Default or parsed
-    prepaid_balance: lessonsPaid,
-    schedule_notes: scheduleNotes,
-    billing_day: billingDay
-  });
-
-  // 2. Log payment in history (since saveStudent just sets the balance but doesn't create a payment record)
-  await supabase.from('tutor_students').update({ package_remaining_lessons: 0 }).eq('id', student.id);
-  await addPayment(student.id, 150000 * lessonsPaid, lessonsPaid);
-
-  // 3. Log past completed lessons (this will deduct from the balance)
-  for (const dateStr of pastCompletedDates) {
-    await logPastCompletedLesson(student.id, dateStr);
-  }
-
-  // 4. Plan future lessons based on remaining balance
-  const { data: stData } = await supabase.from('tutor_students').select('package_remaining_lessons').eq('id', student.id).single();
-  const currentBalance = Number(stData?.package_remaining_lessons) || 0;
-
-  if (currentBalance > 0 && scheduleDays.length > 0) {
-    await planFutureLessons(student.id, currentBalance, scheduleDays);
-  }
+// ---------------------------------------------------------------------------
+// Date helpers (строковая арифметика — не зависит от часового пояса сервера)
+// ---------------------------------------------------------------------------
+function addDaysStr(dateStr: string, n: number): string {
+  const d = new Date(`${dateStr}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().substring(0, 10);
 }
 
+function dayOfWeekOf(dateStr: string): number {
+  return new Date(`${dateStr}T00:00:00Z`).getUTCDay(); // 0=Вс … 6=Сб
+}
+
+function toMinutes(t: string): number {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + (m || 0);
+}
+
+function addMinutesToTime(t: string, minutes: number): string {
+  const total = (toMinutes(t) + minutes) % (24 * 60);
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Приводит '19', '19.00', '19:00', '19:00-20:30' к виду { start: '19:00', end: '20:30' }.
+ * Если конец не указан — длительность 90 минут.
+ */
+export function parseTimeRange(input: string, defaultMinutes = 90): { start: string; end: string } {
+  const matches = [...String(input || '').matchAll(/(\d{1,2})(?:[:.](\d{2}))?/g)];
+  if (matches.length === 0) throw new Error(`Не удалось распознать время "${input}"`);
+  const fmt = (m: RegExpMatchArray) => {
+    const h = Number(m[1]);
+    const min = Number(m[2] || 0);
+    if (h > 23 || min > 59) throw new Error(`Некорректное время "${input}"`);
+    return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+  };
+  const start = fmt(matches[0]);
+  const end = matches.length > 1 ? fmt(matches[1]) : addMinutesToTime(start, defaultMinutes);
+  return { start, end };
+}
+
+// ---------------------------------------------------------------------------
+// Новый ученик "одним махом"
+// ---------------------------------------------------------------------------
+export interface SetupNewStudentParams {
+  name: string;
+  scheduleNotes: string;
+  billingDay: string;
+  lessonsPaid: number;
+  pricePerLesson?: number;
+  amountPaidUzs?: number;
+  paymentDate?: string;
+  pastCompletedDates: string[];
+  scheduleDays: { dayOfWeek: number; timeStr: string }[];
+}
+
+export interface SetupNewStudentResult {
+  studentId: string;
+  pricePerLesson: number;
+  balance: number;
+  pastLogged: number;
+  plannedDates: string[];
+}
+
+export async function setupNewStudent(p: SetupNewStudentParams): Promise<SetupNewStudentResult> {
+  if (!supabase) throw new Error('Supabase is not initialized');
+
+  const lessonsPaid = Math.max(0, Math.floor(Number(p.lessonsPaid) || 0));
+  const amount = Number(p.amountPaidUzs) || 0;
+  const price =
+    Number(p.pricePerLesson) > 0
+      ? Number(p.pricePerLesson)
+      : amount > 0 && lessonsPaid > 0
+      ? Math.round(amount / lessonsPaid)
+      : 150000;
+
+  // 1. Создаём ученика с нулевым балансом (баланс пополнит оплата — так в истории будет запись)
+  const student = await saveStudent({
+    name: p.name,
+    price_per_lesson: price,
+    prepaid_balance: 0,
+    schedule_notes: p.scheduleNotes,
+    billing_day: p.billingDay,
+  });
+
+  // 2. Оплата (пополняет баланс и пишет историю платежей)
+  if (lessonsPaid > 0) {
+    await addPayment(student.id, amount > 0 ? amount : price * lessonsPaid, lessonsPaid, p.paymentDate);
+    await supabase.from('tutor_students').update({ package_total_lessons: lessonsPaid }).eq('id', student.id);
+  }
+
+  // 3. Уже проведённые уроки (списывают баланс)
+  const pastDates = [...new Set((p.pastCompletedDates || []).map((d) => d.substring(0, 10)))].sort();
+  let pastLogged = 0;
+  for (const dateStr of pastDates) {
+    const r = await logPastCompletedLesson(student.id, dateStr);
+    if (r === 'created' || r === 'completed_existing') pastLogged++;
+  }
+
+  // 4. Будущие уроки по остатку баланса
+  const { data: stData } = await supabase
+    .from('tutor_students')
+    .select('package_remaining_lessons')
+    .eq('id', student.id)
+    .single();
+  const balance = Number(stData?.package_remaining_lessons) || 0;
+
+  let plannedDates: string[] = [];
+  if (balance > 0 && (p.scheduleDays || []).length > 0) {
+    plannedDates = (await planFutureLessons(student.id, balance, p.scheduleDays)).created;
+  }
+
+  return { studentId: student.id, pricePerLesson: price, balance, pastLogged, plannedDates };
+}
+
+// ---------------------------------------------------------------------------
+// Автопланирование уроков по шаблону недели
+// ---------------------------------------------------------------------------
 export async function planFutureLessons(
   studentId: string,
   count: number,
-  schedule: { dayOfWeek: number; timeStr: string }[] // 0=Sun, 1=Mon, ..., 6=Sat
-): Promise<void> {
+  schedule: { dayOfWeek: number; timeStr: string }[], // 0=Sun, 1=Mon, ..., 6=Sat
+  startDateStr?: string
+): Promise<{ created: string[]; skipped: string[] }> {
   if (!supabase) throw new Error('Supabase is not initialized');
-  if (count <= 0 || schedule.length === 0) return;
+  const result = { created: [] as string[], skipped: [] as string[] };
+  if (count <= 0 || schedule.length === 0) return result;
+
+  // Нормализуем шаблон: день недели + время
+  const slots = schedule.map((s) => {
+    const dow = Number(s.dayOfWeek);
+    if (!Number.isInteger(dow) || dow < 0 || dow > 6) throw new Error(`Некорректный день недели: ${s.dayOfWeek}`);
+    return { dow, ...parseTimeRange(s.timeStr) };
+  });
 
   const { data: stData } = await supabase
     .from('tutor_students')
@@ -524,61 +614,60 @@ export async function planFutureLessons(
     .single();
   const price = Number(stData?.price_per_lesson) || 150000;
 
-  // Find the highest existing planned date for this student
-  const { data: existingLessons } = await supabase
+  const today = getTashkentTodayStr();
+  const nowMinutes = (() => {
+    const n = getTashkentNow();
+    return n.getHours() * 60 + n.getMinutes();
+  })();
+
+  // Все уроки ученика с сегодняшнего дня — чтобы не создавать дубликаты и продолжить после последнего
+  const { data: existing } = await supabase
     .from('tutor_lessons')
-    .select('lesson_date')
+    .select('lesson_date, start_time, status')
     .eq('student_id', studentId)
-    .eq('status', 'scheduled')
-    .order('lesson_date', { ascending: false })
-    .limit(1);
+    .gte('lesson_date', today);
 
-  let startDate = new Date(); // Start from today
-  if (existingLessons && existingLessons.length > 0) {
-    const lastDate = new Date(existingLessons[0].lesson_date);
-    if (lastDate > startDate) {
-      startDate = new Date(lastDate);
-      startDate.setDate(startDate.getDate() + 1); // Start from the day after the last planned lesson
-    }
+  const occupiedDates = new Set<string>((existing || []).map((l) => String(l.lesson_date).substring(0, 10)));
+
+  let startDate = startDateStr ? startDateStr.substring(0, 10) : today;
+  if (!startDateStr) {
+    const lastPlanned = (existing || [])
+      .filter((l) => l.status === 'scheduled')
+      .map((l) => String(l.lesson_date).substring(0, 10))
+      .sort()
+      .pop();
+    if (lastPlanned && lastPlanned >= startDate) startDate = addDaysStr(lastPlanned, 1);
   }
+  if (startDate < today) startDate = today;
 
-  const newLessons = [];
-  let currentDate = new Date(startDate);
-  
-  // Sort schedule by dayOfWeek to easily find the next day
-  const scheduleDays = schedule.map(s => s.dayOfWeek);
+  const newLessons: any[] = [];
+  let cursor = startDate;
 
-  let lessonsCreated = 0;
-  let safetyCounter = 0; // Prevent infinite loops
+  for (let i = 0; i < 400 && newLessons.length < count; i++, cursor = addDaysStr(cursor, 1)) {
+    const slot = slots.find((s) => s.dow === dayOfWeekOf(cursor));
+    if (!slot) continue;
 
-  while (lessonsCreated < count && safetyCounter < 365) {
-    safetyCounter++;
-    const currentDayOfWeek = currentDate.getDay(); // 0-6
-    
-    const scheduleMatch = schedule.find(s => s.dayOfWeek === currentDayOfWeek);
-    
-    if (scheduleMatch) {
-      const lessonDateStr = format(currentDate, 'yyyy-MM-dd');
-      
-      const parts = scheduleMatch.timeStr.split('-').map(s => s.trim());
-      const startTime = parts[0] || '18:00';
-      const endTime = parts[1] || '19:30';
-
-      newLessons.push({
-        id: generateUUID(),
-        student_id: studentId,
-        lesson_date: lessonDateStr,
-        start_time: startTime,
-        end_time: endTime,
-        status: 'scheduled',
-        price: price,
-        notes: 'Сгенерировано автоматически'
-      });
-      lessonsCreated++;
+    if (occupiedDates.has(cursor)) {
+      result.skipped.push(`${cursor} (уже есть урок)`);
+      continue;
     }
-    
-    // Move to next day
-    currentDate.setDate(currentDate.getDate() + 1);
+    // Сегодняшний урок, время которого уже прошло, не планируем (это "уже проведённый")
+    if (cursor === today && toMinutes(slot.start) <= nowMinutes) {
+      result.skipped.push(`${cursor} ${slot.start} (время уже прошло)`);
+      continue;
+    }
+
+    newLessons.push({
+      id: generateUUID(),
+      student_id: studentId,
+      lesson_date: cursor,
+      start_time: slot.start,
+      end_time: slot.end,
+      status: 'scheduled',
+      price,
+      notes: 'Сгенерировано автоматически',
+    });
+    result.created.push(`${cursor} ${slot.start}`);
   }
 
   if (newLessons.length > 0) {
@@ -588,60 +677,71 @@ export async function planFutureLessons(
       throw error;
     }
   }
+  return result;
 }
 
-export async function logPastCompletedLesson(studentId: string, dateStr: string): Promise<void> {
+// ---------------------------------------------------------------------------
+// Ретроспективное списание
+// ---------------------------------------------------------------------------
+export type PastLessonResult = 'created' | 'completed_existing' | 'already_done' | 'skipped_future';
+
+export async function logPastCompletedLesson(
+  studentId: string,
+  dateStr: string,
+  timeStr?: string
+): Promise<PastLessonResult> {
   if (!supabase) throw new Error('Supabase is not initialized');
 
   const lessonDate = dateStr.substring(0, 10);
   const today = getTashkentTodayStr();
 
-  // 1. Prevent logging future lessons retroactively
+  // 1. Никогда не списываем будущие даты
   if (lessonDate > today) {
     console.warn(`Skipping future date ${lessonDate} for retroactive logging`);
-    return;
+    return 'skipped_future';
   }
 
-  // 2. Prevent duplicates: check if lesson already exists on this date
+  // 2. Если в этот день уже есть урок — работаем с ним, а не создаём дубль
   const { data: existingLessons } = await supabase
     .from('tutor_lessons')
-    .select('id, status')
+    .select('id, status, start_time')
     .eq('student_id', studentId)
     .eq('lesson_date', lessonDate);
 
   if (existingLessons && existingLessons.length > 0) {
-    const existing = existingLessons[0];
-    if (existing.status === 'completed') {
-      return; // Already completed, skip
-    } else {
-      // Update existing to completed and deduct balance
-      await supabase.from('tutor_lessons').update({ status: 'completed', notes: 'Ретроспективное списание' }).eq('id', existing.id);
-      await supabase.rpc('update_student_balance', { p_student_id: studentId, p_delta: -1 });
-      return;
-    }
+    const wanted = timeStr ? parseTimeRange(timeStr).start : null;
+    const byTime = wanted
+      ? existingLessons.filter((l) => String(l.start_time).substring(0, 5) === wanted)
+      : existingLessons;
+    const pool = byTime.length > 0 ? byTime : existingLessons;
+
+    const open = pool.find((l) => l.status === 'scheduled') || pool.find((l) => l.status === 'missed_makeup' || l.status === 'missed_excused');
+    if (!open) return 'already_done'; // completed / penalty — баланс уже учтён
+
+    await supabase.from('tutor_lessons').update({ status: 'completed', notes: 'Ретроспективное списание' }).eq('id', open.id);
+    await supabase.rpc('update_student_balance', { p_student_id: studentId, p_delta: -1 });
+    await supabase.from('tutor_makeups').delete().eq('missed_lesson_id', open.id).eq('status', 'pending');
+    return 'completed_existing';
   }
 
-  const newId = generateUUID();
-
-  // Получаем цену ученика
+  // 3. Урока нет — создаём проведённый
   const { data: stData } = await supabase
     .from('tutor_students')
     .select('price_per_lesson')
     .eq('id', studentId)
     .single();
-
   const price = Number(stData?.price_per_lesson) || 150000;
+  const range = timeStr ? parseTimeRange(timeStr) : { start: '18:00', end: '19:30' };
 
-  // Создаем завершенный урок в прошлом
   const { error } = await supabase.from('tutor_lessons').insert([
     {
-      id: newId,
+      id: generateUUID(),
       student_id: studentId,
       lesson_date: lessonDate,
-      start_time: '18:00',
-      end_time: '19:30',
+      start_time: range.start,
+      end_time: range.end,
       status: 'completed',
-      price: price,
+      price,
       notes: 'Ретроспективное списание',
     },
   ]);
@@ -651,8 +751,8 @@ export async function logPastCompletedLesson(studentId: string, dateStr: string)
     throw error;
   }
 
-  // Списываем баланс
   await supabase.rpc('update_student_balance', { p_student_id: studentId, p_delta: -1 });
+  return 'created';
 }
 
 export async function setLessonStatusDirect(
@@ -941,7 +1041,8 @@ export async function getFinanceSummary(): Promise<FinanceSummary> {
     .lte('lesson_date', endStr);
 
   if (error || !lessons) {
-    return { earnedThisMonthUzs: 2400000, completedLessonsCount: 14 };
+    console.error('getFinanceSummary error:', error);
+    return { earnedThisMonthUzs: 0, completedLessonsCount: 0 };
   }
 
   let earned = 0;
@@ -1053,3 +1154,23 @@ export async function updateStudentInfo(studentId: string, updates: { name?: str
     .eq('id', studentId);
   if (error) throw error;
 }
+
+export async function updateStudentSettings(
+  studentId: string,
+  updates: { price_per_lesson?: number; schedule_notes?: string; billing_day?: string; prepaid_balance?: number }
+): Promise<void> {
+  if (!supabase) throw new Error('Supabase is not initialized');
+  const payload: Record<string, string | number> = {};
+  if (updates.price_per_lesson !== undefined) {
+    const price = Number(updates.price_per_lesson);
+    if (!(price > 0)) throw new Error('Цена за урок должна быть больше нуля');
+    payload.price_per_lesson = price;
+  }
+  if (updates.schedule_notes !== undefined) payload.notes = updates.schedule_notes.trim();
+  if (updates.billing_day !== undefined) payload.billing_day = updates.billing_day.trim();
+  if (updates.prepaid_balance !== undefined) payload.package_remaining_lessons = Number(updates.prepaid_balance);
+  if (Object.keys(payload).length === 0) return;
+  const { error } = await supabase.from('tutor_students').update(payload).eq('id', studentId);
+  if (error) throw error;
+}
+
