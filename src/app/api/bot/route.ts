@@ -1,10 +1,15 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { getLessons, getStudents, setLessonStatusDirect, saveStudent, addPayment } from '@/lib/storage';
 import { formatTashkentHeaderDate, isTashkentToday } from '@/lib/formatters';
 import { generateStudentReport, findStudentsByName } from '@/lib/reports';
 import { supabase } from '@/lib/supabase';
+import { claimUpdate, clearHistory } from '@/lib/botState';
+import { normName } from '@/lib/nameMatch';
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8520814142:AAF1jZQZ9WQX6Hv4QRGOizoEwv2GRChtiPw';
+// Whisper + ИИ могут работать десятки секунд — даём функции запас по времени
+export const maxDuration = 60;
+
+const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://tutor-crm-kappa.vercel.app';
 
 // Helper to safely send telegram message
@@ -88,6 +93,41 @@ export async function buildMorningDigest(firstName: string = 'Фархад') {
     message += `\n`;
   }
 
+  // Find unmarked past lessons
+  const now = new Date();
+  // using all lessons to find unmarked
+  const { data: allUnmarked } = await supabase.from('lessons')
+    .select('student_id')
+    .eq('status', 'scheduled')
+    .lte('date', now.toISOString().split('T')[0]);
+  
+  if (allUnmarked && allUnmarked.length > 0) {
+    const unmarkedCounts: Record<string, number> = {};
+    allUnmarked.forEach(l => {
+      const s = students.find(st => st.id === l.student_id);
+      if (s) {
+        unmarkedCounts[s.name] = (unmarkedCounts[s.name] || 0) + 1;
+      }
+    });
+    if (Object.keys(unmarkedCounts).length > 0) {
+      message += `⚠️ <b>Неотмеченные прошедшие уроки:</b>\n`;
+      Object.entries(unmarkedCounts).forEach(([name, count]) => {
+        message += `• <b>${name}</b>: ${count} ур.\n`;
+      });
+      message += `\n`;
+    }
+  }
+
+  // Debt warnings (prepaid_balance < 0)
+  const debtStudents = students.filter(s => s.prepaid_balance < 0);
+  if (debtStudents.length > 0) {
+    message += `💰 <b>Ученики с долгами (Внимание!):</b>\n`;
+    debtStudents.forEach(s => {
+      message += `• <b>${s.name}</b>: долг ${Math.abs(s.prepaid_balance)} ур.!\n`;
+    });
+    message += `\n`;
+  }
+
   keyboard.push([
     { text: '🚀 Открыть CRM', web_app: { url: APP_URL } },
     { text: '📋 Отчеты', callback_data: 'list_students' }
@@ -121,9 +161,155 @@ async function registerChatId(chatId: number | string, username?: string) {
   } catch(e) { console.error('Register chat id failed', e) }
 }
 
+async function sendChatAction(chatId: number | string, action: string = 'typing') {
+  if (!BOT_TOKEN) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendChatAction`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, action }),
+    });
+  } catch (e) {}
+}
+
+const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// Telegram ограничивает сообщение 4096 символами — режем по строкам, кнопки — на последнем куске
+async function sendLongMessage(chatId: number | string, text: string, replyMarkup?: any) {
+  const LIMIT = 3800;
+  if (text.length <= LIMIT) return sendTelegramMessage(chatId, text, replyMarkup);
+  const chunks: string[] = [];
+  let current = '';
+  for (const line of text.split('\n')) {
+    if ((current + '\n' + line).length > LIMIT && current) {
+      chunks.push(current);
+      current = line;
+    } else {
+      current = current ? current + '\n' + line : line;
+    }
+  }
+  if (current) chunks.push(current);
+  for (let i = 0; i < chunks.length; i++) {
+    await sendTelegramMessage(chatId, chunks[i], i === chunks.length - 1 ? replyMarkup : undefined);
+  }
+}
+
+async function handleMessage(message: any) {
+  const chatId = message.chat.id;
+  if (chatId) await registerChatId(chatId, message.from?.username);
+
+  let rawText = '';
+  if (message.text) {
+    rawText = message.text.trim();
+  } else if (message.voice) {
+    const { transcribeVoice } = await import('@/lib/openai');
+    await sendTelegramMessage(chatId, '🎤 <i>Слушаю...</i>');
+    rawText = await transcribeVoice(message.voice.file_id);
+    if (!rawText) {
+      await sendTelegramMessage(chatId, '❌ Не удалось распознать голосовое сообщение.');
+      return;
+    }
+    await sendTelegramMessage(chatId, `💬 <i>"${escapeHtml(rawText)}"</i>`);
+  }
+
+  const text = rawText.toLowerCase();
+  const firstName = message.from?.first_name || 'Фархад';
+
+  const defaultMarkup = {
+    inline_keyboard: [
+      [{ text: '🚀 Открыть CRM', web_app: { url: APP_URL } }, { text: '📅 Расписание', callback_data: 'daily_schedule' }],
+      [{ text: '📋 Ученики', callback_data: 'list_students' }]
+    ],
+  };
+
+  if (text.startsWith('/start') || text.startsWith('/help')) {
+    const welcomeText = `🚀 <b>Tutor Tracker Bot</b>\n\n<b>Команды бота:</b>\n/today - Расписание на сегодня (с кнопками)\n/students - Список учеников\n/add ИМЯ 150000 - Быстро добавить ученика\n/pay ИМЯ 8 - Внести оплату (на 8 уроков)\n/reset - Забыть контекст разговора с ИИ\n\nИли просто напишите / надиктуйте голосом, что нужно сделать: «Мадина оплатила 8 уроков», «Фазилат сегодня была», «Перенеси Давида на четверг в 18:00», «Покажи расписание Самиры».`;
+    await sendTelegramMessage(chatId, welcomeText, defaultMarkup);
+  } else if (text.startsWith('/reset') || text.startsWith('/new')) {
+    await clearHistory();
+    await sendTelegramMessage(chatId, '🧹 Контекст разговора очищен.');
+  } else if (text.startsWith('/add ')) {
+    const parts = rawText.split(' ');
+    if (parts.length >= 3) {
+      const price = parseInt(parts.pop() || '150000');
+      const name = parts.slice(1).join(' ');
+      try {
+        await saveStudent({ name, price_per_lesson: price, prepaid_balance: 8, billing_day: '10' });
+        await sendTelegramMessage(chatId, `✅ Ученик <b>${escapeHtml(name)}</b> (${price} UZS) успешно добавлен!\nЗайдите в CRM чтобы настроить ему расписание.`, defaultMarkup);
+      } catch (e) {
+        await sendTelegramMessage(chatId, '❌ Ошибка при добавлении ученика.');
+      }
+    } else {
+      await sendTelegramMessage(chatId, '❌ Формат команды: /add Имя Цена\nПример: <code>/add Алина 150000</code>');
+    }
+  } else if (text.startsWith('/pay ')) {
+    const parts = rawText.split(' ');
+    if (parts.length >= 3) {
+      const lessonsCount = parseInt(parts.pop() || '8');
+      const name = parts.slice(1).join(' ');
+      const matched = await findStudentsByName(name);
+      if (matched.length === 1) {
+        try {
+          const student = matched[0];
+          const amount = (student.price_per_lesson || 150000) * lessonsCount;
+          await addPayment(student.id, amount, lessonsCount);
+          await sendTelegramMessage(chatId, `💰 Оплата успешно добавлена!\n👤 <b>${escapeHtml(student.name)}</b>\nКол-во уроков: +${lessonsCount}\nСумма: ${amount} UZS`);
+        } catch (e) {
+          await sendTelegramMessage(chatId, '❌ Ошибка при добавлении оплаты.');
+        }
+      } else {
+        await sendTelegramMessage(chatId, `❌ Ученик с именем "${escapeHtml(name)}" не найден или найдено несколько.`);
+      }
+    } else {
+      await sendTelegramMessage(chatId, '❌ Формат команды: /pay Имя Кол-во_уроков\nПример: <code>/pay Алина 8</code>');
+    }
+  } else if (text.startsWith('/today') || text.startsWith('/digest')) {
+    const { text: msgText, markup } = await buildMorningDigest(firstName);
+    await sendTelegramMessage(chatId, msgText, markup);
+  } else if (text.startsWith('/students')) {
+    const keyboard = await buildStudentsKeyboard();
+    await sendTelegramMessage(chatId, '📋 <b>Список учеников:</b>', keyboard);
+  } else {
+    // Быстрый путь: сообщение — это просто имя ученика (точное совпадение или начало имени).
+    // Короткие реплики вроде «да» / «ок» НЕ должны превращаться в отчёт по случайному ученику —
+    // они уходят ИИ как продолжение диалога.
+    const q = normName(rawText);
+    const found = q.length >= 2 ? await findStudentsByName(rawText) : [];
+    const exact = found.filter((s) => normName(s.name) === q);
+    const candidates = exact.length > 0 ? exact : q.length >= 4 ? found.filter((s) => normName(s.name).startsWith(q)) : [];
+
+    if (candidates.length === 1) {
+      const report = await generateStudentReport(candidates[0].id);
+      if (report) {
+        const reportMarkup = {
+          inline_keyboard: [
+            [{ text: '💰 Внести оплату', callback_data: `pay_prompt:${candidates[0].id}` }],
+            [{ text: '📋 Все ученики', callback_data: 'list_students' }, { text: '🚀 Открыть CRM', web_app: { url: APP_URL } }],
+          ],
+        };
+        await sendLongMessage(chatId, report.telegramHtml, reportMarkup);
+      }
+    } else if (candidates.length > 1) {
+      const buttons = candidates.map((s) => [{ text: `👤 ${s.name} (${s.prepaid_balance} ур.)`, callback_data: `report:${s.id}` }]);
+      await sendTelegramMessage(chatId, `Найдено несколько учеников по запросу "${escapeHtml(rawText)}":`, { inline_keyboard: buttons });
+    } else {
+      await sendChatAction(chatId, 'typing');
+      const { processWithAI } = await import('@/lib/openai');
+      const aiReply = await processWithAI(rawText);
+      await sendLongMessage(chatId, aiReply, defaultMarkup);
+    }
+  }
+}
+
+
 export async function POST(req: NextRequest) {
   try {
     const update = await req.json();
+
+    // Защита от повторной доставки вебхука (Telegram ретраит при таймауте) — иначе действия выполнятся дважды
+    if (typeof update.update_id === 'number' && !(await claimUpdate(update.update_id))) {
+      return NextResponse.json({ ok: true, duplicate: true });
+    }
 
     if (update.callback_query) {
       const cq = update.callback_query;
@@ -256,108 +442,25 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 2. Handle Text Messages, Commands and Voice
+    // 2. Text / voice: отвечаем Telegram мгновенно (200), а тяжёлую работу (Whisper + ИИ) делаем в after().
+    // Так Telegram не считает вебхук упавшим и не присылает его повторно, а пользователь не шлёт команду по 5 раз.
     if (update.message && (update.message.text || update.message.voice)) {
-      const chatId = update.message.chat.id;
-      if (chatId) registerChatId(chatId, update.message.from?.username);
-      
-      let rawText = '';
-      if (update.message.text) {
-        rawText = update.message.text.trim();
-      } else if (update.message.voice) {
-        const { transcribeVoice } = await import('@/lib/openai');
-        await sendTelegramMessage(chatId, '🎤 <i>Слушаю...</i>');
-        rawText = await transcribeVoice(update.message.voice.file_id);
-        if (!rawText) {
-          await sendTelegramMessage(chatId, '❌ Не удалось распознать голосовое сообщение.');
-          return NextResponse.json({ ok: true });
+      const message = update.message;
+      after(async () => {
+        try {
+          await handleMessage(message);
+        } catch (e) {
+          console.error('handleMessage failed', e);
+          await sendTelegramMessage(message.chat.id, '❌ Что-то пошло не так при обработке сообщения. Проверьте CRM перед повтором команды.');
         }
-        await sendTelegramMessage(chatId, `💬 <i>"${rawText}"</i>`);
-      }
-
-      const text = rawText.toLowerCase();
-      const firstName = update.message.from?.first_name || 'Фархад';
-
-      const defaultMarkup = {
-        inline_keyboard: [
-          [{ text: '🚀 Открыть CRM', web_app: { url: APP_URL } }, { text: '📅 Расписание', callback_data: 'daily_schedule' }],
-          [{ text: '📋 Ученики', callback_data: 'list_students' }]
-        ],
-      };
-
-      if (text.startsWith('/start') || text.startsWith('/help')) {
-        const welcomeText = `🚀 <b>Tutor Tracker Bot</b>\n\n<b>Команды бота:</b>\n/today - Расписание на сегодня (с кнопками)\n/students - Список учеников\n/add ИМЯ 150000 - Быстро добавить ученика\n/pay ИМЯ 8 - Внести оплату (на 8 уроков)\n\nЛибо просто напишите имя ученика, чтобы найти его!`;
-        await sendTelegramMessage(chatId, welcomeText, defaultMarkup);
-      } else if (text.startsWith('/add ')) {
-        const parts = rawText.split(' ');
-        if (parts.length >= 3) {
-            const price = parseInt(parts.pop() || '150000');
-            const name = parts.slice(1).join(' ');
-            try {
-                await saveStudent({ name, price_per_lesson: price, prepaid_balance: 8, billing_day: '10' });
-                await sendTelegramMessage(chatId, `✅ Ученик <b>${name}</b> (${price} UZS) успешно добавлен!\nЗайдите в CRM чтобы настроить ему расписание.`, defaultMarkup);
-            } catch(e) {
-                await sendTelegramMessage(chatId, '❌ Ошибка при добавлении ученика.');
-            }
-        } else {
-            await sendTelegramMessage(chatId, '❌ Формат команды: /add Имя Цена\nПример: <code>/add Алина 150000</code>');
-        }
-      } else if (text.startsWith('/pay ')) {
-        const parts = rawText.split(' ');
-        if (parts.length >= 3) {
-            const lessonsCount = parseInt(parts.pop() || '8');
-            const name = parts.slice(1).join(' ');
-            const matched = await findStudentsByName(name);
-            if (matched.length === 1) {
-                try {
-                    const student = matched[0];
-                    const amount = (student.price_per_lesson || 150000) * lessonsCount;
-                    await addPayment(student.id, amount, lessonsCount);
-                    await sendTelegramMessage(chatId, `💰 Оплата успешно добавлена!\n👤 <b>${student.name}</b>\nКол-во уроков: +${lessonsCount}\nСумма: ${amount} UZS`);
-                } catch(e) {
-                    await sendTelegramMessage(chatId, '❌ Ошибка при добавлении оплаты.');
-                }
-            } else {
-                await sendTelegramMessage(chatId, `❌ Ученик с именем "${name}" не найден или найдено несколько.`);
-            }
-        } else {
-            await sendTelegramMessage(chatId, '❌ Формат команды: /pay Имя Кол-во_уроков\nПример: <code>/pay Алина 8</code>');
-        }
-      } else if (text.startsWith('/today') || text.startsWith('/digest')) {
-        const { text: msgText, markup } = await buildMorningDigest(firstName);
-        await sendTelegramMessage(chatId, msgText, markup);
-      } else if (text.startsWith('/students')) {
-        const keyboard = await buildStudentsKeyboard();
-        await sendTelegramMessage(chatId, '📋 <b>Список учеников:</b>', keyboard);
-      } else {
-        const matchedStudents = await findStudentsByName(rawText);
-        if (matchedStudents.length === 1) {
-          const report = await generateStudentReport(matchedStudents[0].id);
-          if (report) {
-            const reportMarkup = {
-                inline_keyboard: [
-                  [{ text: '💰 Внести оплату', callback_data: `pay_prompt:${matchedStudents[0].id}` }],
-                  [{ text: '📋 Все ученики', callback_data: 'list_students' }, { text: '🚀 Открыть CRM', web_app: { url: APP_URL } }],
-                ],
-              };
-            await sendTelegramMessage(chatId, report.telegramHtml, reportMarkup);
-          }
-        } else if (matchedStudents.length > 1) {
-          const buttons = matchedStudents.map((s) => [{ text: `👤 ${s.name} (${s.prepaid_balance} ур.)`, callback_data: `report:${s.id}` }]);
-          await sendTelegramMessage(chatId, `Найдено несколько учеников по запросу "${rawText}":`, { inline_keyboard: buttons });
-        } else {
-          // Если это не точная команда и не точное имя ученика - отдаем текст на обработку ИИ
-          const { processWithAI } = await import('@/lib/openai');
-          const aiReply = await processWithAI(rawText);
-          await sendTelegramMessage(chatId, aiReply, defaultMarkup);
-        }
-      }
+      });
     }
 
     return NextResponse.json({ ok: true });
   } catch (error) {
     console.error('Webhook error', error);
-    return NextResponse.json({ ok: false, error: 'Internal error' }, { status: 500 });
+    // 200, а не 500: иначе Telegram будет бесконечно ретраить апдейт и дублировать действия
+    return NextResponse.json({ ok: false, error: 'Internal error' });
   }
 }
 
