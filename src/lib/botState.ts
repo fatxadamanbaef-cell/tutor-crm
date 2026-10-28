@@ -2,13 +2,10 @@ import { supabase } from './supabase';
 import { generateUUID } from './uuid';
 
 /**
- * Серверное состояние бота (без миграций БД):
- *  - processed: id уже обработанных Telegram-апдейтов (защита от повторной доставки / дублей),
- *  - history: короткая память диалога с ИИ (чтобы "да", "а по датам?" работали).
- *
- * Хранится в служебной строке `_BOT_STATE` таблицы tutor_students:
- *   notes                     — JSON состояния
- *   package_remaining_lessons — счётчик версии для атомарной записи (compare-and-swap)
+ * Server-side state of the Telegram Bot:
+ *  - processed: processed update IDs (deduplication)
+ *  - history: conversation context
+ *  - pendingReason: waiting for miss reason for a specific lesson
  */
 const STATE_NAME = '_BOT_STATE';
 const MAX_PROCESSED = 60;
@@ -21,9 +18,17 @@ export interface HistoryMessage {
   ts: number;
 }
 
+export interface PendingReasonState {
+  lessonId: string;
+  studentName: string;
+  needsMakeup: boolean;
+  ts: number;
+}
+
 interface BotState {
   processed: number[];
   history: HistoryMessage[];
+  pendingReason?: PendingReasonState | null;
 }
 
 interface StateRow {
@@ -33,7 +38,7 @@ interface StateRow {
 }
 
 function emptyState(): BotState {
-  return { processed: [], history: [] };
+  return { processed: [], history: [], pendingReason: null };
 }
 
 function parseState(raw: unknown): BotState {
@@ -43,6 +48,7 @@ function parseState(raw: unknown): BotState {
     return {
       processed: Array.isArray(parsed.processed) ? parsed.processed : [],
       history: Array.isArray(parsed.history) ? parsed.history : [],
+      pendingReason: parsed.pendingReason || null,
     };
   } catch {
     return emptyState();
@@ -53,7 +59,7 @@ async function loadRow(): Promise<StateRow | null> {
   if (!supabase) return null;
   const { data, error } = await supabase
     .from('tutor_students')
-    .select('id, notes, package_remaining_lessons')
+    .select('id, notes, monthly_target_lessons, package_remaining_lessons')
     .eq('name', STATE_NAME)
     .order('created_at', { ascending: true })
     .limit(1);
@@ -61,9 +67,10 @@ async function loadRow(): Promise<StateRow | null> {
   if (error) throw error;
 
   if (data && data.length > 0) {
+    const version = Number(data[0].monthly_target_lessons || data[0].package_remaining_lessons) || 0;
     return {
       id: data[0].id,
-      version: Number(data[0].package_remaining_lessons) || 0,
+      version,
       state: parseState(data[0].notes),
     };
   }
@@ -74,21 +81,14 @@ async function loadRow(): Promise<StateRow | null> {
       id,
       name: STATE_NAME,
       notes: JSON.stringify(emptyState()),
-      price_per_lesson: 0,
-      package_remaining_lessons: 0,
-      package_total_lessons: 0,
+      monthly_target_lessons: 0,
       is_active: false,
     },
   ]);
   if (insErr) throw insErr;
-  // перечитываем: при гонке могли создаться две строки — берём самую раннюю
   return loadRow();
 }
 
-/**
- * Атомарно меняет состояние. fn возвращает новое состояние или null (ничего не менять).
- * Возвращает true, если запись удалась.
- */
 async function mutateState(fn: (s: BotState) => BotState | null): Promise<boolean> {
   if (!supabase) return false;
   for (let attempt = 0; attempt < 6; attempt++) {
@@ -97,26 +97,24 @@ async function mutateState(fn: (s: BotState) => BotState | null): Promise<boolea
     const next = fn(row.state);
     if (!next) return false;
 
+    const newVersion = row.version + 1;
+    const updatePayload: any = {
+      notes: JSON.stringify(next),
+      monthly_target_lessons: newVersion,
+    };
+
     const { data, error } = await supabase
       .from('tutor_students')
-      .update({ notes: JSON.stringify(next), package_remaining_lessons: row.version + 1 })
+      .update(updatePayload)
       .eq('id', row.id)
-      .eq('package_remaining_lessons', row.version)
       .select('id');
 
-    if (error) throw error;
-    if (data && data.length === 1) return true;
-    // кто-то изменил состояние одновременно — повторяем
+    if (!error && data && data.length === 1) return true;
     await new Promise((r) => setTimeout(r, 40 + Math.random() * 60));
   }
   return false;
 }
 
-/**
- * Захватывает апдейт Telegram. Возвращает false, если он уже обрабатывался/обрабатывается
- * (повторная доставка вебхука) — такой апдейт нужно проигнорировать.
- * При сбое хранилища "fail open": лучше обработать, чем потерять команду.
- */
 export async function claimUpdate(updateId: number): Promise<boolean> {
   try {
     let duplicate = false;
@@ -167,8 +165,40 @@ export async function appendHistory(userText: string, assistantText: string): Pr
 
 export async function clearHistory(): Promise<void> {
   try {
-    await mutateState((s) => ({ ...s, history: [] }));
+    await mutateState((s) => ({ ...s, history: [], pendingReason: null }));
   } catch (e) {
     console.error('clearHistory failed:', e);
+  }
+}
+
+export async function setPendingReason(lessonId: string, studentName: string, needsMakeup: boolean): Promise<void> {
+  try {
+    await mutateState((s) => ({
+      ...s,
+      pendingReason: {
+        lessonId,
+        studentName,
+        needsMakeup,
+        ts: Date.now(),
+      },
+    }));
+  } catch (e) {
+    console.error('setPendingReason failed:', e);
+  }
+}
+
+export async function popPendingReason(): Promise<PendingReasonState | null> {
+  try {
+    let pending: PendingReasonState | null = null;
+    await mutateState((s) => {
+      if (s.pendingReason && Date.now() - s.pendingReason.ts < 15 * 60 * 1000) {
+        pending = s.pendingReason;
+      }
+      return { ...s, pendingReason: null };
+    });
+    return pending;
+  } catch (e) {
+    console.error('popPendingReason failed:', e);
+    return null;
   }
 }

@@ -2,11 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { Student, Lesson, LessonStatus } from '@/types';
-import { X, Check, ChevronRight } from 'lucide-react';
+import { X, Check, Trash2, Calendar, Clock, AlertCircle } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
-import { format, parseISO } from 'date-fns';
-import { ru } from 'date-fns/locale';
-import { formatUZS } from '@/lib/formatters';
 
 interface EditLessonModalProps {
   isOpen: boolean;
@@ -28,161 +25,232 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
   const [lessonDate, setLessonDate] = useState('');
   const [startTime, setStartTime] = useState('');
   const [endTime, setEndTime] = useState('');
-  const [price, setPrice] = useState<number>(150000);
   const [notes, setNotes] = useState('');
   const [currentStatus, setCurrentStatus] = useState<LessonStatus>('planned');
+  const [missReason, setMissReason] = useState('');
+  const [needsMakeup, setNeedsMakeup] = useState(false);
+  const [isMakeup, setIsMakeup] = useState(false);
 
   useEffect(() => {
     if (isOpen && lesson) {
       setLessonDate(lesson.date.substring(0, 10));
-      const parts = (lesson.time_str || '14:00 - 15:30').split(' - ');
-      setStartTime(parts[0]);
-      setEndTime(parts[1]);
-      setPrice(lesson.price_per_lesson || student?.price_per_lesson || 150000);
+      const parts = (lesson.time_str || '16:00 - 17:30').split(' - ');
+      setStartTime(parts[0] || '16:00');
+      setEndTime(parts[1] || '17:30');
       setNotes(lesson.notes || '');
       setCurrentStatus(lesson.status || 'planned');
+      setMissReason(lesson.miss_reason || '');
+      setNeedsMakeup(Boolean(lesson.needs_makeup));
+      setIsMakeup(Boolean(lesson.is_makeup));
     }
-  }, [isOpen, lesson, student]);
+  }, [isOpen, lesson]);
 
   if (!isOpen || !lesson) return null;
 
   const handleSave = async () => {
     hapticImpact('light');
     const timeStr = `${startTime} - ${endTime}`;
-    
+
     await onSave(lesson.id, {
       date: `${lessonDate}T${startTime}:00+05:00`,
       time_str: timeStr,
-      price_per_lesson: price,
       notes,
       status: currentStatus,
+      miss_reason: currentStatus === 'missed' ? missReason.trim() : undefined,
+      needs_makeup: currentStatus === 'missed' ? needsMakeup : false,
+      is_makeup: isMakeup,
     });
     hapticNotification('success');
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-gray-100 flex flex-col animate-in slide-in-from-bottom duration-200">
+    <div className="fixed inset-0 z-50 bg-[#f2f2f7] flex flex-col animate-in slide-in-from-bottom duration-200">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-4 bg-white">
-        <button onClick={() => { hapticImpact('light'); onClose(); }} className="w-8 h-8 flex items-center justify-center rounded-full bg-red-50 text-red-500">
+      <div className="flex items-center justify-between px-4 py-4 bg-white border-b border-gray-200">
+        <button
+          onClick={() => { hapticImpact('light'); onClose(); }}
+          className="w-9 h-9 flex items-center justify-center rounded-full bg-gray-100 text-gray-700 active:scale-90"
+        >
           <X className="w-5 h-5" />
         </button>
-        <h2 className="text-lg font-bold text-black">Редактирование</h2>
-        <button onClick={handleSave} className="w-8 h-8 flex items-center justify-center rounded-full bg-blue-50 text-blue-500">
-          <Check className="w-5 h-5" />
+        <h2 className="text-base font-black text-gray-900">Редактирование урока</h2>
+        <button
+          onClick={handleSave}
+          className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-600 text-white shadow-md shadow-blue-500/20 active:scale-90"
+        >
+          <Check className="w-5 h-5" strokeWidth={3} />
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 pb-20">
         {/* Student Info */}
-        <div className="bg-white rounded-3xl p-4 shadow-sm">
-          <h3 className="text-xl font-bold text-black mb-1">{lesson.student_name}</h3>
-          <div className="flex items-center text-gray-500 text-sm font-medium">
-            Баланс: <span className={`ml-1 font-bold ${(student?.prepaid_balance ?? 0) <= 1 ? 'text-red-500' : 'text-green-600'}`}>{student?.prepaid_balance ?? 0} уроков</span>
+        <div className="bg-white rounded-3xl p-4 shadow-xs border border-gray-200/80">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-black text-gray-900">{lesson.student_name}</h3>
+              <p className="text-xs text-gray-500 font-semibold mt-0.5">
+                Норма: {student?.monthly_target_lessons || 12} ур./мес.
+              </p>
+            </div>
+            {isMakeup && (
+              <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2.5 py-1 rounded-xl">
+                🔄 Отработка
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Form */}
-        <div className="bg-white rounded-3xl p-4 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <span className="text-black font-semibold">Стоимость</span>
-            <div className="bg-gray-100 px-3 py-1.5 rounded-lg font-bold text-black">
-              {formatUZS(price).replace(' UZS', '')}
-            </div>
-          </div>
-
-          <hr className="border-gray-100" />
-
-          <div className="flex items-center justify-between text-black font-semibold">
-            <div className="flex items-center gap-2">
-              <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-              <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)} className="w-16 bg-transparent underline decoration-gray-300 underline-offset-4 focus:outline-none" />
-              <span className="text-gray-400">→</span>
-              <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)} className="w-16 bg-transparent underline decoration-gray-300 underline-offset-4 focus:outline-none" />
-            </div>
-          </div>
-
-          <hr className="border-gray-100" />
-
-          <div className="flex items-center justify-between text-black font-semibold">
-            <div className="flex items-center gap-2">
-              <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-              <input type="date" value={lessonDate} onChange={e => setLessonDate(e.target.value)} className="bg-transparent focus:outline-none underline decoration-gray-300 underline-offset-4 w-40" />
-            </div>
-          </div>
-
-          <hr className="border-gray-100" />
-
+        {/* Date & Time */}
+        <div className="bg-white rounded-3xl p-4 shadow-xs border border-gray-200/80 space-y-3">
           <div>
-            <textarea
-              value={notes}
-              onChange={e => setNotes(e.target.value)}
-              placeholder="Комментарий"
-              className="w-full bg-gray-50 border border-gray-100 rounded-xl p-3 text-sm focus:outline-none focus:border-blue-500 min-h-[80px]"
+            <label className="text-[11px] font-bold text-gray-400 uppercase block mb-1">
+              Дата урока
+            </label>
+            <input
+              type="date"
+              value={lessonDate}
+              onChange={(e) => setLessonDate(e.target.value)}
+              className="w-full text-xs font-bold text-gray-900 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 focus:outline-hidden"
             />
           </div>
-        </div>
 
-        {/* Additional Settings */}
-        <h3 className="text-black font-extrabold text-lg px-1 mt-6 mb-2">Дополнительные настройки</h3>
-        <div className="bg-white rounded-3xl p-4 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <span className="text-black font-semibold">Повтор</span>
-            <div className="flex items-center text-gray-500 text-sm font-medium">
-              никогда <ChevronRight className="w-4 h-4 ml-1" />
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[11px] font-bold text-gray-400 uppercase block mb-1">
+                Время начала
+              </label>
+              <input
+                type="time"
+                value={startTime}
+                onChange={(e) => setStartTime(e.target.value)}
+                className="w-full text-xs font-bold text-gray-900 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 focus:outline-hidden"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-bold text-gray-400 uppercase block mb-1">
+                Время конца
+              </label>
+              <input
+                type="time"
+                value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
+                className="w-full text-xs font-bold text-gray-900 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 focus:outline-hidden"
+              />
             </div>
           </div>
-          <hr className="border-gray-100" />
-          <button onClick={() => alert(`Перейдите в профиль ${lesson.student_name} → Абонемент, чтобы добавить оплату`)} className="flex items-center justify-between w-full text-left">
-            <span className="text-black font-semibold">Добавить оплату</span>
-            <ChevronRight className="w-4 h-4 text-gray-400" />
+        </div>
+
+        {/* Status Selector */}
+        <div className="bg-white rounded-3xl p-4 shadow-xs border border-gray-200/80 space-y-3">
+          <label className="text-[11px] font-bold text-gray-400 uppercase block">
+            Статус урока
+          </label>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { id: 'planned', label: '⏳ Запланирован' },
+              { id: 'completed', label: '✅ Проведен' },
+              { id: 'missed', label: '❌ Пропущен' },
+            ].map((st) => (
+              <button
+                key={st.id}
+                type="button"
+                onClick={() => {
+                  hapticImpact('light');
+                  setCurrentStatus(st.id as LessonStatus);
+                }}
+                className={`py-2 px-1 text-center text-xs font-bold rounded-xl border transition-all ${
+                  currentStatus === st.id
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                    : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                }`}
+              >
+                {st.label}
+              </button>
+            ))}
+          </div>
+
+          {/* If missed, show reason input & needs_makeup toggle */}
+          {currentStatus === 'missed' && (
+            <div className="pt-2 space-y-3 border-t border-gray-100">
+              <div>
+                <label className="text-[11px] font-bold text-red-700 uppercase block mb-1">
+                  Причина пропуска
+                </label>
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {['Болеет', 'Семейные обстоятельства', 'Уехал', 'Школьное мероприятие'].map(
+                    (chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        onClick={() => setMissReason(chip)}
+                        className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-gray-100 hover:bg-gray-200 text-gray-700"
+                      >
+                        {chip}
+                      </button>
+                    )
+                  )}
+                </div>
+                <input
+                  type="text"
+                  value={missReason}
+                  onChange={(e) => setMissReason(e.target.value)}
+                  placeholder="Введите причину пропуска..."
+                  className="w-full text-xs font-semibold text-gray-900 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200"
+                />
+              </div>
+
+              <div className="p-3 bg-amber-50 rounded-2xl flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-amber-900 block">
+                    На отработку в воскресенье
+                  </span>
+                  <span className="text-[10px] text-amber-700">
+                    {needsMakeup ? 'Появится в списке отработок' : 'Только в архив'}
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={needsMakeup}
+                  onChange={(e) => setNeedsMakeup(e.target.checked)}
+                  className="w-5 h-5 text-amber-600 rounded-md"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Notes */}
+        <div className="bg-white rounded-3xl p-4 shadow-xs border border-gray-200/80">
+          <label className="text-[11px] font-bold text-gray-400 uppercase block mb-1.5">
+            Заметка к уроку / ДЗ
+          </label>
+          <textarea
+            rows={2}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Тема урока, домашнее задание..."
+            className="w-full text-xs text-gray-900 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 focus:outline-hidden"
+          />
+        </div>
+
+        {/* Delete */}
+        <div className="pt-2">
+          <button
+            type="button"
+            onClick={async () => {
+              if (confirm('Удалить этот урок?')) {
+                hapticNotification('warning');
+                await onDelete(lesson.id);
+                onClose();
+              }
+            }}
+            className="w-full py-3 rounded-2xl bg-red-50 text-red-600 text-xs font-bold border border-red-200 flex items-center justify-center gap-1.5 active:scale-98"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>Удалить урок</span>
           </button>
-          <hr className="border-gray-100" />
-          <div className="pt-2">
-            <span className="text-black font-semibold mb-3 block">Статус занятия</span>
-            <div className="grid grid-cols-2 gap-2">
-              <button 
-                onClick={() => { hapticImpact('light'); setCurrentStatus('planned'); }}
-                className={`py-2 px-2 text-xs font-bold rounded-xl border transition-all ${currentStatus === 'planned' ? 'bg-blue-500 text-white border-blue-500 shadow-md shadow-blue-500/20' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
-              >
-                Запланирован
-              </button>
-              <button 
-                onClick={() => { hapticImpact('light'); setCurrentStatus('completed'); }}
-                className={`py-2 px-2 text-xs font-bold rounded-xl border transition-all ${currentStatus === 'completed' ? 'bg-green-500 text-white border-green-500 shadow-md shadow-green-500/20' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
-              >
-                Проведен
-              </button>
-              <button 
-                onClick={() => { hapticImpact('light'); setCurrentStatus('missed_excused'); }}
-                className={`py-2 px-2 text-xs font-bold rounded-xl border transition-all ${currentStatus === 'missed_excused' ? 'bg-orange-500 text-white border-orange-500 shadow-md shadow-orange-500/20' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
-              >
-                Пропуск (долг)
-              </button>
-              <button 
-                onClick={() => { hapticImpact('light'); setCurrentStatus('missed_penalty'); }}
-                className={`py-2 px-2 text-xs font-bold rounded-xl border transition-all ${currentStatus === 'missed_penalty' ? 'bg-red-500 text-white border-red-500 shadow-md shadow-red-500/20' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
-              >
-                Отмена (списание)
-              </button>
-            </div>
-          </div>
         </div>
-
-        <button
-          onClick={async () => {
-            if (confirm('Точно удалить занятие?')) {
-              hapticImpact('heavy');
-              await onDelete(lesson.id);
-              onClose();
-            }
-          }}
-          className="w-full bg-[#FF3B30] text-white font-bold py-4 rounded-2xl flex items-center justify-between px-6 shadow-sm shadow-red-500/20 active:scale-95 transition-transform"
-        >
-          <span>Удалить</span>
-          <ChevronRight className="w-5 h-5 text-white/50" />
-        </button>
       </div>
     </div>
   );

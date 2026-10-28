@@ -1,18 +1,16 @@
-import { NextRequest, NextResponse, after } from 'next/server';
-import { getLessons, getStudents, setLessonStatusDirect, saveStudent, addPayment } from '@/lib/storage';
-import { formatTashkentHeaderDate, isTashkentToday } from '@/lib/formatters';
+import { NextRequest, NextResponse } from 'next/server';
+import { getLessons, getStudents, setLessonStatusDirect, updateLessonDetails } from '@/lib/storage';
+import { formatTashkentHeaderDate, isTashkentToday, getTashkentNow } from '@/lib/formatters';
 import { generateStudentReport, findStudentsByName } from '@/lib/reports';
 import { supabase } from '@/lib/supabase';
-import { claimUpdate, clearHistory } from '@/lib/botState';
+import { claimUpdate, clearHistory, setPendingReason, popPendingReason } from '@/lib/botState';
 import { normName } from '@/lib/nameMatch';
 
-// Whisper + ИИ могут работать десятки секунд — даём функции запас по времени
 export const maxDuration = 60;
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://tutor-crm-kappa.vercel.app';
 
-// Helper to safely send telegram message
 export async function sendTelegramMessage(chatId: number | string, text: string, replyMarkup?: any) {
   if (!BOT_TOKEN) return;
   const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
@@ -61,76 +59,63 @@ async function answerCallbackQuery(callbackQueryId: string, text?: string) {
 export async function buildMorningDigest(firstName: string = 'Фархад') {
   const todayFormatted = formatTashkentHeaderDate();
   const [lessons, students] = await Promise.all([getLessons(), getStudents()]);
-  const todayLessons = lessons.filter((l) => isTashkentToday(l.date)).sort((a,b) => (a.time_str||'').localeCompare(b.time_str||''));
+  const todayLessons = lessons
+    .filter((l) => isTashkentToday(l.date))
+    .sort((a, b) => (a.time_str || '').localeCompare(b.time_str || ''));
 
-  let message = `☀️ <b>Здравствуйте, ${firstName}!</b>\n`;
-  message += `📚 <b>Ваш план занятий на сегодня (${todayFormatted}):</b>\n\n`;
+  let message = `☀️ <b>Доброе утро! Расписание на сегодня (${todayFormatted}):</b>\n`;
+  message += `Всего запланировано: <b>${todayLessons.length} уроков</b>\n\n`;
 
   const keyboard: any[] = [];
 
   if (todayLessons.length === 0) {
-    message += `<i>На сегодня уроков не запланировано. Отличного отдыха!</i>\n\n`;
+    message += `<i>На сегодня уроков не запланировано. Отличного дня!</i>\n\n`;
   } else {
-    message += `Всего уроков: <b>${todayLessons.length}</b>\n\n`;
     todayLessons.forEach((l, i) => {
       const student = students.find((s) => s.id === l.student_id);
+      const studentName = student?.name || l.student_name || 'Ученик';
+      const target = student?.monthly_target_lessons || 12;
+      const conducted = student?.conducted_this_month || 0;
       const isCompleted = l.status === 'completed';
-      const statusIcon = isCompleted ? '✅' : (l.status === 'missed_penalty' ? '❌' : (l.status === 'missed_excused' ? '⚠️' : '⏳'));
-      message += `<b>${i + 1}. ${l.time_str?.split(' - ')[0] || '18:00'}</b> | <b>${student?.name || l.student_name}</b> ${statusIcon}\n`;
-      
-      keyboard.push([{ text: `${statusIcon} ${l.time_str?.split(' - ')[0]} ${student?.name}`, callback_data: `lesson:${l.id}` }]);
+      const isMissed = l.status === 'missed' || l.status === 'missed_excused' || l.status === 'missed_penalty';
+      const statusIcon = isCompleted ? '✅' : isMissed ? '❌' : '⏳';
+
+      const timeSlot = l.time_str || '16:00 – 17:30';
+      message += `${i + 1}️⃣ <b>${timeSlot}</b> — <b>${studentName}</b> (В этом месяце: ${conducted}/${target}) ${statusIcon}\n`;
+
+      keyboard.push([
+        {
+          text: `${statusIcon} ${timeSlot.split(' - ')[0]} ${studentName}`,
+          callback_data: `lesson:${l.id}`,
+        },
+      ]);
     });
-    message += `\n<i>Нажмите на урок ниже, чтобы отметить его статус:</i>\n\n`;
+    message += `\n`;
   }
 
-  // Pending makeups
-  const studentsWithMakeups = students.filter((s) => s.makeup_debt > 0);
+  // Pending Sunday makeups
+  const studentsWithMakeups = students.filter((s) => (s.makeup_debt || 0) > 0);
   if (studentsWithMakeups.length > 0) {
-    message += `🔄 <b>Долги по отработкам (${studentsWithMakeups.length}):</b>\n`;
-    studentsWithMakeups.forEach((s) => {
-      message += `• <b>${s.name}</b>: ${s.makeup_debt} ур.\n`;
-    });
-    message += `\n`;
+    const names = studentsWithMakeups.map((s) => s.name).join(', ');
+    message += `🔄 <b>Ждут назначения отработки на ВС:</b> ${studentsWithMakeups.length} ученика (${names})\n`;
   }
 
-  // Find unmarked past lessons
-  const now = new Date();
-  // using all lessons to find unmarked
-  const { data: allUnmarked } = await supabase.from('lessons')
-    .select('student_id')
-    .eq('status', 'scheduled')
-    .lte('date', now.toISOString().split('T')[0]);
-  
-  if (allUnmarked && allUnmarked.length > 0) {
-    const unmarkedCounts: Record<string, number> = {};
-    allUnmarked.forEach(l => {
-      const s = students.find(st => st.id === l.student_id);
-      if (s) {
-        unmarkedCounts[s.name] = (unmarkedCounts[s.name] || 0) + 1;
-      }
-    });
-    if (Object.keys(unmarkedCounts).length > 0) {
-      message += `⚠️ <b>Неотмеченные прошедшие уроки:</b>\n`;
-      Object.entries(unmarkedCounts).forEach(([name, count]) => {
-        message += `• <b>${name}</b>: ${count} ур.\n`;
-      });
-      message += `\n`;
-    }
-  }
+  // Reminder for billing day today
+  const todayDayNumber = getTashkentNow().getDate(); // e.g. 28
+  const billingDayStudents = students.filter((s) => {
+    if (!s.billing_day) return false;
+    const match = String(s.billing_day).match(/\d+/);
+    return match && Number(match[0]) === todayDayNumber;
+  });
 
-  // Debt warnings (prepaid_balance < 0)
-  const debtStudents = students.filter(s => s.prepaid_balance < 0);
-  if (debtStudents.length > 0) {
-    message += `💰 <b>Ученики с долгами (Внимание!):</b>\n`;
-    debtStudents.forEach(s => {
-      message += `• <b>${s.name}</b>: долг ${Math.abs(s.prepaid_balance)} ур.!\n`;
-    });
-    message += `\n`;
+  if (billingDayStudents.length > 0) {
+    const names = billingDayStudents.map((s) => s.name).join(', ');
+    message += `📅 <b>Напоминание о дате оплаты сегодня (${todayDayNumber} число):</b> ${names}\n`;
   }
 
   keyboard.push([
     { text: '🚀 Открыть CRM', web_app: { url: APP_URL } },
-    { text: '📋 Отчеты', callback_data: 'list_students' }
+    { text: '📋 Ученики', callback_data: 'list_students' },
   ]);
 
   return { text: message, markup: { inline_keyboard: keyboard } };
@@ -139,13 +124,14 @@ export async function buildMorningDigest(firstName: string = 'Фархад') {
 async function buildStudentsKeyboard() {
   const students = await getStudents();
   if (students.length === 0) {
-    return { inline_keyboard: [[{ text: '🚀 Открыть Tutor Tracker', web_app: { url: APP_URL } }]] };
+    return { inline_keyboard: [[{ text: '🚀 Открыть CRM', web_app: { url: APP_URL } }]] };
   }
   const buttons: Array<Array<{ text: string; callback_data?: string; web_app?: { url: string } }>> = students.map((s) => {
-    const balanceLabel = s.prepaid_balance > 0 ? `+${s.prepaid_balance} ур.` : `${s.prepaid_balance} ур.`;
-    return [{ text: `👤 ${s.name} (${balanceLabel})`, callback_data: `report:${s.id}` }];
+    const target = s.monthly_target_lessons || 12;
+    const conducted = s.conducted_this_month || 0;
+    return [{ text: `👤 ${s.name} (${conducted}/${target} ур.)`, callback_data: `report:${s.id}` }];
   });
-  buttons.push([{ text: '🚀 Открыть Tutor Tracker', web_app: { url: APP_URL } }]);
+  buttons.push([{ text: '🚀 Открыть CRM', web_app: { url: APP_URL } }]);
   return { inline_keyboard: buttons };
 }
 
@@ -154,11 +140,15 @@ async function registerChatId(chatId: number | string, username?: string) {
   try {
     const { data } = await supabase.from('tutor_students').select('id').eq('name', '_BOT_CONFIG').single();
     if (data) {
-        await supabase.from('tutor_students').update({ phone: String(chatId) }).eq('id', data.id);
+      await supabase.from('tutor_students').update({ phone: String(chatId) }).eq('id', data.id);
     } else {
-        await supabase.from('tutor_students').insert([{ name: '_BOT_CONFIG', phone: String(chatId), price_per_lesson: 0, package_remaining_lessons: 0, package_total_lessons: 0 }]);
+      await supabase.from('tutor_students').insert([
+        { name: '_BOT_CONFIG', phone: String(chatId), monthly_target_lessons: 0 },
+      ]);
     }
-  } catch(e) { console.error('Register chat id failed', e) }
+  } catch (e) {
+    console.error('Register chat id failed', e);
+  }
 }
 
 async function sendChatAction(chatId: number | string, action: string = 'typing') {
@@ -174,7 +164,6 @@ async function sendChatAction(chatId: number | string, action: string = 'typing'
 
 const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-// Telegram ограничивает сообщение 4096 символами — режем по строкам, кнопки — на последнем куске
 async function sendLongMessage(chatId: number | string, text: string, replyMarkup?: any) {
   const LIMIT = 3800;
   if (text.length <= LIMIT) return sendTelegramMessage(chatId, text, replyMarkup);
@@ -218,51 +207,32 @@ async function handleMessage(message: any) {
   const defaultMarkup = {
     inline_keyboard: [
       [{ text: '🚀 Открыть CRM', web_app: { url: APP_URL } }, { text: '📅 Расписание', callback_data: 'daily_schedule' }],
-      [{ text: '📋 Ученики', callback_data: 'list_students' }]
+      [{ text: '📋 Ученики', callback_data: 'list_students' }],
     ],
   };
 
+  // Check if we are waiting for a miss reason from a previous quick button tap
+  const pendingReason = await popPendingReason();
+  if (pendingReason) {
+    try {
+      await updateLessonDetails(pendingReason.lessonId, { miss_reason: rawText });
+      await sendTelegramMessage(
+        chatId,
+        `✅ Причина пропуска для ученика <b>${escapeHtml(pendingReason.studentName)}</b> записана в архив:\n<i>«${escapeHtml(rawText)}»</i>${pendingReason.needsMakeup ? '\n🔄 Урок добавлен в отработки на воскресенье.' : ''}`,
+        defaultMarkup
+      );
+      return;
+    } catch (e) {
+      console.error('Failed to save miss reason from bot:', e);
+    }
+  }
+
   if (text.startsWith('/start') || text.startsWith('/help')) {
-    const welcomeText = `🚀 <b>Tutor Tracker Bot</b>\n\n<b>Команды бота:</b>\n/today - Расписание на сегодня (с кнопками)\n/students - Список учеников\n/add ИМЯ 150000 - Быстро добавить ученика\n/pay ИМЯ 8 - Внести оплату (на 8 уроков)\n/reset - Забыть контекст разговора с ИИ\n\nИли просто напишите / надиктуйте голосом, что нужно сделать: «Мадина оплатила 8 уроков», «Фазилат сегодня была», «Перенеси Давида на четверг в 18:00», «Покажи расписание Самиры».`;
+    const welcomeText = `🚀 <b>Tutor Tracker Bot 2.0</b>\n\n<b>Команды:</b>\n/today — Расписание на сегодня\n/students — Список учеников\n/reset — Очистить контекст диалога с ИИ\n\nИли напишите / надиктуйте голосом: «Сахиб сегодня был», «Алина пропустила, заболела, поставь на отработку в ВС», «Перенеси Тимура на пятницу в 16:00», «Дай сводку за неделю».`;
     await sendTelegramMessage(chatId, welcomeText, defaultMarkup);
   } else if (text.startsWith('/reset') || text.startsWith('/new')) {
     await clearHistory();
     await sendTelegramMessage(chatId, '🧹 Контекст разговора очищен.');
-  } else if (text.startsWith('/add ')) {
-    const parts = rawText.split(' ');
-    if (parts.length >= 3) {
-      const price = parseInt(parts.pop() || '150000');
-      const name = parts.slice(1).join(' ');
-      try {
-        await saveStudent({ name, price_per_lesson: price, prepaid_balance: 8, billing_day: '10' });
-        await sendTelegramMessage(chatId, `✅ Ученик <b>${escapeHtml(name)}</b> (${price} UZS) успешно добавлен!\nЗайдите в CRM чтобы настроить ему расписание.`, defaultMarkup);
-      } catch (e) {
-        await sendTelegramMessage(chatId, '❌ Ошибка при добавлении ученика.');
-      }
-    } else {
-      await sendTelegramMessage(chatId, '❌ Формат команды: /add Имя Цена\nПример: <code>/add Алина 150000</code>');
-    }
-  } else if (text.startsWith('/pay ')) {
-    const parts = rawText.split(' ');
-    if (parts.length >= 3) {
-      const lessonsCount = parseInt(parts.pop() || '8');
-      const name = parts.slice(1).join(' ');
-      const matched = await findStudentsByName(name);
-      if (matched.length === 1) {
-        try {
-          const student = matched[0];
-          const amount = (student.price_per_lesson || 150000) * lessonsCount;
-          await addPayment(student.id, amount, lessonsCount);
-          await sendTelegramMessage(chatId, `💰 Оплата успешно добавлена!\n👤 <b>${escapeHtml(student.name)}</b>\nКол-во уроков: +${lessonsCount}\nСумма: ${amount} UZS`);
-        } catch (e) {
-          await sendTelegramMessage(chatId, '❌ Ошибка при добавлении оплаты.');
-        }
-      } else {
-        await sendTelegramMessage(chatId, `❌ Ученик с именем "${escapeHtml(name)}" не найден или найдено несколько.`);
-      }
-    } else {
-      await sendTelegramMessage(chatId, '❌ Формат команды: /pay Имя Кол-во_уроков\nПример: <code>/pay Алина 8</code>');
-    }
   } else if (text.startsWith('/today') || text.startsWith('/digest')) {
     const { text: msgText, markup } = await buildMorningDigest(firstName);
     await sendTelegramMessage(chatId, msgText, markup);
@@ -270,9 +240,7 @@ async function handleMessage(message: any) {
     const keyboard = await buildStudentsKeyboard();
     await sendTelegramMessage(chatId, '📋 <b>Список учеников:</b>', keyboard);
   } else {
-    // Быстрый путь: сообщение — это просто имя ученика (точное совпадение или начало имени).
-    // Короткие реплики вроде «да» / «ок» НЕ должны превращаться в отчёт по случайному ученику —
-    // они уходят ИИ как продолжение диалога.
+    // Check if query is just a student name
     const q = normName(rawText);
     const found = q.length >= 2 ? await findStudentsByName(rawText) : [];
     const exact = found.filter((s) => normName(s.name) === q);
@@ -283,14 +251,13 @@ async function handleMessage(message: any) {
       if (report) {
         const reportMarkup = {
           inline_keyboard: [
-            [{ text: '💰 Внести оплату', callback_data: `pay_prompt:${candidates[0].id}` }],
             [{ text: '📋 Все ученики', callback_data: 'list_students' }, { text: '🚀 Открыть CRM', web_app: { url: APP_URL } }],
           ],
         };
         await sendLongMessage(chatId, report.telegramHtml, reportMarkup);
       }
     } else if (candidates.length > 1) {
-      const buttons = candidates.map((s) => [{ text: `👤 ${s.name} (${s.prepaid_balance} ур.)`, callback_data: `report:${s.id}` }]);
+      const buttons = candidates.map((s) => [{ text: `👤 ${s.name}`, callback_data: `report:${s.id}` }]);
       await sendTelegramMessage(chatId, `Найдено несколько учеников по запросу "${escapeHtml(rawText)}":`, { inline_keyboard: buttons });
     } else {
       await sendChatAction(chatId, 'typing');
@@ -301,12 +268,10 @@ async function handleMessage(message: any) {
   }
 }
 
-
 export async function POST(req: NextRequest) {
   try {
     const update = await req.json();
 
-    // Защита от повторной доставки вебхука (Telegram ретраит при таймауте) — иначе действия выполнятся дважды
     if (typeof update.update_id === 'number' && !(await claimUpdate(update.update_id))) {
       return NextResponse.json({ ok: true, duplicate: true });
     }
@@ -325,7 +290,6 @@ export async function POST(req: NextRequest) {
         if (report) {
           const reportMarkup = {
             inline_keyboard: [
-              [{ text: '💰 Внести оплату', callback_data: `pay_prompt:${studentId}` }],
               [{ text: '📋 Все ученики', callback_data: 'list_students' }, { text: '🚀 Открыть CRM', web_app: { url: APP_URL } }],
             ],
           };
@@ -336,134 +300,64 @@ export async function POST(req: NextRequest) {
           }
         }
         return NextResponse.json({ ok: true });
-      } else if (data === 'list_makeups') {
-        const students = await getStudents();
-        const makeups = students.filter(s => s.makeup_debt > 0);
-        let text = '🔄 <b>Список переносов (долги по отработкам):</b>\n\n';
-        if (makeups.length === 0) {
-            text += '<i>Ура! У вас нет невыполненных отработок.</i>';
-        } else {
-            makeups.forEach(s => {
-                text += `🔸 <b>${s.name}</b>: ${s.makeup_debt} ур.\n`;
-            });
-        }
-        
-        const markup = {
-          inline_keyboard: [
-            [{ text: 'Расписание', callback_data: 'daily_schedule' }, { text: 'Ученики', callback_data: 'list_students' }]
-          ]
-        };
-        
-        if (messageId) {
-            await editTelegramMessage(chatId, messageId, text, markup);
-        } else {
-            await sendTelegramMessage(chatId, text, markup);
+      } else if (data.startsWith('status:')) {
+        // format: status:lessonId:action
+        const parts = data.split(':');
+        const lessonId = parts[1];
+        const action = parts[2];
+
+        const lessons = await getLessons();
+        const lesson = lessons.find((l) => l.id === lessonId);
+        const studentName = lesson?.student_name || 'Ученик';
+
+        if (action === 'completed') {
+          await setLessonStatusDirect(lessonId, 'completed');
+          await answerCallbackQuery(cq.id, '✅ Урок отмечен как проведенный!');
+          if (messageId) {
+            await editTelegramMessage(
+              chatId,
+              messageId,
+              `✅ <b>Урок проведен!</b>\n👤 <b>${escapeHtml(studentName)}</b> (${lesson?.time_str || ''})\nОтмечено в архиве.`
+            );
+          }
+        } else if (action === 'miss_prompt') {
+          await setLessonStatusDirect(lessonId, 'missed', 'Пропуск', false);
+          await setPendingReason(lessonId, studentName, false);
+          await answerCallbackQuery(cq.id, '❌ Отмечен пропуск');
+          await sendTelegramMessage(
+            chatId,
+            `❌ Урок ученика <b>${escapeHtml(studentName)}</b> отмечен как пропущенный.\n\nНапишите или надиктуйте голосом <b>причину пропуска</b> для архива:`
+          );
+        } else if (action === 'makeup_prompt') {
+          await setLessonStatusDirect(lessonId, 'missed', 'Ожидает отработки', true);
+          await setPendingReason(lessonId, studentName, true);
+          await answerCallbackQuery(cq.id, '🔄 Назначен на отработку в ВС');
+          await sendTelegramMessage(
+            chatId,
+            `🔄 Урок ученика <b>${escapeHtml(studentName)}</b> отправлен на отработку в воскресенье.\n\nНапишите или надиктуйте голосом <b>причину пропуска</b> для архива:`
+          );
         }
         return NextResponse.json({ ok: true });
       } else if (data === 'list_students') {
         await answerCallbackQuery(cq.id);
         const keyboard = await buildStudentsKeyboard();
-        if (messageId) {
-            await editTelegramMessage(chatId, messageId, '📋 <b>Выберите ученика:</b>', keyboard);
-        } else {
-            await sendTelegramMessage(chatId, '📋 <b>Выберите ученика:</b>', keyboard);
-        }
+        await sendTelegramMessage(chatId, '📋 <b>Список учеников:</b>', keyboard);
         return NextResponse.json({ ok: true });
       } else if (data === 'daily_schedule') {
-        await answerCallbackQuery(cq.id, 'Загружаю...');
-        const firstName = cq.from?.first_name || 'Фархад';
-        const { text, markup } = await buildMorningDigest(firstName);
-        if (messageId) {
-            await editTelegramMessage(chatId, messageId, text, markup);
-        } else {
-            await sendTelegramMessage(chatId, text, markup);
-        }
-        return NextResponse.json({ ok: true });
-      } else if (data.startsWith('lesson:')) {
-        const lessonId = data.replace('lesson:', '');
-        const lessons = await getLessons();
-        const lesson = lessons.find(l => l.id === lessonId);
-        if (!lesson) {
-          await answerCallbackQuery(cq.id, 'Урок не найден!');
-          return NextResponse.json({ ok: true });
-        }
         await answerCallbackQuery(cq.id);
-        const text = `Управление уроком:\n👤 <b>${lesson.student_name}</b>\n🕒 ${lesson.time_str}\nТекущий статус: <b>${lesson.status === 'completed' ? 'Проведен ✅' : (lesson.status === 'missed_penalty' ? 'Отмена ❌' : (lesson.status === 'missed_excused' ? 'Долг ⚠️' : 'Запланирован ⏳'))}</b>`;
-        const markup = {
-          inline_keyboard: [
-            [{ text: lesson.status === 'planned'  ? '🔹 Запланирован' : 'Запланирован', callback_data: `status:${lesson.id}:planned` }],
-            [{ text: lesson.status === 'completed' ? '✅ Проведен' : 'Проведен', callback_data: `status:${lesson.id}:completed` }],
-            [{ text: lesson.status === 'missed_excused' ? '⚠️ Пропуск (долг)' : 'Пропуск (долг)', callback_data: `status:${lesson.id}:missed_excused` }],
-            [{ text: lesson.status === 'missed_penalty' ? '❌ Отмена (списание)' : 'Отмена (списание)', callback_data: `status:${lesson.id}:missed_penalty` }],
-            [{ text: '⬅️ Назад в расписание', callback_data: 'daily_schedule' }]
-          ]
-        };
-        if (messageId) {
-            await editTelegramMessage(chatId, messageId, text, markup);
-        } else {
-            await sendTelegramMessage(chatId, text, markup);
-        }
-        return NextResponse.json({ ok: true });
-      } else if (data.startsWith('status:')) {
-        const parts = data.split(':');
-        const lessonId = parts[1];
-        const newStatus = parts[2] as any;
-        await answerCallbackQuery(cq.id, 'Обновляю...');
-        await setLessonStatusDirect(lessonId, newStatus);
-        
-        // Refresh the lesson view
-        const lessons = await getLessons();
-        const lesson = lessons.find(l => l.id === lessonId);
-        if (lesson) {
-            const text = `Управление уроком:\n👤 <b>${lesson.student_name}</b>\n🕒 ${lesson.time_str}\nТекущий статус: <b>${lesson.status === 'completed' ? 'Проведен ✅' : (lesson.status === 'missed_penalty' ? 'Отмена ❌' : (lesson.status === 'missed_excused' ? 'Долг ⚠️' : 'Запланирован ⏳'))}</b>`;
-            const markup = {
-            inline_keyboard: [
-                [{ text: lesson.status === 'planned'  ? '🔹 Запланирован' : 'Запланирован', callback_data: `status:${lesson.id}:planned` }],
-                [{ text: lesson.status === 'completed' ? '✅ Проведен' : 'Проведен', callback_data: `status:${lesson.id}:completed` }],
-                [{ text: lesson.status === 'missed_excused' ? '⚠️ Пропуск (долг)' : 'Пропуск (долг)', callback_data: `status:${lesson.id}:missed_excused` }],
-                [{ text: lesson.status === 'missed_penalty' ? '❌ Отмена (списание)' : 'Отмена (списание)', callback_data: `status:${lesson.id}:missed_penalty` }],
-                [{ text: '⬅️ Назад в расписание', callback_data: 'daily_schedule' }]
-            ]
-            };
-            if (messageId) {
-                await editTelegramMessage(chatId, messageId, text, markup);
-            }
-        }
-        return NextResponse.json({ ok: true });
-      } else if (data.startsWith('pay_prompt:')) {
-        const studentId = data.replace('pay_prompt:', '');
-        const students = await getStudents();
-        const student = students.find(s => s.id === studentId);
-        await answerCallbackQuery(cq.id);
-        if (student) {
-            await sendTelegramMessage(chatId, `💰 Чтобы внести оплату за <b>${student.name}</b>, отправьте сообщение:\n\n<code>/pay ${student.name} 8</code>\n\nГде 8 - это количество оплаченных уроков (можно указать любую цифру).`);
-        }
+        const { text, markup } = await buildMorningDigest('Фархад');
+        await sendTelegramMessage(chatId, text, markup);
         return NextResponse.json({ ok: true });
       }
     }
 
-    // 2. Text / voice: отвечаем Telegram мгновенно (200), а тяжёлую работу (Whisper + ИИ) делаем в after().
-    // Так Telegram не считает вебхук упавшим и не присылает его повторно, а пользователь не шлёт команду по 5 раз.
-    if (update.message && (update.message.text || update.message.voice)) {
-      const message = update.message;
-      after(async () => {
-        try {
-          await handleMessage(message);
-        } catch (e) {
-          console.error('handleMessage failed', e);
-          await sendTelegramMessage(message.chat.id, '❌ Что-то пошло не так при обработке сообщения. Проверьте CRM перед повтором команды.');
-        }
-      });
+    if (update.message) {
+      await handleMessage(update.message);
     }
 
     return NextResponse.json({ ok: true });
   } catch (error) {
-    console.error('Webhook error', error);
-    // 200, а не 500: иначе Telegram будет бесконечно ретраить апдейт и дублировать действия
-    return NextResponse.json({ ok: false, error: 'Internal error' });
+    console.error('Bot webhook error:', error);
+    return NextResponse.json({ ok: false, error: 'Internal Error' }, { status: 500 });
   }
-}
-
-export async function GET() {
-  return NextResponse.json({ status: 'Tutor Tracker Bot Webhook is active' });
 }

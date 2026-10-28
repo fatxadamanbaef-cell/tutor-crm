@@ -1,8 +1,22 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Student, Lesson, FinanceSummary } from '@/types';
-import { getStudents, getLessons, getFinanceSummary, addPayment, deleteStudent, saveStudent, updateStudentBillingDay, updateStudentColor, updateLessonTime, saveLesson, deleteLesson, updateLessonDetails, saveBatchLessons, updateStudentInfo, setLessonStatusDirect } from '@/lib/storage';
+import { Student, Lesson, Makeup, LessonStatus } from '@/types';
+import {
+  getStudents,
+  getLessons,
+  getPendingMakeups,
+  saveStudent,
+  deleteStudent,
+  updateStudentSettings,
+  updateLessonTime,
+  saveLesson,
+  deleteLesson,
+  updateLessonDetails,
+  setLessonStatusDirect,
+  scheduleSundayMakeup,
+  archiveMakeup,
+} from '@/lib/storage';
 import { initTelegramApp } from '@/lib/telegram';
 import { Loader2 } from 'lucide-react';
 
@@ -20,8 +34,8 @@ export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<TabType>('schedule');
   const [students, setStudents] = useState<Student[]>([]);
   const [lessons, setLessons] = useState<Lesson[]>([]);
-  const [financeSummary, setFinanceSummary] = useState<FinanceSummary>({ earnedThisMonthUzs: 0, completedLessonsCount: 0 });
-  
+  const [makeups, setMakeups] = useState<Makeup[]>([]);
+
   const [loading, setLoading] = useState(true);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
@@ -36,25 +50,24 @@ export default function Dashboard() {
 
   const refreshData = async () => {
     try {
-      const [sData, lData, fData] = await Promise.all([
+      const [sData, lData, mData] = await Promise.all([
         getStudents(),
         getLessons(),
-        getFinanceSummary(),
+        getPendingMakeups(),
       ]);
       setStudents(sData);
       setLessons(lData);
-      setFinanceSummary(fData);
+      setMakeups(mData);
       setLoading(false);
 
-      // Check for deep link to edit lesson
+      // Deep link to edit lesson
       if (typeof window !== 'undefined') {
         const params = new URLSearchParams(window.location.search);
         const editLessonId = params.get('editLesson');
         if (editLessonId) {
-          const lessonToEdit = lData.find(l => l.id === editLessonId);
+          const lessonToEdit = lData.find((l) => l.id === editLessonId);
           if (lessonToEdit) {
             setSelectedLesson(lessonToEdit);
-            // Optional: clean up the URL without reloading
             window.history.replaceState({}, '', window.location.pathname);
           }
         }
@@ -65,16 +78,56 @@ export default function Dashboard() {
     }
   };
 
-  const handleAddPayment = async (studentId: string, amount: number, lessonsAdded: number, date?: string) => {
+  const handleSetLessonStatus = async (
+    lessonId: string,
+    status: LessonStatus,
+    missReason?: string,
+    needsMakeup?: boolean
+  ) => {
     try {
-      await addPayment(studentId, amount, lessonsAdded, date);
+      await setLessonStatusDirect(lessonId, status, missReason, needsMakeup);
       await refreshData();
-      if (selectedStudent) {
-        const refreshed = (await getStudents()).find(s => s.id === studentId);
-        if (refreshed) setSelectedStudent(refreshed);
-      }
     } catch (e) {
-      console.error('Payment error:', e);
+      console.error('Status change failed:', e);
+    }
+  };
+
+  const handleScheduleSundayMakeup = async (makeupIdOrLessonId: string, sundayDate: string, timeStr: string) => {
+    try {
+      // Find if it's makeupId or lessonId
+      const makeup = makeups.find(m => m.id === makeupIdOrLessonId || m.missed_lesson_id === makeupIdOrLessonId);
+      if (makeup) {
+        await scheduleSundayMakeup(makeup.id, sundayDate, timeStr);
+      } else {
+        const lesson = lessons.find(l => l.id === makeupIdOrLessonId);
+        if (lesson) {
+          await saveLesson({
+            student_id: lesson.student_id,
+            date: sundayDate,
+            time_str: timeStr,
+            status: 'planned',
+            is_makeup: true,
+            notes: `Отработка за ${lesson.date.substring(0, 10)}: ${lesson.miss_reason || ''}`,
+          });
+        }
+      }
+      await refreshData();
+    } catch (e) {
+      console.error('Failed to schedule Sunday makeup:', e);
+    }
+  };
+
+  const handleArchiveMakeup = async (makeupIdOrLessonId: string) => {
+    try {
+      const makeup = makeups.find(m => m.id === makeupIdOrLessonId || m.missed_lesson_id === makeupIdOrLessonId);
+      if (makeup) {
+        await archiveMakeup(makeup.id);
+      } else {
+        await updateLessonDetails(makeupIdOrLessonId, { needs_makeup: false });
+      }
+      await refreshData();
+    } catch (e) {
+      console.error('Failed to archive makeup:', e);
     }
   };
 
@@ -88,17 +141,9 @@ export default function Dashboard() {
     }
   };
 
-  const handleSaveStudent = async (data: any, generatedLessons?: Lesson[]) => {
+  const handleSaveStudent = async (data: any) => {
     try {
-      const saved = await saveStudent(data);
-      setStudents(prev => [...prev, saved]);
-      
-      // Save generated schedule lessons if any
-      if (generatedLessons && generatedLessons.length > 0) {
-        const lessonsWithStudentId = generatedLessons.map(l => ({ ...l, student_id: saved.id }));
-        await saveBatchLessons(lessonsWithStudentId);
-      }
-      
+      await saveStudent(data);
       await refreshData();
       setIsAddStudentOpen(false);
     } catch (e: any) {
@@ -107,36 +152,16 @@ export default function Dashboard() {
     }
   };
 
-  const handleToggleCalendarDate = async (studentId: string, dateStr: string) => {
+  const handleSaveStudentInfo = async (studentId: string, updates: any) => {
     try {
-      const updatedStudents = await getStudents();
-      setStudents(updatedStudents);
+      await updateStudentSettings(studentId, updates);
+      await refreshData();
       if (selectedStudent) {
-        const refreshed = updatedStudents.find(s => s.id === studentId);
+        const refreshed = (await getStudents()).find((s) => s.id === studentId);
         if (refreshed) setSelectedStudent(refreshed);
       }
     } catch (e) {
-      console.error('Toggle sync error:', e);
-    }
-  };
-
-  const handleUpdateBillingDay = async (studentId: string, day: number) => {
-    try {
-      await updateStudentBillingDay(studentId, String(day));
-      await refreshData();
-      if (selectedStudent) setSelectedStudent(prev => prev ? { ...prev, billing_day: day } : null);
-    } catch (e) {
-      console.error('Failed to update billing day:', e);
-    }
-  };
-
-  const handleUpdateColor = async (studentId: string, color: string) => {
-    try {
-      await updateStudentColor(studentId, color);
-      setStudents(prev => prev.map(s => s.id === studentId ? { ...s, color } : s));
-      if (selectedStudent) setSelectedStudent({ ...selectedStudent, color });
-    } catch(e) {
-      console.error('Failed to update color', e);
+      console.error('Failed to save student info:', e);
     }
   };
 
@@ -149,16 +174,12 @@ export default function Dashboard() {
     }
   };
 
-  const handleSaveStudentInfo = async (studentId: string, updates: { name?: string; phone?: string }) => {
+  const handleUpdateLessonMissReason = async (lessonId: string, missReason: string) => {
     try {
-      await updateStudentInfo(studentId, updates);
+      await updateLessonDetails(lessonId, { miss_reason: missReason });
       await refreshData();
-      if (selectedStudent) {
-        const refreshed = (await getStudents()).find(s => s.id === studentId);
-        if (refreshed) setSelectedStudent(refreshed);
-      }
     } catch (e) {
-      console.error('Failed to save student info:', e);
+      console.error('Failed to update miss reason:', e);
     }
   };
 
@@ -175,9 +196,10 @@ export default function Dashboard() {
       {/* Main Tab Content */}
       <div className="h-full overflow-y-auto">
         {activeTab === 'schedule' && (
-          <ScheduleTab 
-            students={students} 
+          <ScheduleTab
+            students={students}
             lessons={lessons}
+            makeups={makeups}
             onAddLesson={() => {
               setSelectedDateForNewLesson(new Date());
               setIsAddLessonOpen(true);
@@ -186,44 +208,47 @@ export default function Dashboard() {
               setSelectedLesson(lesson);
             }}
             onUpdateLessonTime={handleUpdateLessonTime}
+            onSetLessonStatus={handleSetLessonStatus}
+            onScheduleSundayMakeup={handleScheduleSundayMakeup}
+            onArchiveMakeup={handleArchiveMakeup}
           />
         )}
         {activeTab === 'clients' && (
-          <ClientsTab 
-            students={students} 
-            onOpenStudent={setSelectedStudent} 
-            onAddStudent={() => setIsAddStudentOpen(true)} 
+          <ClientsTab
+            students={students}
+            onOpenStudent={setSelectedStudent}
+            onAddStudent={() => setIsAddStudentOpen(true)}
           />
         )}
-        {activeTab === 'stats' && <StatsTab summary={financeSummary} lessons={lessons} students={students} />}
+        {activeTab === 'stats' && <StatsTab lessons={lessons} students={students} />}
         {activeTab === 'settings' && <SettingsTab />}
       </div>
 
       {/* Navigation */}
       <BottomNav activeTab={activeTab} onChangeTab={setActiveTab} />
 
-      {/* Full-Screen Modals */}
+      {/* Full-Screen Profile Screen */}
       {selectedStudent && (
         <ClientProfileScreen
           student={selectedStudent}
           lessons={lessons}
-          onBack={() => { setSelectedStudent(null); refreshData(); }}
-          onAddPayment={handleAddPayment}
+          onBack={() => {
+            setSelectedStudent(null);
+            refreshData();
+          }}
           onDeleteStudent={handleDeleteStudent}
-          onToggleCalendarDate={handleToggleCalendarDate}
-          onUpdateBillingDay={handleUpdateBillingDay}
-          onUpdateColor={handleUpdateColor}
           onSaveStudentInfo={handleSaveStudentInfo}
+          onUpdateLessonMissReason={handleUpdateLessonMissReason}
         />
       )}
 
-      {/* Simple Modals */}
+      {/* Modals */}
       <AddStudentModal
         isOpen={isAddStudentOpen}
         onClose={() => setIsAddStudentOpen(false)}
         onSave={handleSaveStudent}
       />
-      
+
       <AddLessonModal
         isOpen={isAddLessonOpen}
         onClose={() => setIsAddLessonOpen(false)}
@@ -244,13 +269,9 @@ export default function Dashboard() {
         isOpen={Boolean(selectedLesson)}
         onClose={() => setSelectedLesson(null)}
         lesson={selectedLesson}
-        student={selectedLesson ? students.find(s => s.id === selectedLesson.student_id) || null : null}
+        student={selectedLesson ? students.find((s) => s.id === selectedLesson.student_id) || null : null}
         onSave={async (lessonId, updates) => {
           try {
-            const originalLesson = lessons.find(l => l.id === lessonId);
-            if (updates.status && originalLesson && originalLesson.status !== updates.status) {
-              await setLessonStatusDirect(lessonId, updates.status);
-            }
             await updateLessonDetails(lessonId, updates);
             await refreshData();
           } catch (e) {

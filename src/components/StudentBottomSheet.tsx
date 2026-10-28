@@ -136,7 +136,7 @@ export const StudentBottomSheet: React.FC<StudentBottomSheetProps> = ({
   const greenCount = completedLessons.length;
   const redCount = burnedLessons.length;
   const usedCount = greenCount + redCount;
-  const remainingCount = student.prepaid_balance;
+  const remainingCount = student.prepaid_balance ?? 0;
 
   const calculatedPayment = customAmount > 0 ? customAmount : currentPrice * lessonsToAdd;
 
