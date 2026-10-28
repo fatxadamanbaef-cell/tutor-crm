@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getLessons, getStudents, setLessonStatusDirect, updateLessonDetails } from '@/lib/storage';
+import { getLessons, getStudents, setLessonStatusDirect, updateLessonDetails, ensureRecurringLessonsForAllActiveStudents } from '@/lib/storage';
 import { formatTashkentHeaderDate, isTashkentToday, getTashkentNow } from '@/lib/formatters';
 import { generateStudentReport, findStudentsByName } from '@/lib/reports';
 import { supabase } from '@/lib/supabase';
@@ -58,6 +58,9 @@ async function answerCallbackQuery(callbackQueryId: string, text?: string) {
 
 export async function buildMorningDigest(firstName: string = 'Фархад') {
   const todayFormatted = formatTashkentHeaderDate();
+  await ensureRecurringLessonsForAllActiveStudents(4).catch((e) => {
+    console.error('Failed to ensure recurring lessons in buildMorningDigest:', e);
+  });
   const [lessons, students] = await Promise.all([getLessons(), getStudents()]);
   const todayLessons = lessons
     .filter((l) => isTashkentToday(l.date))

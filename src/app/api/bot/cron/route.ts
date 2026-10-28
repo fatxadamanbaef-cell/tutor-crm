@@ -49,6 +49,10 @@ export async function GET(req: NextRequest) {
     const currentTotalMinutes = currentHours * 60 + currentMinutes;
     const currentDayOfWeek = now.getDay(); // 0 = Sunday
 
+    await ensureRecurringLessonsForAllActiveStudents(4).catch((e) => {
+      console.error('Failed to auto-ensure recurring lessons in cron:', e);
+    });
+
     const [lessons, students, pendingMakeups] = await Promise.all([
       getLessons(),
       getStudents(),

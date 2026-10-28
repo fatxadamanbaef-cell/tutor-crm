@@ -35,6 +35,11 @@ ALTER TABLE tutor_lessons
     ADD COLUMN IF NOT EXISTS is_makeup BOOLEAN DEFAULT false,
     ADD COLUMN IF NOT EXISTS reminder_sent BOOLEAN DEFAULT false;
 
+-- Снимаем старое ограничение на статусы, чтобы можно было использовать 'missed' и 'planned'
+ALTER TABLE tutor_lessons DROP CONSTRAINT IF EXISTS tutor_lessons_status_check;
+ALTER TABLE tutor_lessons ADD CONSTRAINT tutor_lessons_status_check 
+    CHECK (status IN ('planned', 'scheduled', 'completed', 'missed', 'missed_makeup', 'missed_excused', 'missed_penalty', 'cancelled'));
+
 -- Если в tutor_makeups были записаны причины пропусков, переносим их в tutor_lessons.miss_reason
 UPDATE tutor_lessons l
 SET miss_reason = m.reason
@@ -47,7 +52,7 @@ SET
     needs_makeup = true,
     miss_reason = COALESCE(miss_reason, notes, 'Уважительная причина (из архива)'),
     status = 'missed'
-WHERE status = 'missed_excused';
+WHERE status IN ('missed_excused', 'missed_makeup');
 
 UPDATE tutor_lessons
 SET 
@@ -87,8 +92,8 @@ WITH extracted_slots AS (
         to_char(start_time, 'HH24:MI') AS start_str,
         to_char(end_time, 'HH24:MI') AS end_str
     FROM tutor_lessons
-    WHERE lesson_date >= CURRENT_DATE - INTERVAL '14 days'
-      AND status IN ('planned', 'completed')
+    WHERE lesson_date >= CURRENT_DATE - INTERVAL '30 days'
+      AND status IN ('planned', 'scheduled', 'completed', 'missed', 'missed_makeup')
 ),
 aggregated_schedules AS (
     SELECT 

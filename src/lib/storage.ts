@@ -256,7 +256,12 @@ export async function getLessons(): Promise<Lesson[]> {
     let status: LessonStatus = 'planned';
     if (l.status === 'completed') {
       status = 'completed';
-    } else if (l.status === 'missed' || l.status === 'missed_excused' || l.status === 'missed_penalty') {
+    } else if (
+      l.status === 'missed' ||
+      l.status === 'missed_excused' ||
+      l.status === 'missed_penalty' ||
+      l.status === 'missed_makeup'
+    ) {
       status = 'missed';
     } else {
       status = 'planned';
@@ -299,37 +304,49 @@ export async function saveLesson(lessonData: {
   const lessonDate = lessonData.date.substring(0, 10);
   const time = lessonData.time_str ? parseTimeRange(lessonData.time_str) : { start: '18:00', end: '19:30' };
 
-  const dbStatus =
-    lessonData.status === 'completed'
-      ? 'completed'
-      : lessonData.status === 'missed' || lessonData.status === 'missed_excused'
-      ? 'missed'
-      : 'planned';
+  let dbStatus = 'scheduled';
+  if (lessonData.status === 'completed') {
+    dbStatus = 'completed';
+  } else if (lessonData.status === 'missed' || lessonData.status === 'missed_excused' || lessonData.status === 'missed_penalty') {
+    dbStatus = 'missed';
+  }
 
   const newId = generateUUID();
   const dbPayload: any = {
     id: newId,
     student_id: lessonData.student_id,
     lesson_date: lessonDate,
-    start_time: time.start,
-    end_time: time.end,
+    start_time: time.start.length === 5 ? `${time.start}:00` : time.start,
+    end_time: time.end.length === 5 ? `${time.end}:00` : time.end,
     status: dbStatus,
     notes: lessonData.notes || '',
     miss_reason: lessonData.miss_reason || null,
     needs_makeup: Boolean(lessonData.needs_makeup),
     is_makeup: Boolean(lessonData.is_makeup),
+    reminder_sent: false,
   };
 
-  const { data, error } = await supabase
+  let insertedRes = await supabase
     .from('tutor_lessons')
     .insert([dbPayload])
     .select('*, tutor_students(name)')
     .single();
 
-  if (error) {
-    console.error('Supabase saveLesson insert error:', error);
-    throw error;
+  if (insertedRes.error && dbStatus === 'missed') {
+    // Retry with missed_makeup if check constraint rejects 'missed'
+    dbPayload.status = 'missed_makeup';
+    insertedRes = await supabase
+      .from('tutor_lessons')
+      .insert([dbPayload])
+      .select('*, tutor_students(name)')
+      .single();
   }
+
+  if (insertedRes.error) {
+    console.error('Supabase saveLesson insert error:', insertedRes.error);
+    throw insertedRes.error;
+  }
+  const data = insertedRes.data;
 
   // If marked missed with makeup, add to tutor_makeups
   if (dbStatus === 'missed' && lessonData.needs_makeup) {
@@ -467,11 +484,20 @@ export async function setLessonStatusDirect(
     const reason = missReason || (targetStatus === 'missed_penalty' ? 'Пропуск без отработки' : 'Пропуск занятия');
     const wantsMakeup = needsMakeup || targetStatus === 'missed_excused';
 
-    await supabase.from('tutor_lessons').update({
+    const { error: updateErr } = await supabase.from('tutor_lessons').update({
       status: 'missed',
       miss_reason: reason,
       needs_makeup: wantsMakeup,
     }).eq('id', lessonId);
+
+    if (updateErr) {
+      // Fallback if check constraint only allows missed_makeup
+      await supabase.from('tutor_lessons').update({
+        status: 'missed_makeup',
+        miss_reason: reason,
+        needs_makeup: wantsMakeup,
+      }).eq('id', lessonId);
+    }
 
     if (wantsMakeup) {
       await supabase.from('tutor_makeups').upsert([
@@ -611,12 +637,13 @@ export async function planRecurringLessonsForStudent(
           id: generateUUID(),
           student_id: studentId,
           lesson_date: cursor,
-          start_time: time.start,
-          end_time: time.end,
-          status: 'planned',
+          start_time: time.start.length === 5 ? `${time.start}:00` : time.start,
+          end_time: time.end.length === 5 ? `${time.end}:00` : time.end,
+          status: 'scheduled',
           notes: 'Периодическое расписание',
           needs_makeup: false,
           is_makeup: false,
+          reminder_sent: false,
         });
       }
     }

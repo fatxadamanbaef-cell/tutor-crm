@@ -16,6 +16,7 @@ import {
   setLessonStatusDirect,
   scheduleSundayMakeup,
   archiveMakeup,
+  ensureRecurringLessonsForAllActiveStudents,
 } from '@/lib/storage';
 import { initTelegramApp } from '@/lib/telegram';
 import { Loader2 } from 'lucide-react';
@@ -50,6 +51,10 @@ export default function Dashboard() {
 
   const refreshData = async () => {
     try {
+      await ensureRecurringLessonsForAllActiveStudents(4).catch((err) => {
+        console.error('ensureRecurringLessons background error:', err);
+      });
+
       const [sData, lData, mData] = await Promise.all([
         getStudents(),
         getLessons(),
