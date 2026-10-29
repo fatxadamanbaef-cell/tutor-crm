@@ -200,7 +200,7 @@ export async function saveStudent(student: {
   }
 
   // If recurring_schedule provided, generate lessons for next 4 weeks
-  if (student.recurring_schedule && student.recurring_schedule.length > 0) {
+  if (student.recurring_schedule !== undefined) {
     await planRecurringLessonsForStudent(studentId, student.recurring_schedule, 4);
   }
 
@@ -600,45 +600,127 @@ export async function planRecurringLessonsForStudent(
   schedule: RecurringSlot[],
   weeksAhead: number = 4
 ): Promise<{ createdCount: number }> {
-  if (!supabase || schedule.length === 0) return { createdCount: 0 };
+  if (!supabase) return { createdCount: 0 };
 
   const todayStr = getTashkentTodayStr();
   const endDateStr = addDaysStr(todayStr, weeksAhead * 7);
+  const now = getTashkentNow();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+  const normalizedSlots = (schedule || []).map((s) => {
+    const time = parseTimeRange(s.startTime + (s.endTime ? ` - ${s.endTime}` : ''));
+    return {
+      dayOfWeek: Number(s.dayOfWeek),
+      start: time.start.substring(0, 5),
+      end: time.end.substring(0, 5),
+    };
+  });
+
+  const validScheduleSlotKeys = new Set(normalizedSlots.map((s) => `${s.dayOfWeek}_${s.start}`));
 
   // Fetch existing lessons in this period for this student
-  const { data: existing } = await supabase
+  const { data: existing, error } = await supabase
     .from('tutor_lessons')
-    .select('lesson_date, start_time')
+    .select('id, lesson_date, start_time, end_time, status, is_makeup, needs_makeup')
     .eq('student_id', studentId)
     .gte('lesson_date', todayStr)
     .lte('lesson_date', endDateStr);
 
-  const existingMap = new Set<string>();
-  (existing || []).forEach((l) => {
+  if (error) {
+    console.error('Failed to fetch existing lessons for student:', error);
+    throw error;
+  }
+
+  const existingList = existing || [];
+
+  const todayHasCompletedOrMissed = existingList.some(
+    (l) =>
+      String(l.lesson_date).substring(0, 10) === todayStr &&
+      (l.status === 'completed' || l.status === 'missed' || String(l.status).startsWith('missed_'))
+  );
+
+  const idsToDelete: string[] = [];
+  const keptKeys = new Set<string>();
+
+  for (const l of existingList) {
     const d = String(l.lesson_date).substring(0, 10);
     const t = String(l.start_time).substring(0, 5);
-    existingMap.add(`${d}_${t}`);
-  });
+    const key = `${d}_${t}`;
+    const dow = dayOfWeekOf(d);
+    const slotKey = `${dow}_${t}`;
+
+    const isPendingOrScheduled = l.status === 'scheduled' || l.status === 'planned';
+    const isProtected = l.is_makeup || l.needs_makeup || !isPendingOrScheduled;
+
+    if (isProtected) {
+      keptKeys.add(key);
+      continue;
+    }
+
+    if (keptKeys.has(key)) {
+      idsToDelete.push(l.id);
+      continue;
+    }
+
+    if (normalizedSlots.length === 0) {
+      idsToDelete.push(l.id);
+      continue;
+    }
+
+    if (d === todayStr) {
+      const slotMinutes = toMinutes(t);
+      if (todayHasCompletedOrMissed || currentMinutes >= slotMinutes || !validScheduleSlotKeys.has(slotKey)) {
+        idsToDelete.push(l.id);
+        continue;
+      }
+    } else {
+      if (!validScheduleSlotKeys.has(slotKey)) {
+        idsToDelete.push(l.id);
+        continue;
+      }
+    }
+
+    keptKeys.add(key);
+  }
+
+  if (idsToDelete.length > 0) {
+    const { error: delErr } = await supabase
+      .from('tutor_lessons')
+      .delete()
+      .in('id', idsToDelete);
+    if (delErr) {
+      console.error('Failed to delete obsolete recurring lessons:', delErr);
+    }
+  }
+
+  if (normalizedSlots.length === 0) {
+    return { createdCount: 0 };
+  }
 
   const newLessons: any[] = [];
   let cursor = todayStr;
 
   while (cursor <= endDateStr) {
-    const dow = dayOfWeekOf(cursor); // 1=Mon .. 7=Sun
-    const matchingSlots = schedule.filter((s) => Number(s.dayOfWeek) === dow);
+    const dow = dayOfWeekOf(cursor);
+    const matchingSlots = normalizedSlots.filter((s) => s.dayOfWeek === dow);
 
     for (const slot of matchingSlots) {
-      const time = parseTimeRange(slot.startTime + (slot.endTime ? ` - ${slot.endTime}` : ''));
-      const key = `${cursor}_${time.start}`;
+      const key = `${cursor}_${slot.start}`;
 
-      if (!existingMap.has(key)) {
-        existingMap.add(key);
+      if (cursor === todayStr) {
+        if (todayHasCompletedOrMissed) continue;
+        const slotMinutes = toMinutes(slot.start);
+        if (currentMinutes >= slotMinutes) continue;
+      }
+
+      if (!keptKeys.has(key)) {
+        keptKeys.add(key);
         newLessons.push({
           id: generateUUID(),
           student_id: studentId,
           lesson_date: cursor,
-          start_time: time.start.length === 5 ? `${time.start}:00` : time.start,
-          end_time: time.end.length === 5 ? `${time.end}:00` : time.end,
+          start_time: slot.start.length === 5 ? `${slot.start}:00` : slot.start,
+          end_time: slot.end.length === 5 ? `${slot.end}:00` : slot.end,
           status: 'scheduled',
           notes: 'Периодическое расписание',
           needs_makeup: false,
@@ -651,10 +733,10 @@ export async function planRecurringLessonsForStudent(
   }
 
   if (newLessons.length > 0) {
-    const { error } = await supabase.from('tutor_lessons').insert(newLessons);
-    if (error) {
-      console.error('Failed to insert recurring lessons:', error);
-      throw error;
+    const { error: insErr } = await supabase.from('tutor_lessons').insert(newLessons);
+    if (insErr) {
+      console.error('Failed to insert recurring lessons:', insErr);
+      throw insErr;
     }
   }
 
@@ -833,7 +915,7 @@ export async function updateStudentSettings(
     await supabase.from('tutor_students').update(payload).eq('id', studentId);
   }
 
-  if (updates.recurring_schedule && updates.recurring_schedule.length > 0) {
+  if (updates.recurring_schedule !== undefined) {
     await planRecurringLessonsForStudent(studentId, updates.recurring_schedule, 4);
   }
 }
