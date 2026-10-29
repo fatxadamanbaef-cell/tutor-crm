@@ -47,6 +47,20 @@ export default function Dashboard() {
   useEffect(() => {
     initTelegramApp();
     refreshData();
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        refreshData();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+    };
   }, []);
 
   const refreshData = async () => {
@@ -216,6 +230,7 @@ export default function Dashboard() {
             onSetLessonStatus={handleSetLessonStatus}
             onScheduleSundayMakeup={handleScheduleSundayMakeup}
             onArchiveMakeup={handleArchiveMakeup}
+            onRefresh={refreshData}
           />
         )}
         {activeTab === 'clients' && (

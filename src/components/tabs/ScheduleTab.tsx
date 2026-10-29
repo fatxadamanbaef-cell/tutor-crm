@@ -19,6 +19,7 @@ interface ScheduleTabProps {
   onSetLessonStatus: (lessonId: string, status: LessonStatus, missReason?: string, needsMakeup?: boolean) => Promise<void>;
   onScheduleSundayMakeup: (makeupIdOrLesson: any, sundayDate: string, timeStr: string) => Promise<void>;
   onArchiveMakeup: (makeupId: string) => Promise<void>;
+  onRefresh?: () => Promise<void> | void;
 }
 
 export const ScheduleTab: React.FC<ScheduleTabProps> = ({
@@ -31,11 +32,25 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
   onSetLessonStatus,
   onScheduleSundayMakeup,
   onArchiveMakeup,
+  onRefresh,
 }) => {
   const [currentWeekStart, setCurrentWeekStart] = useState<Date>(startOfWeek(getTashkentNow(), { weekStartsOn: 1 }));
   const [selectedDate, setSelectedDate] = useState<Date>(getTashkentNow());
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('list');
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const gridRef = useRef<HTMLDivElement>(null);
+
+  const handleRefreshClick = async () => {
+    if (!onRefresh) return;
+    hapticImpact('light');
+    setIsRefreshing(true);
+    try {
+      await onRefresh();
+      hapticNotification('success');
+    } finally {
+      setTimeout(() => setIsRefreshing(false), 500);
+    }
+  };
 
   // Bottom Sheet for Miss Lesson
   const [missModalLesson, setMissModalLesson] = useState<Lesson | null>(null);
@@ -175,6 +190,16 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
         </div>
 
         <div className="flex gap-2">
+          {onRefresh && (
+            <button
+              onClick={handleRefreshClick}
+              disabled={isRefreshing}
+              className="w-8 h-8 flex items-center justify-center rounded-full bg-gray-100 text-gray-700 active:scale-95 disabled:opacity-50"
+              title="Обновить расписание"
+            >
+              <RotateCcw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-blue-600' : ''}`} />
+            </button>
+          )}
           <button
             onClick={() => {
               hapticImpact('light');
