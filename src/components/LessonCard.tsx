@@ -1,23 +1,15 @@
 'use client';
 
-import React, { useRef } from 'react';
+import React, { useState } from 'react';
 import { Lesson, Student, LessonStatus } from '@/types';
-import { Clock, Check, X, Flame } from 'lucide-react';
+import { Clock, Check, X, CalendarClock, ChevronDown } from 'lucide-react';
 import { hapticImpact, hapticNotification, hapticSelection } from '@/lib/telegram';
-
-const fireConfetti = () => {
-  if (typeof window !== 'undefined') {
-    import('canvas-confetti').then((mod) => {
-      mod.default({ particleCount: 45, spread: 55, origin: { y: 0.7 } });
-    }).catch(() => {});
-  }
-};
 
 interface LessonCardProps {
   lesson: Lesson;
   student?: Student;
   onToggleStatus: (id: string) => void;
-  onSetStatus?: (id: string, status: LessonStatus) => void;
+  onSetStatus?: (id: string, status: LessonStatus, missReason?: string, needsMakeup?: boolean) => void;
   onDeleteLesson?: (id: string) => void;
   onEditLesson?: (lesson: Lesson) => void;
 }
@@ -27,180 +19,182 @@ export const LessonCard: React.FC<LessonCardProps> = ({
   student,
   onToggleStatus,
   onSetStatus,
-  onDeleteLesson,
   onEditLesson,
 }) => {
   const isCompleted = lesson.status === 'completed';
-  const isMissed = lesson.status === 'missed_excused';
-  const isBurned = lesson.status === 'missed_penalty';
+  const isMissed = lesson.status === 'missed' || lesson.status === 'missed_excused' || lesson.status === 'missed_penalty';
   const isPlanned = lesson.status === 'planned';
 
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const [showMissOptions, setShowMissOptions] = useState(false);
 
-  const handleCardClick = () => {
-    if (isPlanned) {
-      hapticNotification('success');
-      fireConfetti();
-    } else if (isCompleted) {
-      hapticNotification('warning');
-    } else if (isMissed) {
-      hapticNotification('error');
+  const studentColor = student?.color || '#3B82F6';
+  const target = student?.monthly_target_lessons || 12;
+  const conducted = student?.conducted_this_month || 0;
+
+  const handleQuickComplete = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    hapticNotification('success');
+    setShowMissOptions(false);
+    if (onSetStatus) {
+      // If already completed, toggle back to planned
+      onSetStatus(lesson.id, isCompleted ? 'planned' : 'completed');
     } else {
-      hapticSelection();
+      onToggleStatus(lesson.id);
     }
-    onToggleStatus(lesson.id);
   };
 
-  // Long press handler to edit/delete
-  const handleTouchStart = () => {
-    timerRef.current = setTimeout(() => {
-      hapticImpact('heavy');
-      if (onEditLesson) {
-        onEditLesson(lesson);
-      } else if (onDeleteLesson) {
-        if (confirm(`Удалить урок «${lesson.student_name || 'Ученик'}» из расписания?`)) {
-          onDeleteLesson(lesson.id);
-        }
-      }
-    }, 700);
+  const handleMissWithMakeup = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    hapticNotification('warning');
+    setShowMissOptions(false);
+    if (onSetStatus) {
+      onSetStatus(lesson.id, 'missed', 'Пропуск (в отработку)', true);
+    }
   };
 
-  const handleTouchEnd = () => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
+  const handleMissNoMakeup = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    hapticSelection();
+    setShowMissOptions(false);
+    if (onSetStatus) {
+      onSetStatus(lesson.id, 'missed', 'Пропуск без отработки', false);
     }
   };
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={handleCardClick}
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-      onMouseDown={handleTouchStart}
-      onMouseUp={handleTouchEnd}
-      className={`w-full text-left select-none cursor-pointer rounded-2xl border p-3 transition-all duration-150 active:scale-[0.99] focus:outline-none space-y-2.5 ${
+      onClick={() => onEditLesson && onEditLesson(lesson)}
+      className={`w-full text-left select-none cursor-pointer rounded-2xl bg-white border p-3.5 transition-all duration-150 active:scale-[0.99] shadow-xs space-y-3 ${
         isCompleted
-          ? 'bg-emerald-950/30 border-emerald-500/50 shadow-md shadow-emerald-950/40'
-          : isBurned
-          ? 'bg-rose-950/30 border-rose-500/50 shadow-md shadow-rose-950/40'
+          ? 'border-emerald-300/80 bg-emerald-50/20'
           : isMissed
-          ? 'bg-amber-950/30 border-amber-500/50 shadow-md shadow-amber-950/40'
-          : 'bg-zinc-900/95 border-zinc-800 hover:border-zinc-700 shadow-sm'
+          ? 'border-rose-300/80 bg-rose-50/20'
+          : 'border-gray-200/80 hover:border-gray-300'
       }`}
+      style={{ borderLeftWidth: '4px', borderLeftColor: studentColor }}
     >
-      <div className="flex items-center justify-between gap-3">
-        {/* Left: Time & Student Name & Topic */}
+      {/* Top Header: Time + Student + Progress + Status Badge */}
+      <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 text-xs text-zinc-400 font-medium">
-            <Clock className="w-3.5 h-3.5 text-teal-400 shrink-0" />
-            <span className="font-mono text-zinc-200 font-bold tracking-tight">
+          <div className="flex items-center gap-1.5 text-xs text-gray-500 font-semibold">
+            <Clock className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+            <span className="font-mono text-gray-900 font-extrabold tracking-tight">
               {lesson.time_str || '18:00 - 19:30'}
             </span>
-            {student && (
-              <span className="text-[10px] text-zinc-400">
-                • {student.prepaid_balance > 0 ? `+${student.prepaid_balance} ур.` : `${student.prepaid_balance} ур.`}
-              </span>
-            )}
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-700 shrink-0">
+              {conducted}/{target} ур.
+            </span>
           </div>
 
-          <div className="font-bold text-sm text-white truncate mt-0.5">
+          <div className="font-black text-sm text-gray-900 truncate mt-1">
             {lesson.student_name || student?.name || 'Ученик'}
           </div>
 
           {lesson.notes && (
-            <div className="text-[11px] text-zinc-400 truncate mt-0.5 flex items-center gap-1">
-              <span className="text-amber-400/90 font-bold text-[10px]">ДЗ / Заметка:</span>
-              <span className="truncate">{lesson.notes}</span>
+            <div className="text-[11px] text-gray-500 truncate mt-0.5">
+              <span className="text-amber-600 font-bold mr-1">Заметка:</span>
+              <span>{lesson.notes}</span>
+            </div>
+          )}
+
+          {isMissed && lesson.miss_reason && (
+            <div className="text-[11px] text-rose-600 font-bold truncate mt-0.5">
+              <span>Причина: {lesson.miss_reason}</span>
+              {lesson.needs_makeup && <span className="ml-1 text-amber-600">• Отработка в ВС</span>}
             </div>
           )}
         </div>
 
-        {/* Right: Clean Status Badge & Quick Edit */}
-        <div className="shrink-0 flex items-center gap-1.5">
-          {onEditLesson && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                hapticImpact('light');
-                onEditLesson(lesson);
-              }}
-              className="p-1 rounded-lg text-zinc-500 hover:text-zinc-200 bg-zinc-800/50 hover:bg-zinc-800 active:scale-95 transition-all"
-              title="Перенести или изменить урок"
-            >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 20h9"/>
-                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
-              </svg>
-            </button>
-          )}
-
+        {/* Status Badge */}
+        <div className="shrink-0">
           {isCompleted && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-emerald-300 bg-emerald-500/20 border border-emerald-500/30 px-2 py-0.5 rounded-xl animate-in fade-in zoom-in-95 duration-150">
+            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-lg">
               <Check className="w-3 h-3 stroke-[3]" />
               <span>Проведен</span>
             </span>
           )}
-
-          {isBurned && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-rose-300 bg-rose-500/20 border border-rose-500/30 px-2 py-0.5 rounded-xl animate-in fade-in zoom-in-95 duration-150">
-              <span>🔥 Сгорел</span>
-            </span>
-          )}
-
           {isMissed && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-amber-300 bg-amber-500/20 border border-amber-500/30 px-2 py-0.5 rounded-xl animate-in fade-in zoom-in-95 duration-150">
+            <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-lg">
               <X className="w-3 h-3 stroke-[3]" />
-              <span>В ВС</span>
+              <span>{lesson.needs_makeup ? 'В ВС' : 'Пропуск'}</span>
             </span>
           )}
-
           {isPlanned && (
-            <span className="w-2.5 h-2.5 rounded-full bg-teal-500/60 mr-1" />
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-gray-600 bg-gray-100 px-2 py-0.5 rounded-lg">
+              <span>⏳ План</span>
+            </span>
           )}
         </div>
       </div>
 
-      {/* QUICK STATUS BAR (1-CLICK STATUS SELECTION) */}
-      <div
-        className="grid grid-cols-2 gap-2 pt-1.5 border-t border-zinc-800/60"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          type="button"
-          onClick={() => {
-            hapticNotification('success');
-            fireConfetti();
-            if (onSetStatus) onSetStatus(lesson.id, 'completed');
-            else onToggleStatus(lesson.id);
-          }}
-          className={`py-1.5 px-2 rounded-lg text-xs font-bold border transition-all active:scale-95 flex items-center justify-center gap-1 ${
-            isCompleted
-              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-sm'
-              : 'bg-zinc-950/60 border-zinc-800/80 text-zinc-400 hover:text-emerald-300'
-          }`}
-        >
-          <span>✅</span>
-          <span>Был</span>
-        </button>
+      {/* Quick Action Buttons (1-Tap) */}
+      <div className="pt-2 border-t border-gray-100/90 flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
+        <div className="grid grid-cols-3 gap-1.5">
+          {/* Button 1: Conducted */}
+          <button
+            type="button"
+            onClick={handleQuickComplete}
+            className={`py-2 px-1 text-center text-xs font-bold rounded-xl border transition-all active:scale-95 flex items-center justify-center gap-1 ${
+              isCompleted
+                ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                : 'bg-gray-50 text-emerald-700 border-gray-200 hover:bg-emerald-50'
+            }`}
+          >
+            <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+            <span>{isCompleted ? 'Был ✅' : 'Был'}</span>
+          </button>
 
-        <button
-          type="button"
-          onClick={() => {
-            hapticSelection();
-            if (onSetStatus) onSetStatus(lesson.id, 'planned');
-          }}
-          className={`py-1.5 px-2 rounded-lg text-xs font-bold border transition-all active:scale-95 flex items-center justify-center gap-1 ${
-            isPlanned
-              ? 'bg-teal-500/20 text-teal-400 border-teal-500/30 shadow-sm'
-              : 'bg-zinc-950/60 border-zinc-800/80 text-zinc-400 hover:text-teal-300'
-          }`}
-        >
-          <span>⚪</span>
-          <span>Не был (План)</span>
-        </button>
+          {/* Button 2: Missed Toggle */}
+          <button
+            type="button"
+            onClick={() => {
+              hapticImpact('light');
+              setShowMissOptions(!showMissOptions);
+            }}
+            className={`py-2 px-1 text-center text-xs font-bold rounded-xl border transition-all active:scale-95 flex items-center justify-center gap-0.5 ${
+              isMissed
+                ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
+                : 'bg-gray-50 text-rose-700 border-gray-200 hover:bg-rose-50'
+            }`}
+          >
+            <X className="w-3.5 h-3.5 stroke-[2.5]" />
+            <span>Пропуск</span>
+            <ChevronDown className={`w-3 h-3 transition-transform ${showMissOptions ? 'rotate-180' : ''}`} />
+          </button>
+
+          {/* Button 3: Reschedule / Edit */}
+          <button
+            type="button"
+            onClick={() => {
+              hapticImpact('light');
+              if (onEditLesson) onEditLesson(lesson);
+            }}
+            className="py-2 px-1 text-center text-xs font-bold rounded-xl border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 transition-all active:scale-95 flex items-center justify-center gap-1"
+          >
+            <CalendarClock className="w-3.5 h-3.5 text-blue-600" />
+            <span>Перенести</span>
+          </button>
+        </div>
+
+        {/* Quick Miss Options Submenu */}
+        {showMissOptions && (
+          <div className="grid grid-cols-2 gap-1.5 pt-1 animate-in fade-in duration-150">
+            <button
+              type="button"
+              onClick={handleMissWithMakeup}
+              className="py-1.5 px-2 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 active:scale-95"
+            >
+              <span>🔄 В отработку (ВС)</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleMissNoMakeup}
+              className="py-1.5 px-2 bg-rose-50 text-rose-800 border border-rose-200 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 active:scale-95"
+            >
+              <span>❌ Без отработки</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

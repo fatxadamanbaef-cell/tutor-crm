@@ -16,7 +16,6 @@ import {
   setLessonStatusDirect,
   scheduleSundayMakeup,
   archiveMakeup,
-  ensureRecurringLessonsForAllActiveStudents,
 } from '@/lib/storage';
 import { initTelegramApp } from '@/lib/telegram';
 import { Loader2 } from 'lucide-react';
@@ -47,28 +46,10 @@ export default function Dashboard() {
   useEffect(() => {
     initTelegramApp();
     refreshData();
-
-    const handleVisibilityOrFocus = () => {
-      if (document.visibilityState === 'visible') {
-        refreshData();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
-    window.addEventListener('focus', handleVisibilityOrFocus);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
-      window.removeEventListener('focus', handleVisibilityOrFocus);
-    };
   }, []);
 
   const refreshData = async () => {
     try {
-      await ensureRecurringLessonsForAllActiveStudents(4).catch((err) => {
-        console.error('ensureRecurringLessons background error:', err);
-      });
-
       const [sData, lData, mData] = await Promise.all([
         getStudents(),
         getLessons(),
@@ -104,23 +85,41 @@ export default function Dashboard() {
     needsMakeup?: boolean
   ) => {
     try {
+      // Optimistic local state update
+      setLessons((prev) =>
+        prev.map((l) =>
+          l.id === lessonId
+            ? {
+                ...l,
+                status,
+                miss_reason: missReason !== undefined ? missReason : l.miss_reason,
+                needs_makeup: needsMakeup !== undefined ? needsMakeup : l.needs_makeup,
+              }
+            : l
+        )
+      );
+
       await setLessonStatusDirect(lessonId, status, missReason, needsMakeup);
-      await refreshData();
+
+      // Update makeups list in background if needed
+      getPendingMakeups().then(setMakeups).catch(() => {});
     } catch (e) {
       console.error('Status change failed:', e);
+      refreshData();
     }
   };
 
   const handleScheduleSundayMakeup = async (makeupIdOrLessonId: string, sundayDate: string, timeStr: string) => {
     try {
-      // Find if it's makeupId or lessonId
       const makeup = makeups.find(m => m.id === makeupIdOrLessonId || m.missed_lesson_id === makeupIdOrLessonId);
       if (makeup) {
-        await scheduleSundayMakeup(makeup.id, sundayDate, timeStr);
+        const newL = await scheduleSundayMakeup(makeup.id, sundayDate, timeStr);
+        setLessons((prev) => [...prev, newL]);
+        setMakeups((prev) => prev.filter((m) => m.id !== makeup.id));
       } else {
         const lesson = lessons.find(l => l.id === makeupIdOrLessonId);
         if (lesson) {
-          await saveLesson({
+          const newL = await saveLesson({
             student_id: lesson.student_id,
             date: sundayDate,
             time_str: timeStr,
@@ -128,11 +127,12 @@ export default function Dashboard() {
             is_makeup: true,
             notes: `Отработка за ${lesson.date.substring(0, 10)}: ${lesson.miss_reason || ''}`,
           });
+          setLessons((prev) => [...prev, newL]);
         }
       }
-      await refreshData();
     } catch (e) {
       console.error('Failed to schedule Sunday makeup:', e);
+      refreshData();
     }
   };
 
@@ -141,30 +141,38 @@ export default function Dashboard() {
       const makeup = makeups.find(m => m.id === makeupIdOrLessonId || m.missed_lesson_id === makeupIdOrLessonId);
       if (makeup) {
         await archiveMakeup(makeup.id);
+        setMakeups((prev) => prev.filter((m) => m.id !== makeup.id));
       } else {
         await updateLessonDetails(makeupIdOrLessonId, { needs_makeup: false });
+        setLessons((prev) =>
+          prev.map((l) => (l.id === makeupIdOrLessonId ? { ...l, needs_makeup: false } : l))
+        );
       }
-      await refreshData();
     } catch (e) {
       console.error('Failed to archive makeup:', e);
+      refreshData();
     }
   };
 
   const handleDeleteStudent = async (studentId: string) => {
     try {
-      await deleteStudent(studentId);
+      setStudents((prev) => prev.filter((s) => s.id !== studentId));
+      setLessons((prev) => prev.filter((l) => l.student_id !== studentId));
       setSelectedStudent(null);
-      await refreshData();
+      await deleteStudent(studentId);
     } catch (e) {
       console.error('Delete error:', e);
+      refreshData();
     }
   };
 
   const handleSaveStudent = async (data: any) => {
     try {
-      await saveStudent(data);
-      await refreshData();
+      const saved = await saveStudent(data);
+      setStudents((prev) => [...prev.filter((s) => s.id !== saved.id), saved]);
       setIsAddStudentOpen(false);
+      // Refresh lessons for this student's new slots
+      getLessons().then(setLessons).catch(() => {});
     } catch (e: any) {
       console.error('Save error:', e);
       alert('Ошибка при сохранении: ' + (e.message || String(e)));
@@ -174,11 +182,11 @@ export default function Dashboard() {
   const handleSaveStudentInfo = async (studentId: string, updates: any) => {
     try {
       await updateStudentSettings(studentId, updates);
-      await refreshData();
-      if (selectedStudent) {
-        const refreshed = (await getStudents()).find((s) => s.id === studentId);
-        if (refreshed) setSelectedStudent(refreshed);
-      }
+      const updatedStudents = await getStudents();
+      setStudents(updatedStudents);
+      const refreshed = updatedStudents.find((s) => s.id === studentId);
+      if (refreshed) setSelectedStudent(refreshed);
+      getLessons().then(setLessons).catch(() => {});
     } catch (e) {
       console.error('Failed to save student info:', e);
     }
@@ -186,17 +194,30 @@ export default function Dashboard() {
 
   const handleUpdateLessonTime = async (lessonId: string, timeStr: string, dateStr?: string) => {
     try {
+      setLessons((prev) =>
+        prev.map((l) =>
+          l.id === lessonId
+            ? {
+                ...l,
+                time_str: timeStr,
+                date: dateStr ? `${dateStr}T${timeStr.split(' - ')[0]}:00+05:00` : l.date,
+              }
+            : l
+        )
+      );
       await updateLessonTime(lessonId, timeStr, dateStr);
-      await refreshData();
     } catch (e) {
       console.error('Failed to update lesson time:', e);
+      refreshData();
     }
   };
 
   const handleUpdateLessonMissReason = async (lessonId: string, missReason: string) => {
     try {
+      setLessons((prev) =>
+        prev.map((l) => (l.id === lessonId ? { ...l, miss_reason: missReason } : l))
+      );
       await updateLessonDetails(lessonId, { miss_reason: missReason });
-      await refreshData();
     } catch (e) {
       console.error('Failed to update miss reason:', e);
     }
@@ -204,14 +225,14 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+      <div className="min-h-screen bg-[#f2f2f7] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="h-screen bg-gray-50 overflow-hidden relative selection:bg-blue-100">
+    <div className="h-screen bg-[#f2f2f7] overflow-hidden relative selection:bg-blue-100">
       {/* Main Tab Content */}
       <div className="h-full overflow-y-auto">
         {activeTab === 'schedule' && (
@@ -254,11 +275,11 @@ export default function Dashboard() {
           lessons={lessons}
           onBack={() => {
             setSelectedStudent(null);
-            refreshData();
           }}
           onDeleteStudent={handleDeleteStudent}
           onSaveStudentInfo={handleSaveStudentInfo}
           onUpdateLessonMissReason={handleUpdateLessonMissReason}
+          onOpenLesson={(lesson) => setSelectedLesson(lesson)}
         />
       )}
 
@@ -276,11 +297,12 @@ export default function Dashboard() {
         initialDate={selectedDateForNewLesson}
         onSave={async (data) => {
           try {
-            await saveLesson(data);
-            await refreshData();
+            const newLesson = await saveLesson(data);
+            setLessons((prev) => [...prev, newLesson]);
             setIsAddLessonOpen(false);
           } catch (e) {
             console.error('Failed to save lesson:', e);
+            refreshData();
           }
         }}
       />
@@ -292,18 +314,24 @@ export default function Dashboard() {
         student={selectedLesson ? students.find((s) => s.id === selectedLesson.student_id) || null : null}
         onSave={async (lessonId, updates) => {
           try {
+            setLessons((prev) =>
+              prev.map((l) => (l.id === lessonId ? { ...l, ...updates } : l))
+            );
             await updateLessonDetails(lessonId, updates);
-            await refreshData();
+            setSelectedLesson(null);
           } catch (e) {
             console.error('Update failed:', e);
+            refreshData();
           }
         }}
         onDelete={async (lessonId) => {
           try {
+            setLessons((prev) => prev.filter((l) => l.id !== lessonId));
             await deleteLesson(lessonId);
-            await refreshData();
+            setSelectedLesson(null);
           } catch (e) {
             console.error('Delete failed:', e);
+            refreshData();
           }
         }}
       />

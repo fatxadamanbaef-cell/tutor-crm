@@ -82,8 +82,6 @@ export async function generateStudentReport(
     schedule_notes: studentData.notes || '',
     color: studentData.color || '#3B82F6',
     makeup_debt: 0,
-    price_per_lesson: 0,
-    prepaid_balance: 0,
   };
 
   // 2. Fetch pending makeups
@@ -261,8 +259,6 @@ export async function findStudentsByName(nameQuery: string): Promise<Student[]> 
     color: s.color || '#3B82F6',
     created_at: s.created_at,
     makeup_debt: 0,
-    price_per_lesson: 0,
-    prepaid_balance: 0,
   }));
 }
 

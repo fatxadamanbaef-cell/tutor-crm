@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { buildMorningDigest, sendTelegramMessage } from '../route';
 
 const TEACHER_TELEGRAM_CHAT_ID = process.env.TEACHER_TELEGRAM_CHAT_ID || '';
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'https://tutor-tracker.vercel.app';
 
 export async function GET(req: NextRequest) {
   try {
@@ -10,26 +9,18 @@ export async function GET(req: NextRequest) {
     const chatId = url.searchParams.get('chat_id') || TEACHER_TELEGRAM_CHAT_ID;
 
     if (!chatId) {
-      return NextResponse.json({
-        ok: false,
-        error: 'chat_id is required or set TEACHER_TELEGRAM_CHAT_ID env variable',
-      }, { status: 400 });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'chat_id is required or set TEACHER_TELEGRAM_CHAT_ID env variable',
+        },
+        { status: 400 }
+      );
     }
 
-    const { text: digestText } = await buildMorningDigest('Преподаватель');
+    const { text: digestText, markup } = await buildMorningDigest('Фархад');
 
-    const replyMarkup = {
-      inline_keyboard: [
-        [
-          {
-            text: '🚀 Открыть расписание',
-            web_app: { url: APP_URL },
-          },
-        ],
-      ],
-    };
-
-    await sendTelegramMessage(chatId, digestText, replyMarkup);
+    await sendTelegramMessage(chatId, digestText, markup);
 
     return NextResponse.json({ ok: true, sent_to: chatId });
   } catch (error) {

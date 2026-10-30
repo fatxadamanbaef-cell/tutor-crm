@@ -59,7 +59,7 @@ async function loadRow(): Promise<StateRow | null> {
   if (!supabase) return null;
   const { data, error } = await supabase
     .from('tutor_students')
-    .select('id, notes, monthly_target_lessons, package_remaining_lessons')
+    .select('id, notes, monthly_target_lessons')
     .eq('name', STATE_NAME)
     .order('created_at', { ascending: true })
     .limit(1);
@@ -67,7 +67,7 @@ async function loadRow(): Promise<StateRow | null> {
   if (error) throw error;
 
   if (data && data.length > 0) {
-    const version = Number(data[0].monthly_target_lessons || data[0].package_remaining_lessons) || 0;
+    const version = Number(data[0].monthly_target_lessons) || 0;
     return {
       id: data[0].id,
       version,

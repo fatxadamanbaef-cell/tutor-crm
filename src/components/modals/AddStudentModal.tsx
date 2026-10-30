@@ -15,9 +15,6 @@ interface AddStudentModalProps {
     phone?: string;
     telegram?: string;
     recurring_schedule?: RecurringSlot[];
-    // legacy compatibility
-    price_per_lesson?: number;
-    prepaid_balance?: number;
   }) => void;
 }
 
@@ -73,8 +70,6 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
       phone: phone.trim(),
       telegram: telegram.trim(),
       recurring_schedule,
-      price_per_lesson: 0,
-      prepaid_balance: 0,
     });
 
     onClose();

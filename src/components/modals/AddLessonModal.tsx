@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Student, LessonStatus } from '@/types';
 import { X, CalendarPlus, Clock } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
-import { getTashkentTodayStr, formatUZS } from '@/lib/formatters';
+import { getTashkentTodayStr } from '@/lib/formatters';
 import { format } from 'date-fns';
 
 interface AddLessonModalProps {

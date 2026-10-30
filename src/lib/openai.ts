@@ -19,6 +19,7 @@ import { getTashkentTodayStr, getTashkentNow } from './formatters';
 import { resolveStudent } from './nameMatch';
 import { getHistory, appendHistory } from './botState';
 import { generateStudentReport } from './reports';
+import { supabase } from './supabase';
 
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4.1';
 const MAX_STEPS = 8;
@@ -107,15 +108,15 @@ const TOOLS = [
   // 2. Перенос урока
   fn(
     'rescheduleLesson',
-    'Переносит запланированный урок ученика на другое время и/или день.',
+    'Переносит урок ученика (запланированный, уже проведенный «был» или пропущенный) на новую дату и/или время. Если исходная дата (fromDate) не указана, система автоматически найдет подходящий/последний урок ученика. После переноса урок становится активным и запланированным (planned).',
     {
       studentName: studentNameProp,
-      fromDate: { type: 'string', description: 'Текущая дата урока YYYY-MM-DD' },
+      fromDate: { type: 'string', description: 'Исходная дата урока YYYY-MM-DD (необязательно, если не указана — найдет сегодняшний или последний урок)' },
       toDate: { type: 'string', description: 'Новая дата YYYY-MM-DD' },
-      toStartTime: { type: 'string', description: "Новое время 'HH:MM' или 'HH:MM - HH:MM' (например '16:00')" },
+      toStartTime: { type: 'string', description: "Новое время 'HH:MM' или 'HH:MM - HH:MM' (например '10:00' или '10:00 - 11:30')" },
       reason: { type: 'string', description: 'Причина переноса' },
     },
-    ['studentName', 'fromDate', 'toDate', 'toStartTime']
+    ['studentName', 'toDate', 'toStartTime']
   ),
 
   // 3. Создание или обновление ученика и его шаблона расписания
@@ -250,25 +251,66 @@ function createToolbox(): Toolbox {
     // 2. rescheduleLesson
     async rescheduleLesson(a) {
       const student = await pickStudent(a.studentName);
-      const fromDate = assertDate(a.fromDate, 'fromDate');
       const toDate = assertDate(a.toDate, 'toDate');
       const { lessons } = await load();
 
-      const lesson = lessons.find(
-        (l) => l.student_id === student.id && l.date.substring(0, 10) === fromDate
-      );
-      if (!lesson) {
-        throw new Error(`Ученик ${student.name} не имеет урока на дату ${fromDate}`);
+      const studentLessons = lessons
+        .filter((l) => l.student_id === student.id)
+        .sort((x, y) => y.date.localeCompare(x.date));
+
+      let lesson: Lesson | undefined;
+      if (a.fromDate) {
+        const fromDate = assertDate(a.fromDate, 'fromDate');
+        lesson = studentLessons.find((l) => l.date.substring(0, 10) === fromDate);
       }
 
-      await updateLessonTime(lesson.id, a.toStartTime, toDate);
-      if (a.reason) {
-        await updateLessonDetails(lesson.id, { notes: `Перенос: ${a.reason}` });
+      if (!lesson) {
+        // Find today's lesson
+        lesson = studentLessons.find((l) => l.date.substring(0, 10) === today);
+      }
+
+      if (!lesson) {
+        // Check if there is already a lesson on toDate
+        lesson = studentLessons.find((l) => l.date.substring(0, 10) === toDate);
+      }
+
+      if (!lesson && studentLessons.length > 0) {
+        // Pick the most recent lesson (past or planned)
+        lesson = studentLessons[0];
+      }
+
+      const originalDate = lesson ? lesson.date.substring(0, 10) : null;
+
+      if (lesson && originalDate !== toDate) {
+        await updateLessonTime(lesson.id, a.toStartTime, toDate);
+        await updateLessonDetails(lesson.id, {
+          status: 'planned',
+          miss_reason: undefined,
+          needs_makeup: false,
+          notes: a.reason ? `Перенос с ${originalDate}: ${a.reason}` : `Перенос с ${originalDate}`,
+        });
+        if (lesson.id && supabase) {
+          await supabase.from('tutor_makeups').delete().eq('missed_lesson_id', lesson.id);
+        }
+      } else if (lesson && originalDate === toDate) {
+        await updateLessonTime(lesson.id, a.toStartTime, toDate);
+        await updateLessonDetails(lesson.id, {
+          status: 'planned',
+          notes: a.reason ? `Перенос: ${a.reason}` : (lesson.notes || 'Запланированный урок'),
+        });
+      } else {
+        lesson = await saveLesson({
+          student_id: student.id,
+          date: toDate,
+          time_str: a.toStartTime,
+          status: 'planned',
+          notes: a.reason ? `Перенос: ${a.reason}` : 'Запланированный урок',
+        });
       }
 
       cache = null;
-      writes.push(`${student.name}: перенос с ${fromDate} на ${toDate} в ${a.toStartTime}`);
-      return { success: true, message: `Урок перенесен на ${toDate} в ${a.toStartTime}.` };
+      writes.push(`${student.name}: перенос${originalDate ? ` с ${originalDate}` : ''} на ${toDate} в ${a.toStartTime}`);
+      return { success: true, message: `Урок ученика ${student.name} успешно запланирован на ${toDate} в ${a.toStartTime} ✅. Статус: запланирован.` };
     },
 
     // 3. setupOrUpdateStudent
@@ -276,11 +318,15 @@ function createToolbox(): Toolbox {
       const { students } = await load();
       const existing = students.find((s) => s.name.toLowerCase() === a.name.trim().toLowerCase());
 
-      const slots: RecurringSlot[] = (a.recurringDaysAndTimes || []).map((s: any) => ({
-        dayOfWeek: Number(s.dayOfWeek),
-        startTime: String(s.timeStr).split('-')[0].trim(),
-        endTime: String(s.timeStr).includes('-') ? String(s.timeStr).split('-')[1].trim() : '17:30',
-      }));
+      const slots: RecurringSlot[] = (a.recurringDaysAndTimes || []).map((s: any) => {
+        const timeStr = String(s.timeStr || '16:00');
+        const parsed = parseTimeRange(timeStr, 60);
+        return {
+          dayOfWeek: Number(s.dayOfWeek),
+          startTime: parsed.start,
+          endTime: parsed.end,
+        };
+      });
 
       const saved = await saveStudent({
         id: existing?.id,
@@ -333,15 +379,12 @@ function createToolbox(): Toolbox {
 
     // 6. getSchedule
     async getSchedule(a) {
-      const { lessons, students } = await load();
       let from = a.dateFrom ? assertDate(a.dateFrom, 'dateFrom') : today;
       let to = a.dateTo ? assertDate(a.dateTo, 'dateTo') : addDays(from, 30);
       if (a.date) from = to = assertDate(a.date, 'date');
 
-      let list = lessons.filter((l) => {
-        const d = l.date.substring(0, 10);
-        return d >= from && d <= to;
-      });
+      const lessonsInRange = await getLessons(from, to);
+      let list = lessonsInRange;
 
       let student: Student | null = null;
       if (a.studentName) {
@@ -434,7 +477,7 @@ ${studentsBrief}
 2. Основная задача — ведение расписания, учет посещаемости (проведено / пропущен с указанием причины), отработки на воскресенье и архив учеников.
 3. Если ученик был на уроке — вызывай markLessonStatus со статусом completed.
 4. Если ученик пропустил занятие — вызывай markLessonStatus со статусом missed, обязательно передавай причину missReason (например: «Болеет», «Семейные обстоятельства») и sendToSundayMakeup: true, если просят отработать в воскресенье.
-5. Если просят перенести урок — вызывай rescheduleLesson.
+5. Если просят перенести урок — ВСЕГДА вызывай rescheduleLesson. Можно переносить ЛЮБОЙ урок: как запланированный, так и тот, который «был» (проведенный) или пропущенный. При переносе на новую дату урок автоматически становится активным и запланированным (planned). Если пользователь не назвал дату исходного урока (например: «перенеси урок Фазилат на завтра на 10:00»), не отказывай и не переспрашивай — rescheduleLesson сам найдет подходящий урок ученика и перенесет его.
 6. Отвечай кратко, профессионально и по делу. Форматируй важные данные жирным текстом.`;
 
     const messages: any[] = [{ role: 'system', content: systemPrompt }];

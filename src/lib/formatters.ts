@@ -21,6 +21,27 @@ export function getTashkentTodayStr(): string {
 }
 
 /**
+ * Returns YYYY-MM-DD string strictly in Asia/Tashkent (UTC+5) timezone.
+ * Accepts Date object, ISO string, or defaults to current Tashkent time.
+ */
+export function getTashkentDateString(input?: Date | string | null): string {
+  if (!input) {
+    return format(getTashkentNow(), 'yyyy-MM-dd');
+  }
+  if (typeof input === 'string') {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
+    const d = new Date(input);
+    if (isNaN(d.getTime())) return format(getTashkentNow(), 'yyyy-MM-dd');
+    const utc = d.getTime() + d.getTimezoneOffset() * 60000;
+    const tashkentDate = new Date(utc + TASHKENT_OFFSET_MS);
+    return format(tashkentDate, 'yyyy-MM-dd');
+  }
+  const utc = input.getTime() + input.getTimezoneOffset() * 60000;
+  const tashkentDate = new Date(utc + TASHKENT_OFFSET_MS);
+  return format(tashkentDate, 'yyyy-MM-dd');
+}
+
+/**
  * Returns list of Date objects for horizontal strip (e.g. 2 days in past, today, 12 days in future)
  */
 export function getTashkentDateStrip(daysPast: number = 2, daysFuture: number = 14): Date[] {
@@ -74,13 +95,7 @@ export function isTashkentToday(isoDateString: string): boolean {
   }
 }
 
-/**
- * Currency formatter: 2 400 000 UZS
- */
-export function formatUZS(amount: number): string {
-  if (isNaN(amount) || amount === undefined || amount === null) return '0 UZS';
-  return `${Math.round(amount).toLocaleString('ru-RU')} UZS`;
-}
+
 
 /**
  * Format simple time (HH:mm)

@@ -80,12 +80,12 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
   };
 
   return (
-    <div className="space-y-2.5">
+    <div className="space-y-2">
       {/* Date Strip Header */}
       <div className="flex items-center justify-between px-1">
         <div className="flex items-center gap-1.5">
-          <CalendarIcon className="w-4 h-4 text-teal-400" />
-          <span className="text-xs font-bold uppercase tracking-wider text-zinc-300">
+          <CalendarIcon className="w-4 h-4 text-blue-600" />
+          <span className="text-xs font-black uppercase tracking-wider text-gray-800">
             {isSelectedToday
               ? `Сегодня • ${formatTashkentHeaderDate(selectedDate)}`
               : formatTashkentHeaderDate(selectedDate)}
@@ -96,7 +96,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
           {!isSelectedToday && (
             <button
               onClick={handleTodayClick}
-              className="text-[11px] font-bold text-teal-400 bg-teal-500/15 border border-teal-500/30 px-2 py-0.5 rounded-lg active:scale-95 transition-all"
+              className="text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-lg active:scale-95 transition-all"
             >
               Сегодня
             </button>
@@ -110,8 +110,8 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
             }}
             className={`flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all active:scale-95 ${
               isMonthView
-                ? 'bg-teal-600 text-white border-teal-400'
-                : 'bg-zinc-800/80 text-zinc-300 border-zinc-700 hover:bg-zinc-800'
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
             }`}
           >
             {isMonthView ? (
@@ -141,23 +141,23 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
               <button
                 key={day.toISOString()}
                 onClick={() => handleDayClick(day)}
-                className={`flex flex-col items-center justify-between min-w-[46px] h-[62px] py-1.5 rounded-2xl border transition-all active:scale-95 shrink-0 relative ${
+                className={`flex flex-col items-center justify-between min-w-[46px] h-[60px] py-1.5 rounded-2xl border transition-all active:scale-95 shrink-0 relative ${
                   isSelected
-                    ? 'bg-teal-600 text-white border-teal-400 shadow-lg shadow-teal-600/30 font-bold'
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-md shadow-blue-500/20 font-bold'
                     : chip.isToday
-                    ? 'bg-zinc-900 text-zinc-200 border-teal-500/50 ring-1 ring-teal-500/30'
-                    : 'bg-zinc-900/80 text-zinc-400 border-zinc-800/80 hover:border-zinc-700'
+                    ? 'bg-blue-50 text-blue-700 border-blue-300 ring-1 ring-blue-300'
+                    : 'bg-white text-gray-700 border-gray-200/90 hover:bg-gray-50'
                 }`}
               >
                 <span
                   className={`text-[10px] uppercase font-bold ${
-                    isSelected ? 'text-teal-100' : 'text-zinc-400'
+                    isSelected ? 'text-blue-100' : 'text-gray-400'
                   }`}
                 >
                   {chip.dayOfWeek}
                 </span>
 
-                <span className="text-sm font-extrabold leading-none">
+                <span className="text-sm font-black leading-none">
                   {chip.dayNumber}
                 </span>
 
@@ -168,31 +168,27 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
                       className={`w-1.5 h-1.5 rounded-full ${
                         isSelected ? 'bg-rose-200 ring-1 ring-rose-400' : 'bg-rose-500'
                       }`}
-                      title="Сгоревший урок"
                     />
                   )}
                   {statusSummary.hasCompleted && (
                     <span
                       className={`w-1.5 h-1.5 rounded-full ${
-                        isSelected ? 'bg-emerald-200 ring-1 ring-emerald-400' : 'bg-emerald-400'
+                        isSelected ? 'bg-emerald-200 ring-1 ring-emerald-400' : 'bg-emerald-500'
                       }`}
-                      title="Проведенный урок"
                     />
                   )}
                   {statusSummary.hasMakeup && (
                     <span
                       className={`w-1.5 h-1.5 rounded-full ${
-                        isSelected ? 'bg-amber-200 ring-1 ring-amber-400' : 'bg-amber-400'
+                        isSelected ? 'bg-amber-200 ring-1 ring-amber-400' : 'bg-amber-500'
                       }`}
-                      title="Ожидает отработки"
                     />
                   )}
                   {statusSummary.hasPlanned && !statusSummary.hasCompleted && !statusSummary.hasBurned && (
                     <span
                       className={`w-1.5 h-1.5 rounded-full ${
-                        isSelected ? 'bg-white' : 'bg-teal-400'
+                        isSelected ? 'bg-white' : 'bg-blue-400'
                       }`}
-                      title="Запланирован"
                     />
                   )}
                   {statusSummary.total === 0 && <span className="w-1.5 h-1.5" />}
@@ -205,7 +201,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
 
       {/* VIEW 2: EXPANDED MONTH GRID (1-31) */}
       {isMonthView && (
-        <div className="p-3.5 bg-zinc-900/95 border border-zinc-800 rounded-3xl space-y-3 animate-in fade-in zoom-in-95 duration-150 shadow-2xl">
+        <div className="p-3.5 bg-white border border-gray-200/80 rounded-3xl space-y-3 animate-in fade-in zoom-in-95 duration-150 shadow-xl">
           {/* Month Navigator */}
           <div className="flex items-center justify-between">
             <button
@@ -213,12 +209,12 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
                 hapticImpact('light');
                 setCurrentMonthDate(subMonths(currentMonthDate, 1));
               }}
-              className="p-1.5 rounded-xl bg-zinc-800 text-zinc-300 hover:text-white active:bg-zinc-700"
+              className="p-1.5 rounded-xl bg-gray-100 text-gray-700 hover:bg-gray-200 active:scale-95"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
 
-            <span className="font-extrabold text-sm text-zinc-100 capitalize">
+            <span className="text-xs font-black capitalize text-gray-900">
               {format(currentMonthDate, 'LLLL yyyy', { locale: ru })}
             </span>
 
@@ -227,24 +223,22 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
                 hapticImpact('light');
                 setCurrentMonthDate(addMonths(currentMonthDate, 1));
               }}
-              className="p-1.5 rounded-xl bg-zinc-800 text-zinc-300 hover:text-white active:bg-zinc-700"
+              className="p-1.5 rounded-xl bg-gray-100 text-gray-700 hover:bg-gray-200 active:scale-95"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
 
-          {/* Weekday Headers */}
-          <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-zinc-400 uppercase">
-            <span>Пн</span>
-            <span>Вт</span>
-            <span>Ср</span>
-            <span>Чт</span>
-            <span>Пт</span>
-            <span>Сб</span>
-            <span className="text-amber-400">Вс</span>
+          {/* DOW Headers */}
+          <div className="grid grid-cols-7 gap-1 text-center">
+            {['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].map((d) => (
+              <span key={d} className="text-[10px] font-bold uppercase text-gray-400">
+                {d}
+              </span>
+            ))}
           </div>
 
-          {/* Days 7-column Grid */}
+          {/* Days Grid */}
           <div className="grid grid-cols-7 gap-1">
             {monthDays.map((day) => {
               const isSelected = isSameDay(day, selectedDate);
@@ -256,52 +250,38 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
                 <button
                   key={day.toISOString()}
                   onClick={() => handleDayClick(day)}
-                  className={`h-11 rounded-xl flex flex-col items-center justify-between py-1 transition-all text-xs font-bold border relative active:scale-95 ${
-                    isSelected
-                      ? 'bg-teal-600 text-white border-teal-400 shadow-md shadow-teal-600/30 font-black'
+                  disabled={!isCurrentMonth}
+                  className={`h-9 rounded-xl flex flex-col items-center justify-center relative border transition-all active:scale-95 ${
+                    !isCurrentMonth
+                      ? 'opacity-20 pointer-events-none border-transparent text-gray-400'
+                      : isSelected
+                      ? 'bg-blue-600 text-white border-blue-600 shadow-md font-bold'
                       : isToday
-                      ? 'bg-zinc-800/90 text-teal-300 border-teal-500/60'
-                      : isCurrentMonth
-                      ? 'bg-zinc-950/60 text-zinc-200 border-zinc-800 hover:border-zinc-700'
-                      : 'bg-zinc-950/20 text-zinc-600 border-transparent'
+                      ? 'bg-blue-50 text-blue-700 border-blue-300 font-extrabold'
+                      : 'bg-gray-50/70 border-gray-100 text-gray-700 hover:border-gray-300'
                   }`}
                 >
-                  <span className="text-[11px] leading-tight">{day.getDate()}</span>
+                  <span className="text-xs leading-none font-bold">
+                    {format(day, 'd')}
+                  </span>
 
-                  {/* Indicators */}
-                  <div className="flex items-center gap-0.5 h-1.5 justify-center">
-                    {statusSummary.hasBurned && (
-                      <span className="w-1 h-1 rounded-full bg-rose-500" />
-                    )}
-                    {statusSummary.hasCompleted && (
-                      <span className="w-1 h-1 rounded-full bg-emerald-400" />
-                    )}
-                    {statusSummary.hasMakeup && (
-                      <span className="w-1 h-1 rounded-full bg-amber-400" />
-                    )}
-                    {statusSummary.hasPlanned && !statusSummary.hasCompleted && !statusSummary.hasBurned && (
-                      <span className="w-1 h-1 rounded-full bg-teal-400" />
-                    )}
-                  </div>
+                  {/* Micro indicator */}
+                  {statusSummary.total > 0 && (
+                    <div className="flex gap-0.5 mt-0.5">
+                      {statusSummary.hasCompleted && (
+                        <span className={`w-1 h-1 rounded-full ${isSelected ? 'bg-emerald-200' : 'bg-emerald-500'}`} />
+                      )}
+                      {statusSummary.hasPlanned && (
+                        <span className={`w-1 h-1 rounded-full ${isSelected ? 'bg-white' : 'bg-blue-400'}`} />
+                      )}
+                      {statusSummary.hasMakeup && (
+                        <span className={`w-1 h-1 rounded-full ${isSelected ? 'bg-amber-200' : 'bg-amber-500'}`} />
+                      )}
+                    </div>
+                  )}
                 </button>
               );
             })}
-          </div>
-
-          {/* Legend */}
-          <div className="flex items-center justify-center gap-3 pt-2 border-t border-zinc-800/80 text-[10px] text-zinc-400 font-medium">
-            <span className="flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Проведен
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-rose-500" /> Сгорел
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" /> В ВС
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-teal-400" /> План
-            </span>
           </div>
         </div>
       )}

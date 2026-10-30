@@ -23,11 +23,6 @@ export interface Student {
   makeup_debt: number; // количество активных отработок (pending makeups)
   conducted_this_month?: number;
   missed_this_month?: number;
-  
-  // Поля обратной совместимости (всегда определены числом для предотвращения TS18048)
-  price_per_lesson: number;
-  prepaid_balance: number;
-  package_total_lessons?: number;
 }
 
 export interface Lesson {
@@ -43,9 +38,6 @@ export interface Lesson {
   reminder_sent?: boolean;
   notes?: string;
   created_at: string;
-  
-  // Поле обратной совместимости
-  price_per_lesson?: number;
 }
 
 export interface Makeup {
@@ -76,10 +68,4 @@ export interface AttendanceSummary {
     date: string;
     status: string;
   }>;
-}
-
-// Устаревший интерфейс для мягкой миграции
-export interface FinanceSummary {
-  earnedThisMonthUzs: number;
-  completedLessonsCount: number;
 }

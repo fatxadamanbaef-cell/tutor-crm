@@ -4,6 +4,8 @@ import React, { useState, useEffect } from 'react';
 import { Student, Lesson, LessonStatus } from '@/types';
 import { X, Check, Trash2, Calendar, Clock, AlertCircle } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
+import { format, addDays } from 'date-fns';
+import { getTashkentNow } from '@/lib/formatters';
 
 interface EditLessonModalProps {
   isOpen: boolean;
@@ -65,7 +67,7 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#f2f2f7] flex flex-col animate-in slide-in-from-bottom duration-200">
+    <div className="fixed inset-0 z-[60] bg-[#f2f2f7] flex flex-col animate-in slide-in-from-bottom duration-200">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-4 bg-white border-b border-gray-200">
         <button
@@ -104,15 +106,57 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
         {/* Date & Time */}
         <div className="bg-white rounded-3xl p-4 shadow-xs border border-gray-200/80 space-y-3">
           <div>
-            <label className="text-[11px] font-bold text-gray-400 uppercase block mb-1">
-              Дата урока
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-bold text-gray-400 uppercase">
+                Дата урока
+              </label>
+              {lesson && lessonDate !== lesson.date.substring(0, 10) && (
+                <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">
+                  Перенос с {lesson.date.substring(0, 10)}
+                </span>
+              )}
+            </div>
             <input
               type="date"
               value={lessonDate}
-              onChange={(e) => setLessonDate(e.target.value)}
+              onChange={(e) => {
+                const val = e.target.value;
+                setLessonDate(val);
+                // When moving a lesson to another date, auto-set status to planned
+                if (currentStatus !== 'planned') {
+                  setCurrentStatus('planned');
+                }
+              }}
               className="w-full text-xs font-bold text-gray-900 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 focus:outline-hidden"
             />
+
+            {/* Quick Reschedule Shortcuts */}
+            <div className="flex gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  hapticImpact('light');
+                  const todayStr = format(getTashkentNow(), 'yyyy-MM-dd');
+                  setLessonDate(todayStr);
+                  setCurrentStatus('planned');
+                }}
+                className="flex-1 py-1.5 px-2 bg-blue-50 text-blue-700 text-[11px] font-bold rounded-xl border border-blue-200/80 active:scale-95"
+              >
+                📅 Сегодня
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  hapticImpact('light');
+                  const tomorrowStr = format(addDays(getTashkentNow(), 1), 'yyyy-MM-dd');
+                  setLessonDate(tomorrowStr);
+                  setCurrentStatus('planned');
+                }}
+                className="flex-1 py-1.5 px-2 bg-purple-50 text-purple-700 text-[11px] font-bold rounded-xl border border-purple-200/80 active:scale-95"
+              >
+                🚀 На завтра
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2">

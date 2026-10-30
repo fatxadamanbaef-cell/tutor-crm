@@ -1,21 +1,21 @@
-import { Student, Lesson, Makeup, AttendanceSummary, LessonStatus, RecurringSlot, FinanceSummary } from '@/types';
+import { Student, Lesson, Makeup, AttendanceSummary, LessonStatus, RecurringSlot } from '@/types';
 import { supabase } from './supabase';
-import { getTashkentTodayStr, getTashkentNow } from './formatters';
+import { getTashkentTodayStr, getTashkentNow, getTashkentDateString } from './formatters';
 import { generateUUID } from './uuid';
-import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, parseISO, addDays } from 'date-fns';
+import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subMonths, addDays } from 'date-fns';
 
 // -------------------------------------------------------------
 // DATE / TIME HELPERS (Strict UTC+5 Tashkent strings)
 // -------------------------------------------------------------
 function addDaysStr(dateStr: string, n: number): string {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().substring(0, 10);
+  const d = new Date(`${dateStr}T12:00:00+05:00`);
+  d.setDate(d.getDate() + n);
+  return getTashkentDateString(d);
 }
 
 function dayOfWeekOf(dateStr: string): number {
   // Returns 1 (Mon) .. 7 (Sun)
-  const d = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
+  const d = new Date(`${dateStr}T12:00:00+05:00`).getDay();
   return d === 0 ? 7 : d;
 }
 
@@ -49,9 +49,11 @@ export function parseTimeRange(input: string, defaultMinutes = 90): { start: str
 export async function getStudents(): Promise<Student[]> {
   if (!supabase) throw new Error('Supabase is not initialized');
 
+  // Filter out system bot records directly at DB level
   const { data: studentsData, error: stError } = await supabase
     .from('tutor_students')
     .select('*')
+    .not('name', 'like', '_BOT_%')
     .order('name');
 
   if (stError) {
@@ -91,39 +93,33 @@ export async function getStudents(): Promise<Student[]> {
     if (isMissed) missedCountMap[l.student_id] = (missedCountMap[l.student_id] || 0) + 1;
   });
 
-  return (studentsData || [])
-    .filter((s) => !String(s.name).startsWith('_BOT_'))
-    .map((s) => {
-      let recurring: RecurringSlot[] = [];
-      if (Array.isArray(s.recurring_schedule)) {
-        recurring = s.recurring_schedule;
-      } else if (typeof s.recurring_schedule === 'string') {
-        try { recurring = JSON.parse(s.recurring_schedule); } catch {}
-      }
+  return (studentsData || []).map((s) => {
+    let recurring: RecurringSlot[] = [];
+    if (Array.isArray(s.recurring_schedule)) {
+      recurring = s.recurring_schedule;
+    } else if (typeof s.recurring_schedule === 'string') {
+      try { recurring = JSON.parse(s.recurring_schedule); } catch {}
+    }
 
-      const target = Number(s.monthly_target_lessons) || Number(s.package_total_lessons) || 12;
+    const target = Number(s.monthly_target_lessons) || 12;
 
-      return {
-        id: s.id,
-        name: s.name,
-        monthly_target_lessons: target,
-        recurring_schedule: recurring,
-        billing_day: s.billing_day || '10 число',
-        phone: s.phone || '',
-        telegram: s.telegram || '',
-        schedule_notes: s.notes || '',
-        color: s.color || '#3B82F6',
-        is_active: s.is_active !== false,
-        created_at: s.created_at,
-        makeup_debt: makeupsCountMap[s.id] || 0,
-        conducted_this_month: conductedCountMap[s.id] || 0,
-        missed_this_month: missedCountMap[s.id] || 0,
-        // Legacy fallback fields for safety
-        package_total_lessons: target,
-        prepaid_balance: conductedCountMap[s.id] || 0,
-        price_per_lesson: 0,
-      };
-    });
+    return {
+      id: s.id,
+      name: s.name,
+      monthly_target_lessons: target,
+      recurring_schedule: recurring,
+      billing_day: s.billing_day || '10 число',
+      phone: s.phone || '',
+      telegram: s.telegram || '',
+      schedule_notes: s.notes || '',
+      color: s.color || '#3B82F6',
+      is_active: s.is_active !== false,
+      created_at: s.created_at,
+      makeup_debt: makeupsCountMap[s.id] || 0,
+      conducted_this_month: conductedCountMap[s.id] || 0,
+      missed_this_month: missedCountMap[s.id] || 0,
+    };
+  });
 }
 
 export async function saveStudent(student: {
@@ -137,9 +133,6 @@ export async function saveStudent(student: {
   schedule_notes?: string;
   color?: string;
   is_active?: boolean;
-  // legacy
-  price_per_lesson?: number;
-  prepaid_balance?: number;
 }): Promise<Student> {
   if (!supabase) throw new Error('Supabase is not initialized');
 
@@ -166,41 +159,12 @@ export async function saveStudent(student: {
     .single();
 
   if (error) {
-    // If column monthly_target_lessons is missing before migration, fallback safely
-    if (error.message?.includes('monthly_target_lessons')) {
-      delete dbPayload.monthly_target_lessons;
-      delete dbPayload.recurring_schedule;
-      dbPayload.package_total_lessons = target;
-      const { data: fallbackData, error: fbErr } = await supabase
-        .from('tutor_students')
-        .upsert([dbPayload])
-        .select()
-        .single();
-      if (fbErr) throw fbErr;
-      return {
-        id: fallbackData.id,
-        name: fallbackData.name,
-        monthly_target_lessons: target,
-        recurring_schedule: student.recurring_schedule || [],
-        billing_day: fallbackData.billing_day || '10',
-        phone: fallbackData.phone || '',
-        telegram: fallbackData.telegram || '',
-        schedule_notes: fallbackData.notes || '',
-        color: fallbackData.color || '#3B82F6',
-        created_at: fallbackData.created_at,
-        makeup_debt: 0,
-        conducted_this_month: 0,
-        missed_this_month: 0,
-        price_per_lesson: 0,
-        prepaid_balance: 0,
-      };
-    }
     console.error('Supabase saveStudent error:', error);
     throw error;
   }
 
-  // If recurring_schedule provided, generate lessons for next 4 weeks
-  if (student.recurring_schedule !== undefined) {
+  // If recurring_schedule provided, safely generate upcoming lessons
+  if (student.recurring_schedule !== undefined && student.recurring_schedule.length > 0) {
     await planRecurringLessonsForStudent(studentId, student.recurring_schedule, 4);
   }
 
@@ -218,8 +182,6 @@ export async function saveStudent(student: {
     makeup_debt: 0,
     conducted_this_month: 0,
     missed_this_month: 0,
-    price_per_lesson: 0,
-    prepaid_balance: 0,
   };
 }
 
@@ -228,22 +190,68 @@ export async function deleteStudent(studentId: string): Promise<void> {
 
   await supabase.from('tutor_lessons').delete().eq('student_id', studentId);
   await supabase.from('tutor_makeups').delete().eq('student_id', studentId);
-  try {
-    await supabase.from('tutor_payments').delete().eq('student_id', studentId);
-  } catch {}
   const { error } = await supabase.from('tutor_students').delete().eq('id', studentId);
   if (error) throw error;
 }
 
 // -------------------------------------------------------------
-// LESSONS API
+// LESSONS MAPPER & API
 // -------------------------------------------------------------
-export async function getLessons(): Promise<Lesson[]> {
+function mapLessonRow(l: any): Lesson {
+  let status: LessonStatus = 'planned';
+  if (l.status === 'completed') {
+    status = 'completed';
+  } else if (
+    l.status === 'missed' ||
+    l.status === 'missed_excused' ||
+    l.status === 'missed_penalty' ||
+    l.status === 'missed_makeup'
+  ) {
+    status = 'missed';
+  } else {
+    status = 'planned';
+  }
+
+  const startTimeClean = (l.start_time || '18:00').substring(0, 5);
+  const endTimeClean = (l.end_time || '19:30').substring(0, 5);
+  const timeStr = `${startTimeClean} - ${endTimeClean}`;
+  const isoDate = `${l.lesson_date}T${startTimeClean}:00+05:00`;
+
+  return {
+    id: l.id,
+    student_id: l.student_id,
+    student_name: l.tutor_students?.name || 'Ученик',
+    date: isoDate,
+    time_str: timeStr,
+    status,
+    miss_reason: l.miss_reason || (l.status === 'missed_excused' ? 'Уважительная причина' : l.status === 'missed_penalty' ? 'Пропуск' : undefined),
+    needs_makeup: Boolean(l.needs_makeup || l.status === 'missed_excused'),
+    is_makeup: Boolean(l.is_makeup),
+    reminder_sent: Boolean(l.reminder_sent),
+    notes: l.notes || '',
+    created_at: l.created_at,
+  };
+}
+
+/**
+ * Loads lessons within an active window (defaults to 1st of previous month to +35 days ahead).
+ * Prevents loading entire database history into client memory.
+ */
+export async function getLessons(fromDate?: string, toDate?: string): Promise<Lesson[]> {
   if (!supabase) throw new Error('Supabase is not initialized');
+
+  const now = getTashkentNow();
+  const defaultFrom = format(startOfMonth(subMonths(now, 1)), 'yyyy-MM-dd');
+  const defaultTo = format(addDays(now, 35), 'yyyy-MM-dd');
+
+  const from = fromDate ? getTashkentDateString(fromDate) : defaultFrom;
+  const to = toDate ? getTashkentDateString(toDate) : defaultTo;
 
   const { data, error } = await supabase
     .from('tutor_lessons')
     .select('*, tutor_students(name, color)')
+    .gte('lesson_date', from)
+    .lte('lesson_date', to)
     .order('lesson_date', { ascending: true })
     .order('start_time', { ascending: true });
 
@@ -252,41 +260,26 @@ export async function getLessons(): Promise<Lesson[]> {
     throw error;
   }
 
-  return (data || []).map((l) => {
-    let status: LessonStatus = 'planned';
-    if (l.status === 'completed') {
-      status = 'completed';
-    } else if (
-      l.status === 'missed' ||
-      l.status === 'missed_excused' ||
-      l.status === 'missed_penalty' ||
-      l.status === 'missed_makeup'
-    ) {
-      status = 'missed';
-    } else {
-      status = 'planned';
-    }
+  return (data || []).map(mapLessonRow);
+}
 
-    const startTimeClean = (l.start_time || '18:00').substring(0, 5);
-    const endTimeClean = (l.end_time || '19:30').substring(0, 5);
-    const timeStr = `${startTimeClean} - ${endTimeClean}`;
-    const isoDate = `${l.lesson_date}T${startTimeClean}:00+05:00`;
+/**
+ * Loads the complete archive of all lessons for a specific student (for ClientProfileScreen).
+ */
+export async function getStudentLessonsArchive(studentId: string): Promise<Lesson[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('tutor_lessons')
+    .select('*, tutor_students(name, color)')
+    .eq('student_id', studentId)
+    .order('lesson_date', { ascending: false })
+    .order('start_time', { ascending: true });
 
-    return {
-      id: l.id,
-      student_id: l.student_id,
-      student_name: l.tutor_students?.name || 'Ученик',
-      date: isoDate,
-      time_str: timeStr,
-      status,
-      miss_reason: l.miss_reason || (l.status === 'missed_excused' ? 'Уважительная причина' : l.status === 'missed_penalty' ? 'Пропуск' : undefined),
-      needs_makeup: Boolean(l.needs_makeup || l.status === 'missed_excused'),
-      is_makeup: Boolean(l.is_makeup),
-      reminder_sent: Boolean(l.reminder_sent),
-      notes: l.notes || '',
-      created_at: l.created_at,
-    };
-  });
+  if (error) {
+    console.error('getStudentLessonsArchive error:', error);
+    return [];
+  }
+  return (data || []).map(mapLessonRow);
 }
 
 export async function saveLesson(lessonData: {
@@ -301,23 +294,20 @@ export async function saveLesson(lessonData: {
 }): Promise<Lesson> {
   if (!supabase) throw new Error('Supabase is not initialized');
 
-  const lessonDate = lessonData.date.substring(0, 10);
-  const time = lessonData.time_str ? parseTimeRange(lessonData.time_str) : { start: '18:00', end: '19:30' };
+  const lessonDate = getTashkentDateString(lessonData.date);
+  const time = parseTimeRange(lessonData.time_str || '18:00 - 19:30');
+  const lessonId = generateUUID();
 
   let dbStatus = 'scheduled';
-  if (lessonData.status === 'completed') {
-    dbStatus = 'completed';
-  } else if (lessonData.status === 'missed' || lessonData.status === 'missed_excused' || lessonData.status === 'missed_penalty') {
-    dbStatus = 'missed';
-  }
+  if (lessonData.status === 'completed') dbStatus = 'completed';
+  else if (lessonData.status === 'missed') dbStatus = 'missed';
 
-  const newId = generateUUID();
-  const dbPayload: any = {
-    id: newId,
+  const payload: any = {
+    id: lessonId,
     student_id: lessonData.student_id,
     lesson_date: lessonDate,
-    start_time: time.start.length === 5 ? `${time.start}:00` : time.start,
-    end_time: time.end.length === 5 ? `${time.end}:00` : time.end,
+    start_time: time.start,
+    end_time: time.end,
     status: dbStatus,
     notes: lessonData.notes || '',
     miss_reason: lessonData.miss_reason || null,
@@ -326,72 +316,47 @@ export async function saveLesson(lessonData: {
     reminder_sent: false,
   };
 
-  let insertedRes = await supabase
+  const { data, error } = await supabase
     .from('tutor_lessons')
-    .insert([dbPayload])
-    .select('*, tutor_students(name)')
+    .insert([payload])
+    .select('*, tutor_students(name, color)')
     .single();
 
-  if (insertedRes.error && dbStatus === 'missed') {
-    // Retry with missed_makeup if check constraint rejects 'missed'
-    dbPayload.status = 'missed_makeup';
-    insertedRes = await supabase
-      .from('tutor_lessons')
-      .insert([dbPayload])
-      .select('*, tutor_students(name)')
-      .single();
+  if (error) {
+    console.error('Supabase saveLesson error:', error);
+    throw error;
   }
 
-  if (insertedRes.error) {
-    console.error('Supabase saveLesson insert error:', insertedRes.error);
-    throw insertedRes.error;
-  }
-  const data = insertedRes.data;
-
-  // If marked missed with makeup, add to tutor_makeups
-  if (dbStatus === 'missed' && lessonData.needs_makeup) {
-    await supabase.from('tutor_makeups').insert([
-      {
-        id: generateUUID(),
-        student_id: lessonData.student_id,
-        student_name: data.tutor_students?.name || 'Ученик',
-        missed_lesson_id: newId,
-        reason: lessonData.miss_reason || 'Пропуск урока',
-        status: 'pending',
-        missed_date: lessonDate,
-      },
-    ]);
-  }
-
-  return {
-    id: data.id,
-    student_id: data.student_id,
-    student_name: data.tutor_students?.name || 'Ученик',
-    date: `${data.lesson_date}T${time.start}:00+05:00`,
-    time_str: `${time.start} - ${time.end}`,
-    status: lessonData.status || 'planned',
-    miss_reason: data.miss_reason || lessonData.miss_reason,
-    needs_makeup: data.needs_makeup,
-    is_makeup: data.is_makeup,
-    notes: data.notes || '',
-    created_at: data.created_at,
-  };
+  return mapLessonRow(data);
 }
 
-export async function saveBatchLessons(newLessons: Lesson[]): Promise<void> {
-  if (!supabase || newLessons.length === 0) return;
+export async function saveBatchLessons(lessons: Array<{
+  student_id: string;
+  date: string;
+  time_str?: string;
+  notes?: string;
+  status?: LessonStatus;
+  miss_reason?: string;
+  needs_makeup?: boolean;
+  is_makeup?: boolean;
+}>): Promise<void> {
+  if (!supabase) throw new Error('Supabase is not initialized');
+  if (lessons.length === 0) return;
 
-  const dbPayload = newLessons.map((l) => {
-    const lessonDate = l.date.substring(0, 10);
-    const time = l.time_str ? parseTimeRange(l.time_str) : { start: '18:00', end: '19:30' };
+  const dbPayload = lessons.map((l) => {
+    const time = parseTimeRange(l.time_str || '18:00 - 19:30');
+    let dbStatus = 'scheduled';
+    if (l.status === 'completed') dbStatus = 'completed';
+    else if (l.status === 'missed') dbStatus = 'missed';
+
     return {
-      id: l.id || generateUUID(),
+      id: generateUUID(),
       student_id: l.student_id,
-      lesson_date: lessonDate,
+      lesson_date: getTashkentDateString(l.date),
       start_time: time.start,
       end_time: time.end,
-      status: l.status === 'completed' ? 'completed' : l.status === 'missed' ? 'missed' : 'planned',
-      notes: l.notes || 'Плановый урок',
+      status: dbStatus,
+      notes: l.notes || '',
       miss_reason: l.miss_reason || null,
       needs_makeup: Boolean(l.needs_makeup),
       is_makeup: Boolean(l.is_makeup),
@@ -412,7 +377,7 @@ export async function updateLessonTime(lessonId: string, timeStr: string, newDat
     start_time: time.start,
     end_time: time.end,
   };
-  if (newDateStr) updatePayload.lesson_date = newDateStr.substring(0, 10);
+  if (newDateStr) updatePayload.lesson_date = getTashkentDateString(newDateStr);
 
   const { error } = await supabase.from('tutor_lessons').update(updatePayload).eq('id', lessonId);
   if (error) throw error;
@@ -422,7 +387,7 @@ export async function updateLessonDetails(lessonId: string, updates: Partial<Les
   if (!supabase) throw new Error('Supabase is not initialized');
   const payload: any = {};
 
-  if (updates.date) payload.lesson_date = updates.date.substring(0, 10);
+  if (updates.date) payload.lesson_date = getTashkentDateString(updates.date);
   if (updates.time_str) {
     const time = parseTimeRange(updates.time_str);
     payload.start_time = time.start;
@@ -491,7 +456,6 @@ export async function setLessonStatusDirect(
     }).eq('id', lessonId);
 
     if (updateErr) {
-      // Fallback if check constraint only allows missed_makeup
       await supabase.from('tutor_lessons').update({
         status: 'missed_makeup',
         miss_reason: reason,
@@ -567,9 +531,11 @@ export async function scheduleSundayMakeup(
 
   if (mErr || !makeup) throw new Error('Makeup record not found');
 
+  const targetSunday = getTashkentDateString(sundayDate);
+
   const newLesson = await saveLesson({
     student_id: makeup.student_id,
-    date: sundayDate,
+    date: targetSunday,
     time_str: timeStr,
     status: 'planned',
     is_makeup: true,
@@ -593,22 +559,23 @@ export async function archiveMakeup(makeupId: string): Promise<void> {
 }
 
 // -------------------------------------------------------------
-// RECURRING SCHEDULE GENERATOR (4 weeks ahead, safe duplicate prevention)
+// SAFE RECURRING SCHEDULE GENERATOR (Strictly INSERT IF NOT EXISTS)
+// Never deletes or overwrites existing lessons or manual reschedules!
 // -------------------------------------------------------------
 export async function planRecurringLessonsForStudent(
   studentId: string,
   schedule: RecurringSlot[],
   weeksAhead: number = 4
 ): Promise<{ createdCount: number }> {
-  if (!supabase) return { createdCount: 0 };
+  if (!supabase || !schedule || schedule.length === 0) return { createdCount: 0 };
 
   const todayStr = getTashkentTodayStr();
   const endDateStr = addDaysStr(todayStr, weeksAhead * 7);
   const now = getTashkentNow();
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
 
-  const normalizedSlots = (schedule || []).map((s) => {
-    const time = parseTimeRange(s.startTime + (s.endTime ? ` - ${s.endTime}` : ''));
+  const normalizedSlots = schedule.map((s) => {
+    const time = parseTimeRange(s.startTime + (s.endTime ? ` - ${s.endTime}` : ''), 60);
     return {
       dayOfWeek: Number(s.dayOfWeek),
       start: time.start.substring(0, 5),
@@ -616,12 +583,10 @@ export async function planRecurringLessonsForStudent(
     };
   });
 
-  const validScheduleSlotKeys = new Set(normalizedSlots.map((s) => `${s.dayOfWeek}_${s.start}`));
-
-  // Fetch existing lessons in this period for this student
+  // Fetch ALL existing lessons in this period for this student
   const { data: existing, error } = await supabase
     .from('tutor_lessons')
-    .select('id, lesson_date, start_time, end_time, status, is_makeup, needs_makeup')
+    .select('id, lesson_date, start_time, status')
     .eq('student_id', studentId)
     .gte('lesson_date', todayStr)
     .lte('lesson_date', endDateStr);
@@ -631,71 +596,17 @@ export async function planRecurringLessonsForStudent(
     throw error;
   }
 
+  // Register all existing dates and slot keys to prevent overwriting
   const existingList = existing || [];
+  const existingSlotKeys = new Set<string>();
+  const existingDates = new Set<string>();
 
-  const todayHasCompletedOrMissed = existingList.some(
-    (l) =>
-      String(l.lesson_date).substring(0, 10) === todayStr &&
-      (l.status === 'completed' || l.status === 'missed' || String(l.status).startsWith('missed_'))
-  );
-
-  const idsToDelete: string[] = [];
-  const keptKeys = new Set<string>();
-
-  for (const l of existingList) {
-    const d = String(l.lesson_date).substring(0, 10);
-    const t = String(l.start_time).substring(0, 5);
-    const key = `${d}_${t}`;
-    const dow = dayOfWeekOf(d);
-    const slotKey = `${dow}_${t}`;
-
-    const isPendingOrScheduled = l.status === 'scheduled' || l.status === 'planned';
-    const isProtected = l.is_makeup || l.needs_makeup || !isPendingOrScheduled;
-
-    if (isProtected) {
-      keptKeys.add(key);
-      continue;
-    }
-
-    if (keptKeys.has(key)) {
-      idsToDelete.push(l.id);
-      continue;
-    }
-
-    if (normalizedSlots.length === 0) {
-      idsToDelete.push(l.id);
-      continue;
-    }
-
-    if (d === todayStr) {
-      const slotMinutes = toMinutes(t);
-      if (todayHasCompletedOrMissed || currentMinutes >= slotMinutes || !validScheduleSlotKeys.has(slotKey)) {
-        idsToDelete.push(l.id);
-        continue;
-      }
-    } else {
-      if (!validScheduleSlotKeys.has(slotKey)) {
-        idsToDelete.push(l.id);
-        continue;
-      }
-    }
-
-    keptKeys.add(key);
-  }
-
-  if (idsToDelete.length > 0) {
-    const { error: delErr } = await supabase
-      .from('tutor_lessons')
-      .delete()
-      .in('id', idsToDelete);
-    if (delErr) {
-      console.error('Failed to delete obsolete recurring lessons:', delErr);
-    }
-  }
-
-  if (normalizedSlots.length === 0) {
-    return { createdCount: 0 };
-  }
+  existingList.forEach((l) => {
+    const d = getTashkentDateString(l.lesson_date);
+    const t = String(l.start_time || '').substring(0, 5);
+    existingSlotKeys.add(`${d}_${t}`);
+    existingDates.add(d);
+  });
 
   const newLessons: any[] = [];
   let cursor = todayStr;
@@ -705,29 +616,40 @@ export async function planRecurringLessonsForStudent(
     const matchingSlots = normalizedSlots.filter((s) => s.dayOfWeek === dow);
 
     for (const slot of matchingSlots) {
-      const key = `${cursor}_${slot.start}`;
+      const slotKey = `${cursor}_${slot.start}`;
 
+      // Today: don't plan slots in the past
       if (cursor === todayStr) {
-        if (todayHasCompletedOrMissed) continue;
         const slotMinutes = toMinutes(slot.start);
         if (currentMinutes >= slotMinutes) continue;
       }
 
-      if (!keptKeys.has(key)) {
-        keptKeys.add(key);
-        newLessons.push({
-          id: generateUUID(),
-          student_id: studentId,
-          lesson_date: cursor,
-          start_time: slot.start.length === 5 ? `${slot.start}:00` : slot.start,
-          end_time: slot.end.length === 5 ? `${slot.end}:00` : slot.end,
-          status: 'scheduled',
-          notes: 'Периодическое расписание',
-          needs_makeup: false,
-          is_makeup: false,
-          reminder_sent: false,
-        });
+      // If a lesson already exists on this exact slot, skip
+      if (existingSlotKeys.has(slotKey)) {
+        continue;
       }
+
+      // If student only has 1 lesson on this day of week and already has a lesson on this date, skip
+      if (matchingSlots.length === 1 && existingDates.has(cursor)) {
+        continue;
+      }
+
+      // Safe add:
+      existingSlotKeys.add(slotKey);
+      existingDates.add(cursor);
+
+      newLessons.push({
+        id: generateUUID(),
+        student_id: studentId,
+        lesson_date: cursor,
+        start_time: slot.start.length === 5 ? `${slot.start}:00` : slot.start,
+        end_time: slot.end.length === 5 ? `${slot.end}:00` : slot.end,
+        status: 'scheduled',
+        notes: 'Периодическое расписание',
+        needs_makeup: false,
+        is_makeup: false,
+        reminder_sent: false,
+      });
     }
     cursor = addDaysStr(cursor, 1);
   }
@@ -735,12 +657,25 @@ export async function planRecurringLessonsForStudent(
   if (newLessons.length > 0) {
     const { error: insErr } = await supabase.from('tutor_lessons').insert(newLessons);
     if (insErr) {
-      console.error('Failed to insert recurring lessons:', insErr);
+      console.error('Failed to insert recurring lessons safely:', insErr);
       throw insErr;
     }
   }
 
   return { createdCount: newLessons.length };
+}
+
+export async function ensureRecurringLessonsForStudent(studentId: string, weeksAhead: number = 4): Promise<number> {
+  if (!supabase) return 0;
+  const { data: student, error } = await supabase
+    .from('tutor_students')
+    .select('id, is_active, recurring_schedule')
+    .eq('id', studentId)
+    .single();
+
+  if (error || !student || !student.is_active || !student.recurring_schedule) return 0;
+  const res = await planRecurringLessonsForStudent(student.id, student.recurring_schedule, weeksAhead);
+  return res.createdCount;
 }
 
 export async function ensureRecurringLessonsForAllActiveStudents(weeksAhead: number = 4): Promise<number> {
@@ -817,7 +752,7 @@ export async function getAttendanceSummary(period: 'week' | 'month' = 'month'): 
 
   const makeupDetails = makeups.map((m: any) => ({
     studentName: m.tutor_students?.name || m.student_name || 'Ученик',
-    date: m.missed_date || m.created_at.substring(0, 10),
+    date: m.missed_date || getTashkentDateString(m.created_at),
     status: m.status === 'completed' ? 'Отработано' : m.status === 'scheduled' ? 'Назначено в ВС' : 'Ожидает отработки',
   }));
 
@@ -832,9 +767,6 @@ export async function getAttendanceSummary(period: 'week' | 'month' = 'month'): 
   };
 }
 
-// -------------------------------------------------------------
-// STUDENT ARCHIVE HISTORY (By Month)
-// -------------------------------------------------------------
 export async function getStudentArchive(studentId: string, monthDate: Date = getTashkentNow()) {
   if (!supabase) return { completed: [], missed: [], planned: [], target: 12 };
 
@@ -869,28 +801,6 @@ export async function getStudentArchive(studentId: string, monthDate: Date = get
   };
 }
 
-// -------------------------------------------------------------
-// COMPATIBILITY & HELPER EXPORTS (For gentle migration)
-// -------------------------------------------------------------
-export async function updateStudentBillingDay(studentId: string, billingDay: string): Promise<void> {
-  if (!supabase) throw new Error('Supabase is not initialized');
-  await supabase.from('tutor_students').update({ billing_day: billingDay }).eq('id', studentId);
-}
-
-export async function updateStudentColor(studentId: string, color: string): Promise<void> {
-  if (!supabase) throw new Error('Supabase is not initialized');
-  await supabase.from('tutor_students').update({ color }).eq('id', studentId);
-}
-
-export async function updateStudentInfo(studentId: string, updates: { name?: string; phone?: string }): Promise<void> {
-  if (!supabase) throw new Error('Supabase is not initialized');
-  const payload: Record<string, string> = {};
-  if (updates.name !== undefined) payload.name = updates.name.trim();
-  if (updates.phone !== undefined) payload.phone = updates.phone.trim();
-  if (Object.keys(payload).length === 0) return;
-  await supabase.from('tutor_students').update(payload).eq('id', studentId);
-}
-
 export async function updateStudentSettings(
   studentId: string,
   updates: {
@@ -898,10 +808,6 @@ export async function updateStudentSettings(
     billing_day?: string;
     schedule_notes?: string;
     recurring_schedule?: RecurringSlot[];
-    // legacy
-    price_per_lesson?: number;
-    prepaid_balance?: number;
-    package_total_lessons?: number;
   }
 ): Promise<void> {
   if (!supabase) throw new Error('Supabase is not initialized');
@@ -915,55 +821,8 @@ export async function updateStudentSettings(
     await supabase.from('tutor_students').update(payload).eq('id', studentId);
   }
 
-  if (updates.recurring_schedule !== undefined) {
+  // Update only this student's upcoming schedule
+  if (updates.recurring_schedule !== undefined && updates.recurring_schedule.length > 0) {
     await planRecurringLessonsForStudent(studentId, updates.recurring_schedule, 4);
   }
-}
-
-// Deprecated finance stubs for compatibility
-export async function getFinanceSummary(): Promise<FinanceSummary> {
-  const summary = await getAttendanceSummary('month');
-  return {
-    earnedThisMonthUzs: 0,
-    completedLessonsCount: summary.completedCount,
-  };
-}
-
-export async function addPayment(studentId: string, amount: number, lessonsCount: number, date?: string): Promise<any> {
-  // Safe zero-finance stub: no-op
-  return { id: generateUUID(), student_id: studentId, amount_uzs: 0, lessons_added: lessonsCount, created_at: date || getTashkentTodayStr() };
-}
-
-export async function burnLesson(lessonId: string): Promise<void> {
-  await setLessonStatusDirect(lessonId, 'missed', 'Пропуск без отработки', false);
-}
-
-export interface StudentHistoryRecord {
-  id: string;
-  type: 'payment' | 'lesson';
-  date: string;
-  title: string;
-  subtitle?: string;
-  badge: string;
-  status?: string;
-  amountUzs?: number;
-}
-
-export async function getStudentHistory(studentId: string): Promise<StudentHistoryRecord[]> {
-  const lessons = await getLessons();
-  return lessons
-    .filter((l) => l.student_id === studentId)
-    .map((l) => ({
-      id: l.id,
-      type: 'lesson',
-      date: l.date,
-      title: l.status === 'completed' ? 'Урок проведен' : l.status === 'missed' ? 'Пропуск' : 'Запланирован',
-      subtitle: `${l.time_str}${l.miss_reason ? ` • ${l.miss_reason}` : ''}`,
-      badge: l.status === 'completed' ? 'Проведен' : l.status === 'missed' ? 'Пропуск' : 'План',
-      status: l.status,
-    }));
-}
-
-export async function toggleStudentCalendarDate(studentId: string, dateStr: string): Promise<any> {
-  return { status: null };
 }

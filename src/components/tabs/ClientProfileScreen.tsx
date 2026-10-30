@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Student, Lesson, RecurringSlot } from '@/types';
 import { X, Check, ChevronLeft, ChevronRight, Calendar, Clock, Edit2, Trash2, Plus, AlertCircle, RotateCcw } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
 import { format, parseISO, addMonths, subMonths, startOfMonth, endOfMonth, isWithinInterval } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { getTashkentNow } from '@/lib/formatters';
+import { getStudentLessonsArchive } from '@/lib/storage';
 
 interface ClientProfileScreenProps {
   student: Student;
@@ -17,6 +18,7 @@ interface ClientProfileScreenProps {
   onUpdateColor?: (studentId: string, color: string) => void;
   onSaveStudentInfo?: (studentId: string, updates: any) => void;
   onUpdateLessonMissReason?: (lessonId: string, missReason: string) => Promise<void>;
+  onOpenLesson?: (lesson: Lesson) => void;
   // Legacy stubs for compatibility
   onAddPayment?: any;
   onToggleCalendarDate?: any;
@@ -39,6 +41,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
   onDeleteStudent,
   onSaveStudentInfo,
   onUpdateLessonMissReason,
+  onOpenLesson,
 }) => {
   const [activeTab, setActiveTab] = useState<'archive' | 'settings'>('archive');
   const [selectedMonth, setSelectedMonth] = useState<Date>(getTashkentNow());
@@ -63,13 +66,28 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     '#F97316', '#84CC16', '#0EA5E9', '#A855F7'
   ];
 
+  const [archiveLessons, setArchiveLessons] = useState<Lesson[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    getStudentLessonsArchive(student.id).then((data) => {
+      if (isMounted && data.length > 0) {
+        setArchiveLessons(data);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [student.id]);
+
+  const activeLessons = archiveLessons.length > 0 ? archiveLessons : lessons.filter((l) => l.student_id === student.id);
+
   // Filter lessons for selected student and selected month
   const monthLessons = useMemo(() => {
     const start = startOfMonth(selectedMonth);
     const end = endOfMonth(selectedMonth);
 
-    return lessons
-      .filter((l) => l.student_id === student.id)
+    return activeLessons
       .filter((l) => {
         try {
           const d = parseISO(l.date);
@@ -79,7 +97,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
         }
       })
       .sort((a, b) => b.date.localeCompare(a.date));
-  }, [lessons, student.id, selectedMonth]);
+  }, [activeLessons, selectedMonth]);
 
   const completedCount = monthLessons.filter((l) => l.status === 'completed').length;
   const missedCount = monthLessons.filter((l) => l.status === 'missed' || l.status === 'missed_excused' || l.status === 'missed_penalty').length;
@@ -259,7 +277,13 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                     return (
                       <div
                         key={l.id}
-                        className={`p-3 rounded-2xl border transition-all ${
+                        onClick={() => {
+                          if (onOpenLesson) {
+                            hapticImpact('light');
+                            onOpenLesson(l);
+                          }
+                        }}
+                        className={`p-3 rounded-2xl border transition-all cursor-pointer hover:shadow-xs active:scale-[0.99] ${
                           isCompleted
                             ? 'bg-green-50/30 border-green-200'
                             : isMissed
@@ -300,6 +324,9 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                                 🔄 Отработка
                               </span>
                             )}
+                            <span className="text-[11px] text-gray-400 font-bold ml-1 hover:text-gray-700" title="Перенести / изменить">
+                              ✏️
+                            </span>
                           </div>
                         </div>
 
@@ -311,7 +338,8 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                         {/* Miss Reason row with inline edit */}
                         {isMissed && (
                           <div
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               setEditingReasonLesson({ id: l.id, currentReason: l.miss_reason || '' });
                               setReasonInput(l.miss_reason || '');
                             }}
