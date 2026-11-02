@@ -81,11 +81,18 @@ export default function Dashboard() {
   const handleSetLessonStatus = async (
     lessonId: string,
     status: LessonStatus,
-    missReason?: string,
-    needsMakeup?: boolean
+    missReason?: string
   ) => {
     try {
-      // Optimistic local state update
+      const isDeducted = (s: string) => s === 'completed' || s === 'missed_penalty' || s === 'missed';
+      const prevLesson = lessons.find((l) => l.id === lessonId);
+      const prevDeducted = prevLesson ? isDeducted(prevLesson.status) : false;
+      const targetDeducted = isDeducted(status);
+      let delta = 0;
+      if (!prevDeducted && targetDeducted) delta = -1;
+      else if (prevDeducted && !targetDeducted) delta = 1;
+
+      // Optimistic local state update for lessons
       setLessons((prev) =>
         prev.map((l) =>
           l.id === lessonId
@@ -93,16 +100,24 @@ export default function Dashboard() {
                 ...l,
                 status,
                 miss_reason: missReason !== undefined ? missReason : l.miss_reason,
-                needs_makeup: needsMakeup !== undefined ? needsMakeup : l.needs_makeup,
+                needs_makeup: false,
               }
             : l
         )
       );
 
-      await setLessonStatusDirect(lessonId, status, missReason, needsMakeup);
+      // Optimistic local state update for student balance
+      if (delta !== 0 && prevLesson) {
+        setStudents((prev) =>
+          prev.map((s) =>
+            s.id === prevLesson.student_id
+              ? { ...s, lessons_balance: (s.lessons_balance ?? 0) + delta }
+              : s
+          )
+        );
+      }
 
-      // Update makeups list in background if needed
-      getPendingMakeups().then(setMakeups).catch(() => {});
+      await setLessonStatusDirect(lessonId, status, missReason);
     } catch (e) {
       console.error('Status change failed:', e);
       refreshData();

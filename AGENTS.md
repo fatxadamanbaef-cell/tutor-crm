@@ -17,51 +17,75 @@ Built with Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS, Supabase
 
 ## 1. Core Architecture & Philosophy
 
-- **Zero-Finance Model**: The system tracks lessons, attendance, student targets, and Sunday makeups. Financial fields, prices, balances, and payment calculations are completely removed.
-- **Strict Timezone Standard**: Single source of truth is **Asia/Tashkent (UTC+5)**. All dates are formatted using `getTashkentDateString(date?: Date)` in `src/lib/formatters.ts`. Never use raw `new Date().toISOString().split('T')[0]`.
+- **Hybrid Billing & Balance Model**: 
+  - Supports two billing modes per student: `date_to_date` (calendar period based on monthly `billing_day`) and `package` (lesson package quota).
+  - Tracks strict `lessons_balance` with each student having a defined `lesson_rate` (default 300,000 UZS).
+  - Sunday makeups workflow is completely deprecated in favor of explicit 3-state attendance tracking.
+- **Strict Timezone Standard**: Single source of truth is **Asia/Tashkent (UTC+5)**. All dates are formatted using `getTashkentDateString(date?: Date)` in `src/lib/formatters.ts`.
 - **Database Isolation**: System bot configurations (`_BOT_CONFIG`, `_BOT_STATE`) in `tutor_students` are filtered out at query level (`.not('name', 'like', '_BOT_%')`).
 - **Mobile WebView Performance**: Lightweight list view with zero drag-and-drop overhead, ensuring 60 FPS in Telegram WebViews.
 
 ---
 
-## 2. Data Layer (`src/lib/storage.ts`)
+## 2. 3-State Attendance & Idempotent Balance Deductions
 
-- **Windowed Lesson Fetching**: `getLessons(fromDate?, toDate?)` defaults to an active window:
+Attendance transitions directly control `lessons_balance` on `tutor_students`:
+1. `completed` (✅ Был): Decrements `lessons_balance` by 1.
+2. `missed_penalty` (🔥 Сгорел): Decrements `lessons_balance` by 1 (paid/burned absence).
+3. `missed_excused` (🛑 Отмена): Does **not** decrement balance. If transitioning from `completed` or `missed_penalty`, refunds +1 back to `lessons_balance`.
+- Transitions back to `planned` refund +1 if previous state was deducted.
+- Balance mutations are idempotent (`completed` -> `completed` never double-deducts).
+
+---
+
+## 3. Data Layer & Billing Engine (`src/lib/storage.ts`)
+
+- **Windowed Lesson Fetching**: `getLessons(fromDate?, toDate?)` defaults to active window:
   `[1st of previous month, today + 35 days]`.
-- **Student Archive on Demand**: Full history for a specific student is loaded only when opening their profile via `getStudentLessonsArchive(studentId)`.
-- **Safe Recurring Generator**:
-  - `planRecurringLessonsForStudent(studentId, slots, weeksAhead)` is **strictly additive** (`INSERT IF NOT EXISTS`).
-  - Existing lessons (`planned`, `completed`, `missed`, rescheduled) are **never deleted or overwritten**.
-  - Recurring generation is triggered ONLY on the server cron (`/api/bot/cron`) or when a teacher explicitly saves a recurring schedule in `ClientProfileScreen.tsx`.
-- **Client Polling & Event Listeners**:
-  - No `visibilitychange` or `window.focus` event listeners reloading or regenerating lessons.
-  - Page loads data in parallel (`Promise.all([getStudents(), getLessons(), getPendingMakeups()])`) and applies **Optimistic UI** updates on user actions.
+- **Interactive Schedule Horizon & Archive**:
+  - `getStudentHorizonLessons(studentId, daysHorizon)`: fetches past (`today - daysHorizon`) and upcoming (`today + daysHorizon`) lessons, ensuring recurring projection up to 9 weeks (63 days) ahead.
+  - `getUnmarkedPastLessons(studentId)`: returns all past lessons (`lesson_date <= today`) still in `planned`/`scheduled` status.
+  - `initializePackageFromPastDate(studentId, startDate, packageCount, excludedDates)`: backfills past package lessons from `startDate`, sets starting baseline, marks completed/excused lessons, and sets exact remaining balance.
+- **Recurring Schedule Generation & Template Changes**:
+  - `planRecurringLessonsForStudent(studentId, slots, weeksAhead = 9, cleanFutureUntouched)`
+  - When schedule template changes, future untouched planned slots (`lesson_date >= today`, `status IN ('planned', 'scheduled')`, default notes) are cleaned before generating new slots.
+  - Completed, missed, or custom rescheduled lessons are **never deleted or overwritten**.
+- **Hybrid Billing Calculator Engine**:
+  - `calculateStudentBilling(studentId, customStartDate?, customEndDate?)`:
+    - `date_to_date`: iterates through calendar days in billing cycle `[billing_day, billing_day - 1]`, counts recurring slots, calculates gross sum, adjusts for current balance, and outputs net amount to pay.
+    - `package`: calculates package cost (`monthly_target_lessons * lesson_rate`) and current balance.
+  - `topUpStudentBalance(studentId, lessonsAdded)`: increments balance upon payment.
 
 ---
 
-## 3. UI Structure
+## 4. UI Structure
 
-- `src/app/page.tsx`: Main SPA container managing navigation (`Schedule`, `Clients`), quick stat badges, and optimistic state mutations.
+- `src/app/page.tsx`: Main SPA container managing optimistic UI mutations for status changes, balance adjustments, and schedule updates.
 - `src/components/tabs/ScheduleTab.tsx`:
-  - `HorizontalDateStrip.tsx`: Fast swipeable calendar strip with lesson count indicators and a "Сегодня" button.
-  - `LessonCard.tsx`: Chronological card with 1-tap quick actions:
-    - **Был** (toggle completed / planned)
-    - **Пропуск** (with inline submenu: "В отработку (ВС)" / "Без отработки")
-    - **Перенести** (opens `EditLessonModal.tsx`)
-  - `SundayMakeupsSection.tsx`: Pending makeup lesson queue with 1-click scheduling.
-- `src/components/tabs/ClientsTab.tsx` & `ClientProfileScreen.tsx`: Student management, monthly target setting, recurring schedule editor, and full lesson archive.
+  - `HorizontalDateStrip.tsx`: Fast swipeable calendar strip with lesson count indicators and "Сегодня" quick jump.
+  - `LessonCard.tsx`: Chronological card with 1-tap quick buttons:
+    - **Был** (`completed`, -1 balance)
+    - **Сгорел** (`missed_penalty`, -1 balance)
+    - **Отмена** (`missed_excused`, 0 balance change)
+    - **Инфо** (opens `EditLessonModal.tsx`)
+- `src/components/tabs/ClientsTab.tsx` & `ClientProfileScreen.tsx`:
+  - Student profiles with live balance badge, `+ / -` quick adjustments, period billing breakdown, and recurring schedule editor.
+  - **Quick-Mark Past Lessons Alert**: high-visibility banner with 1-tap `✅`, `🔥`, `🛑` chips and bulk `✅ Отметить все (N) как проведенные`.
+  - **Retroactive Package Wizard**: "📦 Открыть пакет с прошлой даты" with live slot preview chips, exclusion toggles, and instant balance recalculation.
+  - **7 / 14 / 30 / 60-Day Horizon**: interactive timeline with "Все / Прошедшие / Будущие" filters, live counter bar, and 1-tap status switchers (`✅`, `🔥`, `🛑`, `📅`).
 
 ---
 
-## 4. Telegram Bot & AI Integration
+## 5. Telegram Bot & AI Integration
 
 - **Route Endpoints**:
-  - `/api/bot/route.ts`: Telegram webhook handler, audio voice transcription (Whisper), and natural language command parsing (GPT-4.1).
-  - `/api/bot/cron/route.ts`: Periodic cron job for 08:30 morning digest, 15-minute lesson reminders, and weekly Sunday summary.
+  - `/api/bot/route.ts`: Telegram webhook handler, Whisper voice transcription, GPT-4.1 natural language processing, and interactive 1-tap reminder callbacks (`status:<id>:completed`, `status:<id>:penalty`, `status:<id>:excused`).
+  - `/api/bot/cron/route.ts`: Periodic cron job for 08:30 morning digest (with billing alerts for due dates & low balances), 15-minute reminders with 1-tap buttons, and Sunday weekly summaries.
   - `/api/bot/digest/route.ts`: Manual/API trigger for sending morning digest using unified `buildMorningDigest()`.
 - **OpenAI Tools (`src/lib/openai.ts`)**:
-  - `markLessonStatus`: Mark lesson completed or missed with reason and optional Sunday makeup.
-  - `rescheduleLesson`: Reschedule planned, conducted, or missed lessons to any target date/time.
-  - `setupOrUpdateStudent`: Create/update student profile, target, billing day, and recurring schedule.
+  - `markLessonStatus`: Mark lesson completed, penalty miss, or excused cancellation with balance tracking.
+  - `calculateStudentBilling`: Compute period billing, lesson counts, and amount in UZS.
+  - `addStudentPayment`: Record student lesson package payments to balance.
+  - `setupOrUpdateStudent`: Create/update student profile, `billing_type`, `lesson_rate`, `lessons_balance`, and recurring schedule.
+  - `rescheduleLesson`: Reschedule any lesson to a new date/time.
   - `getSchedule`: Query real lessons within any specific date window.
-  - `getStudentArchiveReport`: Full attendance summary without finance.

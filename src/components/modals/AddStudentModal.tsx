@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { RecurringSlot } from '@/types';
+import { RecurringSlot, BillingType } from '@/types';
 import { X, UserPlus, Clock } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
 
@@ -12,6 +12,9 @@ interface AddStudentModalProps {
     name: string;
     monthly_target_lessons: number;
     billing_day: string;
+    billing_type?: BillingType;
+    lesson_rate?: number;
+    lessons_balance?: number;
     phone?: string;
     telegram?: string;
     recurring_schedule?: RecurringSlot[];
@@ -34,6 +37,9 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
   const [telegram, setTelegram] = useState('');
   const [monthlyTarget, setMonthlyTarget] = useState(12);
   const [billingDay, setBillingDay] = useState('10');
+  const [billingType, setBillingType] = useState<BillingType>('date_to_date');
+  const [lessonRate, setLessonRate] = useState(300000);
+  const [lessonsBalance, setLessonsBalance] = useState(0);
 
   // Recurring Schedule
   const [selectedDays, setSelectedDays] = useState<number[]>([1, 3, 5]); // Mon, Wed, Fri
@@ -67,6 +73,9 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
       name: name.trim(),
       monthly_target_lessons: Number(monthlyTarget) || 12,
       billing_day: billingDay.trim() || '10',
+      billing_type: billingType,
+      lesson_rate: Number(lessonRate) || 300000,
+      lessons_balance: Number(lessonsBalance) || 0,
       phone: phone.trim(),
       telegram: telegram.trim(),
       recurring_schedule,
@@ -76,19 +85,22 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-3">
-      <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl space-y-4 animate-in slide-in-from-bottom-6 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-3">
+      <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl space-y-4 animate-in slide-in-from-bottom-6 max-h-[90vh] overflow-y-auto border border-slate-200">
         {/* Header */}
-        <div className="flex justify-between items-center pb-2 border-b border-gray-100">
+        <div className="flex justify-between items-center pb-2 border-b border-slate-100">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600">
-              <UserPlus className="w-4 h-4" />
+            <div className="w-9 h-9 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600">
+              <UserPlus className="w-5 h-5" />
             </div>
-            <h3 className="text-base font-black text-gray-900">Новый ученик</h3>
+            <div>
+              <h3 className="text-base font-black text-slate-900 leading-tight">Новый ученик</h3>
+              <p className="text-[11px] font-medium text-slate-500">Заполните данные для CRM</p>
+            </div>
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 hover:text-gray-600"
+            className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -97,7 +109,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
         {/* Inputs */}
         <div className="space-y-3">
           <div>
-            <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1">
+            <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide block mb-1">
               Имя ученика *
             </label>
             <input
@@ -105,13 +117,13 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Например: Сахиб"
-              className="w-full px-3 py-2 text-xs font-bold border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:outline-hidden focus:border-blue-500"
+              className="w-full px-3.5 py-2.5 text-sm font-bold border border-slate-300 rounded-xl bg-slate-50 text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1">
+              <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide block mb-1">
                 Телефон
               </label>
               <input
@@ -119,11 +131,11 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 placeholder="+998 90 ..."
-                className="w-full px-3 py-2 text-xs border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:outline-hidden focus:border-blue-500"
+                className="w-full px-3.5 py-2.5 text-xs font-semibold border border-slate-300 rounded-xl bg-slate-50 text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
               />
             </div>
             <div>
-              <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1">
+              <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide block mb-1">
                 Telegram
               </label>
               <input
@@ -131,14 +143,77 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
                 value={telegram}
                 onChange={(e) => setTelegram(e.target.value)}
                 placeholder="@username"
-                className="w-full px-3 py-2 text-xs border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:outline-hidden focus:border-blue-500"
+                className="w-full px-3.5 py-2.5 text-xs font-semibold border border-slate-300 rounded-xl bg-slate-50 text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
+              />
+            </div>
+          </div>
+
+          {/* Billing Type Selector */}
+          <div>
+            <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide block mb-1">
+              Модель биллинга
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  hapticImpact('light');
+                  setBillingType('date_to_date');
+                }}
+                className={`py-2 px-2 rounded-xl text-xs font-bold border transition-all ${
+                  billingType === 'date_to_date'
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                    : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                }`}
+              >
+                📅 По датам месяца
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  hapticImpact('light');
+                  setBillingType('package');
+                }}
+                className={`py-2 px-2 rounded-xl text-xs font-bold border transition-all ${
+                  billingType === 'package'
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                    : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                }`}
+              >
+                📦 Пакетная оплата
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide block mb-1">
+                Ставка за урок (сум)
+              </label>
+              <input
+                type="number"
+                value={lessonRate}
+                onChange={(e) => setLessonRate(Number(e.target.value))}
+                step={10000}
+                className="w-full px-3.5 py-2 text-xs font-black border border-slate-300 rounded-xl bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide block mb-1">
+                Начальный баланс
+              </label>
+              <input
+                type="number"
+                value={lessonsBalance}
+                onChange={(e) => setLessonsBalance(Number(e.target.value))}
+                className="w-full px-3.5 py-2 text-xs font-black border border-slate-300 rounded-xl bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1">
+              <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide block mb-1">
                 Норма уроков в мес.
               </label>
               <input
@@ -147,11 +222,11 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
                 onChange={(e) => setMonthlyTarget(Number(e.target.value))}
                 min={1}
                 max={60}
-                className="w-full px-3 py-2 text-xs font-black border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:outline-hidden focus:border-blue-500"
+                className="w-full px-3.5 py-2 text-xs font-black border border-slate-300 rounded-xl bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
               />
             </div>
             <div>
-              <label className="text-[11px] font-bold text-gray-500 uppercase block mb-1">
+              <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide block mb-1">
                 День оплаты
               </label>
               <input
@@ -159,17 +234,19 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
                 value={billingDay}
                 onChange={(e) => setBillingDay(e.target.value)}
                 placeholder="10 число"
-                className="w-full px-3 py-2 text-xs font-bold border border-gray-200 rounded-xl bg-gray-50 focus:bg-white focus:outline-hidden focus:border-blue-500"
+                className="w-full px-3.5 py-2 text-xs font-bold border border-slate-300 rounded-xl bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
               />
             </div>
           </div>
 
           {/* Schedule */}
-          <div className="p-3 bg-gray-50 rounded-2xl border border-gray-200/80 space-y-2">
-            <span className="text-[11px] font-bold text-gray-700 uppercase block">
+          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/90 space-y-2.5">
+            <span className="text-[11px] font-black text-slate-700 uppercase tracking-wide block">
               Периодическое расписание
             </span>
-            <div className="flex gap-1">
+
+            {/* Days Chips */}
+            <div className="flex justify-between gap-1">
               {WEEKDAYS.map((wd) => {
                 const isSelected = selectedDays.includes(wd.id);
                 return (
@@ -177,10 +254,10 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
                     key={wd.id}
                     type="button"
                     onClick={() => toggleDay(wd.id)}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                    className={`w-8 h-8 rounded-xl font-bold text-xs flex items-center justify-center transition-all ${
                       isSelected
-                        ? 'bg-blue-600 text-white shadow-xs'
-                        : 'bg-white text-gray-600 border border-gray-200'
+                        ? 'bg-blue-600 text-white shadow-xs scale-105'
+                        : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'
                     }`}
                   >
                     {wd.label}
@@ -189,38 +266,39 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
               })}
             </div>
 
+            {/* Time */}
             <div className="flex items-center gap-2 pt-1">
-              <Clock className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+              <Clock className="w-4 h-4 text-slate-400 shrink-0" />
               <input
                 type="time"
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
-                className="bg-white border border-gray-200 text-xs font-bold rounded-lg px-2 py-1"
+                className="bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-black text-slate-900 focus:border-blue-600 focus:outline-hidden"
               />
-              <span className="text-gray-400 text-xs">–</span>
+              <span className="text-slate-400 text-xs font-bold">–</span>
               <input
                 type="time"
                 value={endTime}
                 onChange={(e) => setEndTime(e.target.value)}
-                className="bg-white border border-gray-200 text-xs font-bold rounded-lg px-2 py-1"
+                className="bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-black text-slate-900 focus:border-blue-600 focus:outline-hidden"
               />
             </div>
           </div>
         </div>
 
         {/* Buttons */}
-        <div className="flex gap-2 pt-2 border-t border-gray-100">
+        <div className="flex gap-2 pt-2 border-t border-slate-100">
           <button
             type="button"
             onClick={onClose}
-            className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-700 text-xs font-semibold"
+            className="flex-1 py-3 rounded-2xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-100 active:scale-95 transition-all"
           >
             Отмена
           </button>
           <button
             type="button"
             onClick={handleSave}
-            className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-xs font-bold shadow-md shadow-blue-500/20 active:scale-98"
+            className="flex-1 py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-500/20 active:scale-95 transition-all"
           >
             Создать ученика
           </button>

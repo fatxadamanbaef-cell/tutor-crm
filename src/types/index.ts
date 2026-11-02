@@ -1,5 +1,7 @@
 export type LessonStatus = 'planned' | 'completed' | 'missed' | 'missed_excused' | 'missed_penalty';
 
+export type BillingType = 'date_to_date' | 'package';
+
 export interface RecurringSlot {
   dayOfWeek: number; // 1 (Пн) .. 7 (Вс)
   startTime: string; // '16:00'
@@ -12,6 +14,9 @@ export interface Student {
   monthly_target_lessons: number; // норма уроков в месяц (например 8, 12, 20)
   recurring_schedule?: RecurringSlot[];
   billing_day?: string | number; // день оплаты (строка или число, например "10" или "10 число")
+  billing_type: BillingType; // 'date_to_date' | 'package'
+  lesson_rate: number; // стоимость одного урока (например 300000)
+  lessons_balance: number; // текущий баланс уроков (например 0, +4, -1)
   phone?: string;
   telegram?: string;
   schedule_notes?: string;
@@ -20,7 +25,7 @@ export interface Student {
   created_at: string;
   
   // Расчетные поля посещаемости
-  makeup_debt: number; // количество активных отработок (pending makeups)
+  makeup_debt?: number; // legacy
   conducted_this_month?: number;
   missed_this_month?: number;
 }
@@ -68,4 +73,24 @@ export interface AttendanceSummary {
     date: string;
     status: string;
   }>;
+}
+
+export interface BillingCalculation {
+  studentId: string;
+  studentName: string;
+  billingType: BillingType;
+  lessonRate: number;
+  lessonsBalance: number;
+  // date_to_date fields
+  startDate?: string;
+  endDate?: string;
+  scheduledLessonsCount?: number;
+  grossAmount?: number;
+  lessonsToPay?: number;
+  netAmount?: number;
+  // package fields
+  packageSize?: number;
+  packageAmount?: number;
+  // Summary in Russian
+  summaryText: string;
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getLessons, getStudents, setLessonStatusDirect, updateLessonDetails, ensureRecurringLessonsForAllActiveStudents } from '@/lib/storage';
+import { getLessons, getStudents, setLessonStatusDirect, updateLessonDetails, ensureRecurringLessonsForAllActiveStudents, calculateStudentBilling } from '@/lib/storage';
 import { formatTashkentHeaderDate, isTashkentToday, getTashkentNow } from '@/lib/formatters';
 import { generateStudentReport, findStudentsByName } from '@/lib/reports';
 import { supabase } from '@/lib/supabase';
@@ -10,6 +10,8 @@ export const maxDuration = 60;
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://tutor-crm-kappa.vercel.app';
+
+const escapeHtml = (s: string) => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 export async function sendTelegramMessage(chatId: number | string, text: string, replyMarkup?: any) {
   if (!BOT_TOKEN) return;
@@ -58,7 +60,7 @@ async function answerCallbackQuery(callbackQueryId: string, text?: string) {
 
 export async function buildMorningDigest(firstName: string = 'Фархад') {
   const todayFormatted = formatTashkentHeaderDate();
-  await ensureRecurringLessonsForAllActiveStudents(4).catch((e) => {
+  await ensureRecurringLessonsForAllActiveStudents(9).catch((e) => {
     console.error('Failed to ensure recurring lessons in buildMorningDigest:', e);
   });
   const [lessons, students] = await Promise.all([getLessons(), getStudents()]);
@@ -96,24 +98,51 @@ export async function buildMorningDigest(firstName: string = 'Фархад') {
     message += `\n`;
   }
 
-  // Pending Sunday makeups
-  const studentsWithMakeups = students.filter((s) => (s.makeup_debt || 0) > 0);
-  if (studentsWithMakeups.length > 0) {
-    const names = studentsWithMakeups.map((s) => s.name).join(', ');
-    message += `🔄 <b>Ждут назначения отработки на ВС:</b> ${studentsWithMakeups.length} ученика (${names})\n`;
+  // 💰 БИЛЛИНГ И БАЛАНСЫ
+  const now = getTashkentNow();
+  const todayDayNumber = now.getDate();
+
+  // 1. Date-to-date students whose billing_day is today or in 1–2 days
+  const billingAlertLines: string[] = [];
+  const dateToDateStudents = students.filter((s) => s.billing_type !== 'package');
+  for (const s of dateToDateStudents) {
+    const match = String(s.billing_day || '').match(/\d+/);
+    if (!match) continue;
+    const bDay = Number(match[0]);
+    // check if bDay is today or in 1-2 days
+    const diff = (bDay - todayDayNumber + 31) % 31;
+    if (diff >= 0 && diff <= 2) {
+      try {
+        const calc = await calculateStudentBilling(s.id);
+        const isToday = diff === 0;
+        const prefix = isToday ? '🔴 <b>СЕГОДНЯ ОПЛАТА:</b>' : `🟡 <b>Оплата через ${diff} дн.:</b>`;
+        billingAlertLines.push(
+          `${prefix} <b>${escapeHtml(s.name)}</b> (${s.billing_day || bDay + ' число'}) — <b>${(calc.netAmount || 0).toLocaleString('ru-RU')} сум</b> (${calc.scheduledLessonsCount || 0} ур., баланс: ${s.lessons_balance ?? 0} ур.)`
+        );
+      } catch {}
+    }
   }
 
-  // Reminder for billing day today
-  const todayDayNumber = getTashkentNow().getDate(); // e.g. 28
-  const billingDayStudents = students.filter((s) => {
-    if (!s.billing_day) return false;
-    const match = String(s.billing_day).match(/\d+/);
-    return match && Number(match[0]) === todayDayNumber;
-  });
+  // 2. Package / low balance students (lessons_balance <= 2 or negative)
+  const lowBalanceStudents = students.filter((s) => (s.lessons_balance ?? 0) <= 2);
+  const lowBalanceLines: string[] = [];
+  for (const s of lowBalanceStudents) {
+    const targetSize = s.monthly_target_lessons || 8;
+    const rate = s.lesson_rate || 300000;
+    const packageSum = targetSize * rate;
+    lowBalanceLines.push(
+      `⚠️ <b>${escapeHtml(s.name)}</b>: осталось <b>${s.lessons_balance ?? 0} ур.</b> (к оплате пакет ${targetSize} ур. = <b>${packageSum.toLocaleString('ru-RU')} сум</b>)`
+    );
+  }
 
-  if (billingDayStudents.length > 0) {
-    const names = billingDayStudents.map((s) => s.name).join(', ');
-    message += `📅 <b>Напоминание о дате оплаты сегодня (${todayDayNumber} число):</b> ${names}\n`;
+  if (billingAlertLines.length > 0 || lowBalanceLines.length > 0) {
+    message += `💰 <b>БИЛЛИНГ И БАЛАНСЫ:</b>\n`;
+    if (billingAlertLines.length > 0) {
+      message += billingAlertLines.join('\n') + '\n\n';
+    }
+    if (lowBalanceLines.length > 0) {
+      message += `<b>Низкий баланс уроков:</b>\n` + lowBalanceLines.join('\n') + '\n\n';
+    }
   }
 
   keyboard.push([
@@ -164,8 +193,6 @@ async function sendChatAction(chatId: number | string, action: string = 'typing'
     });
   } catch (e) {}
 }
-
-const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 async function sendLongMessage(chatId: number | string, text: string, replyMarkup?: any) {
   const LIMIT = 3800;
@@ -314,31 +341,35 @@ export async function POST(req: NextRequest) {
         const studentName = lesson?.student_name || 'Ученик';
 
         if (action === 'completed') {
-          await setLessonStatusDirect(lessonId, 'completed');
-          await answerCallbackQuery(cq.id, '✅ Урок отмечен как проведенный!');
+          const res = await setLessonStatusDirect(lessonId, 'completed');
+          await answerCallbackQuery(cq.id, `✅ Был! Баланс: ${res.newBalance} ур.`);
           if (messageId) {
             await editTelegramMessage(
               chatId,
               messageId,
-              `✅ <b>Урок проведен!</b>\n👤 <b>${escapeHtml(studentName)}</b> (${lesson?.time_str || ''})\nОтмечено в архиве.`
+              `✅ <b>Урок проведен: ${escapeHtml(studentName)}</b> (${lesson?.time_str || ''})\n⚖️ Остаток на балансе: <b>${res.newBalance} ур.</b>`
             );
           }
-        } else if (action === 'miss_prompt') {
-          await setLessonStatusDirect(lessonId, 'missed', 'Пропуск', false);
-          await setPendingReason(lessonId, studentName, false);
-          await answerCallbackQuery(cq.id, '❌ Отмечен пропуск');
-          await sendTelegramMessage(
-            chatId,
-            `❌ Урок ученика <b>${escapeHtml(studentName)}</b> отмечен как пропущенный.\n\nНапишите или надиктуйте голосом <b>причину пропуска</b> для архива:`
-          );
-        } else if (action === 'makeup_prompt') {
-          await setLessonStatusDirect(lessonId, 'missed', 'Ожидает отработки', true);
-          await setPendingReason(lessonId, studentName, true);
-          await answerCallbackQuery(cq.id, '🔄 Назначен на отработку в ВС');
-          await sendTelegramMessage(
-            chatId,
-            `🔄 Урок ученика <b>${escapeHtml(studentName)}</b> отправлен на отработку в воскресенье.\n\nНапишите или надиктуйте голосом <b>причину пропуска</b> для архива:`
-          );
+        } else if (action === 'penalty' || action === 'miss_prompt') {
+          const res = await setLessonStatusDirect(lessonId, 'missed_penalty', 'Пропуск без предупреждения');
+          await answerCallbackQuery(cq.id, `🔥 Сгорел! Баланс: ${res.newBalance} ур.`);
+          if (messageId) {
+            await editTelegramMessage(
+              chatId,
+              messageId,
+              `🔥 <b>Урок сгорел (списан): ${escapeHtml(studentName)}</b>\n⚖️ Остаток на балансе: <b>${res.newBalance} ур.</b>`
+            );
+          }
+        } else if (action === 'excused' || action === 'makeup_prompt') {
+          const res = await setLessonStatusDirect(lessonId, 'missed_excused', 'Уважительная отмена');
+          await answerCallbackQuery(cq.id, `🛑 Отмена! Баланс: ${res.newBalance} ур.`);
+          if (messageId) {
+            await editTelegramMessage(
+              chatId,
+              messageId,
+              `🛑 <b>Уважительная отмена: ${escapeHtml(studentName)}</b>\n⚖️ Урок сохранен. Баланс: <b>${res.newBalance} ур.</b>`
+            );
+          }
         }
         return NextResponse.json({ ok: true });
       } else if (data === 'list_students') {

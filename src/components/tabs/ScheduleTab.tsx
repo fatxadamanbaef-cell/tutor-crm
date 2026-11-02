@@ -7,7 +7,6 @@ import { hapticImpact, hapticNotification } from '@/lib/telegram';
 import { getTashkentNow, getTashkentDateString } from '@/lib/formatters';
 import { HorizontalDateStrip } from '../HorizontalDateStrip';
 import { LessonCard } from '../LessonCard';
-import { SundayMakeupsSection } from '../SundayMakeupsSection';
 
 interface ScheduleTabProps {
   students: Student[];
@@ -16,9 +15,9 @@ interface ScheduleTabProps {
   onAddLesson: () => void;
   onOpenLesson: (lesson: Lesson) => void;
   onUpdateLessonTime: (lessonId: string, timeStr: string, dateStr?: string) => Promise<void>;
-  onSetLessonStatus: (lessonId: string, status: LessonStatus, missReason?: string, needsMakeup?: boolean) => Promise<void>;
-  onScheduleSundayMakeup: (makeupIdOrLesson: any, sundayDate: string, timeStr: string) => Promise<void>;
-  onArchiveMakeup: (makeupId: string) => Promise<void>;
+  onSetLessonStatus: (lessonId: string, status: LessonStatus, missReason?: string) => Promise<void>;
+  onScheduleSundayMakeup?: (makeupIdOrLesson: any, sundayDate: string, timeStr: string) => Promise<void>;
+  onArchiveMakeup?: (makeupId: string) => Promise<void>;
   onRefresh?: () => Promise<void> | void;
 }
 
@@ -135,8 +134,8 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                     const nextStatus = lesson.status === 'completed' ? 'planned' : 'completed';
                     onSetLessonStatus(id, nextStatus);
                   }}
-                  onSetStatus={(id, status, reason, makeup) => {
-                    onSetLessonStatus(id, status, reason, makeup);
+                  onSetStatus={(id, status, reason) => {
+                    onSetLessonStatus(id, status, reason);
                   }}
                   onEditLesson={onOpenLesson}
                 />
@@ -144,15 +143,6 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
             })}
           </div>
         )}
-
-        {/* Sunday Makeups Queue */}
-        <SundayMakeupsSection
-          makeups={makeups}
-          lessons={lessons}
-          students={students}
-          onScheduleSundayMakeup={onScheduleSundayMakeup}
-          onArchiveMakeup={onArchiveMakeup}
-        />
       </div>
     </div>
   );

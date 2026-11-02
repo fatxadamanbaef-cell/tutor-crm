@@ -61,6 +61,9 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ students, onOpenStudent,
             const target = student.monthly_target_lessons || 12;
             const conducted = student.conducted_this_month || 0;
             const missed = student.missed_this_month || 0;
+            const balance = student.lessons_balance ?? 0;
+            const rate = student.lesson_rate || 300000;
+            const isPkg = student.billing_type === 'package';
 
             return (
               <div
@@ -78,33 +81,47 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ students, onOpenStudent,
                     </div>
                     <div>
                       <h3 className="text-sm font-bold text-gray-900 leading-tight">{student.name}</h3>
-                      <div className="text-[11px] text-gray-500 flex items-center gap-1 mt-0.5 font-medium">
-                        <Calendar className="w-3 h-3 text-gray-400" />
-                        <span>Оплата: <b>{student.billing_day || '10 число'}</b></span>
+                      <div className="text-[11px] text-gray-500 flex items-center gap-1.5 mt-0.5 font-medium">
+                        <span className="px-1.5 py-0.2 rounded bg-gray-100 text-gray-700 text-[10px] font-bold">
+                          {isPkg ? 'Пакет' : 'По датам'}
+                        </span>
+                        <span>• Оплата: <b>{student.billing_day || '10 число'}</b></span>
                       </div>
                     </div>
                   </div>
 
                   <div className="text-right">
-                    <span className="text-xs font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-100">
-                      {conducted}/{target} ур.
+                    <span
+                      className={`text-xs font-black px-2.5 py-1 rounded-lg border ${
+                        balance <= 0
+                          ? 'bg-rose-50 text-rose-700 border-rose-200'
+                          : balance <= 2
+                          ? 'bg-amber-50 text-amber-700 border-amber-200'
+                          : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      }`}
+                    >
+                      Баланс: {balance} ур.
                     </span>
                   </div>
                 </div>
 
                 {/* Progress / Status Bar */}
-                <div className="grid grid-cols-3 gap-2 pt-2.5 border-t border-gray-100 text-center">
-                  <div className="bg-gray-50 py-1.5 px-2 rounded-xl">
-                    <span className="text-[10px] font-bold text-gray-400 block uppercase">Норма</span>
-                    <span className="text-xs font-black text-gray-800">{target} ур.</span>
+                <div className="grid grid-cols-4 gap-1.5 pt-2.5 border-t border-gray-100 text-center">
+                  <div className="bg-gray-50 py-1.5 px-1 rounded-xl">
+                    <span className="text-[9px] font-bold text-gray-400 block uppercase">Ставка</span>
+                    <span className="text-[11px] font-black text-gray-800">{(rate / 1000)}k</span>
                   </div>
-                  <div className="bg-green-50 py-1.5 px-2 rounded-xl">
-                    <span className="text-[10px] font-bold text-green-700 block uppercase">Проведено</span>
-                    <span className="text-xs font-black text-green-700">{conducted} ✅</span>
+                  <div className="bg-blue-50 py-1.5 px-1 rounded-xl">
+                    <span className="text-[9px] font-bold text-blue-700 block uppercase">Норма</span>
+                    <span className="text-[11px] font-black text-blue-700">{target} ур.</span>
                   </div>
-                  <div className="bg-red-50 py-1.5 px-2 rounded-xl">
-                    <span className="text-[10px] font-bold text-red-700 block uppercase">Пропуски</span>
-                    <span className="text-xs font-black text-red-700">{missed} ❌</span>
+                  <div className="bg-green-50 py-1.5 px-1 rounded-xl">
+                    <span className="text-[9px] font-bold text-green-700 block uppercase">Был</span>
+                    <span className="text-[11px] font-black text-green-700">{conducted} ✅</span>
+                  </div>
+                  <div className="bg-red-50 py-1.5 px-1 rounded-xl">
+                    <span className="text-[9px] font-bold text-red-700 block uppercase">Пропуск</span>
+                    <span className="text-[11px] font-black text-red-700">{missed} ❌</span>
                   </div>
                 </div>
               </div>

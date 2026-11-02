@@ -1,5 +1,5 @@
 import OpenAI, { toFile } from 'openai';
-import type { Student, Lesson, LessonStatus, RecurringSlot } from '@/types';
+import type { Student, Lesson, LessonStatus, RecurringSlot, BillingType } from '@/types';
 import {
   getStudents,
   getLessons,
@@ -10,10 +10,11 @@ import {
   deleteLesson,
   getAttendanceSummary,
   getPendingMakeups,
-  scheduleSundayMakeup,
   parseTimeRange,
   saveLesson,
   planRecurringLessonsForStudent,
+  calculateStudentBilling,
+  topUpStudentBalance,
 } from './storage';
 import { getTashkentTodayStr, getTashkentNow } from './formatters';
 import { resolveStudent } from './nameMatch';
@@ -87,19 +88,18 @@ function fn(name: string, description: string, properties: Record<string, unknow
 }
 
 // ===========================================================================
-// TOOLS FOR GPT-4.1 (Zero-Finance, Attendance, Recurring Schedule, Makeups)
+// TOOLS FOR GPT-4.1 (Hybrid Billing, Balance Tracking, Attendance, Schedule)
 // ===========================================================================
 const TOOLS = [
   // 1. Отметка статуса урока
   fn(
     'markLessonStatus',
-    'Отмечает статус урока ученика (completed — проведен, missed — пропущен). При пропуске ОБЯЗАТЕЛЬНО укажи причину missReason. Если нужно отправить на отработку в воскресенье — установи sendToSundayMakeup: true.',
+    'Отмечает статус урока ученика: completed (проведен, -1 с баланса), missed_penalty (сгорел/пропуск без предупреждения, -1 с баланса), missed_excused (уважительная отмена, урок сохраняется, баланс не меняется). При пропуске укажи причину missReason.',
     {
       studentName: studentNameProp,
       date: { type: 'string', description: 'Дата урока YYYY-MM-DD (по умолчанию сегодня)' },
-      status: { type: 'string', enum: ['completed', 'missed'], description: 'Статус: проведен или пропущен' },
-      missReason: { type: 'string', description: 'Причина пропуска (например: Болеет, Уехал на соревнования)' },
-      sendToSundayMakeup: { type: 'boolean', description: 'Отправить ли урок на отработку в воскресенье' },
+      status: { type: 'string', enum: ['completed', 'missed_penalty', 'missed_excused', 'missed'], description: 'Статус посещаемости' },
+      missReason: { type: 'string', description: 'Причина пропуска (например: Болеет, Предупредил заранее)' },
       lessonNotes: { type: 'string', description: 'Заметка к уроку или домашнее задание' },
     },
     ['studentName', 'status']
@@ -122,9 +122,12 @@ const TOOLS = [
   // 3. Создание или обновление ученика и его шаблона расписания
   fn(
     'setupOrUpdateStudent',
-    'Создает нового ученика или обновляет существующего: норму уроков в месяц (monthlyTargetLessons), день оплаты (billingDay) и шаблон периодического расписания (recurringDaysAndTimes).',
+    'Создает нового ученика или обновляет существующего: модель биллинга (billingType: date_to_date или package), ставку за урок (lessonRate), баланс уроков (lessonsBalance), норму уроков в месяц (monthlyTargetLessons), день оплаты (billingDay) и шаблон периодического расписания (recurringDaysAndTimes).',
     {
       name: { type: 'string', description: 'Имя ученика' },
+      billingType: { type: 'string', enum: ['date_to_date', 'package'], description: 'Тип биллинга: date_to_date (по датам) или package (пакет уроков)' },
+      lessonRate: { type: 'integer', description: 'Ставка за один урок в сумах (например 300000)' },
+      lessonsBalance: { type: 'integer', description: 'Текущий баланс уроков (например 0, 8, 12, -2)' },
       monthlyTargetLessons: { type: 'integer', description: 'Норма уроков в месяц (например 8, 12, 20)' },
       billingDay: { type: 'string', description: "День оплаты, например '10' или '10 число'" },
       recurringDaysAndTimes: { type: 'array', items: weekSlot, description: 'Дни недели и время занятий' },
@@ -132,10 +135,33 @@ const TOOLS = [
     ['name']
   ),
 
-  // 4. Отчет по архиву ученика
+  // 4. Расчет биллинга / счета за период
+  fn(
+    'calculateStudentBilling',
+    'Рассчитывает стоимость обучения ученика за период. Для date_to_date считает точное количество уроков по расписанию в текущем/следующем периоде с учетом баланса. Для package рассчитывает стоимость пакета уроков.',
+    {
+      studentName: studentNameProp,
+      startDate: { type: 'string', description: 'Начальная дата периода YYYY-MM-DD (необязательно)' },
+      endDate: { type: 'string', description: 'Конечная дата периода YYYY-MM-DD (необязательно)' },
+    },
+    ['studentName']
+  ),
+
+  // 5. Пополнение баланса при оплате
+  fn(
+    'addStudentPayment',
+    'Пополняет баланс уроков ученика при оплате (например: оплатил 8 уроков, внес абонемент).',
+    {
+      studentName: studentNameProp,
+      lessonsCount: { type: 'integer', description: 'Количество оплаченных уроков (например 8, 10, 12)' },
+    },
+    ['studentName', 'lessonsCount']
+  ),
+
+  // 6. Отчет по архиву ученика
   fn(
     'getStudentArchiveReport',
-    'Формирует полную сводку по архиву посещаемости ученика: норма уроков, день оплаты, проведенные уроки, пропуски с причинами и статус отработок (без каких-либо цен и денег).',
+    'Формирует полную сводку по архиву посещаемости ученика: модель биллинга, ставка, баланс уроков, день оплаты, проведенные уроки, пропуски с причинами.',
     {
       studentName: studentNameProp,
       month: { type: 'string', description: 'Месяц (необязательно, по умолчанию текущий)' },
@@ -143,17 +169,17 @@ const TOOLS = [
     ['studentName']
   ),
 
-  // 5. Сводка за день / неделю / месяц
+  // 7. Сводка за день / неделю / месяц
   fn(
     'getWeeklyOrDailySummary',
-    'Возвращает статистику посещаемости за период (today, week, month): сколько проведено уроков, сколько пропущено с причинами, отработки на воскресенье.',
+    'Возвращает статистику посещаемости за период (today, week, month): сколько проведено уроков, сколько сгорело/пропущено с причинами.',
     {
       period: { type: 'string', enum: ['today', 'week', 'month'], description: 'Период: today (сегодня), week (неделя), month (месяц)' },
     },
     ['period']
   ),
 
-  // 6. Получение расписания
+  // 8. Получение расписания
   fn(
     'getSchedule',
     'Возвращает реальные уроки из CRM (дата, время, ученик, статус, причина пропуска). Всегда вызывай перед ответом на вопросы о расписании.',
@@ -166,7 +192,7 @@ const TOOLS = [
     }
   ),
 
-  // 7. Удаление урока
+  // 9. Удаление урока
   fn(
     'deleteLesson',
     'Удаляет запланированный урок.',
@@ -213,26 +239,28 @@ function createToolbox(): Toolbox {
       const date = a.date ? assertDate(a.date) : today;
       const { lessons } = await load();
 
+      let targetStatus: LessonStatus = a.status;
+      if (targetStatus === 'missed') {
+        targetStatus = 'missed_penalty';
+      }
+
       // Find existing lesson for this student on this date
       let lesson = lessons.find((l) => l.student_id === student.id && l.date.substring(0, 10) === date);
 
+      let newBalance = student.lessons_balance ?? 0;
       if (!lesson) {
-        // If not found and date is not in future, create it
         lesson = await saveLesson({
           student_id: student.id,
           date,
-          status: a.status,
+          status: targetStatus,
           miss_reason: a.missReason,
-          needs_makeup: Boolean(a.sendToSundayMakeup),
           notes: a.lessonNotes,
         });
+        const res = await setLessonStatusDirect(lesson.id, targetStatus, a.missReason);
+        newBalance = res.newBalance;
       } else {
-        await setLessonStatusDirect(
-          lesson.id,
-          a.status,
-          a.missReason,
-          Boolean(a.sendToSundayMakeup)
-        );
+        const res = await setLessonStatusDirect(lesson.id, targetStatus, a.missReason);
+        newBalance = res.newBalance;
         if (a.lessonNotes) {
           await updateLessonDetails(lesson.id, { notes: a.lessonNotes });
         }
@@ -240,12 +268,14 @@ function createToolbox(): Toolbox {
 
       cache = null;
 
-      const actStr = a.status === 'completed'
-        ? `отмечен как проведённый ✅`
-        : `отмечен как пропущенный ❌ (${a.missReason || 'без причины'})${a.sendToSundayMakeup ? ' [на отработке в ВС]' : ''}`;
+      const actStr = targetStatus === 'completed'
+        ? `проведён ✅ (-1 с баланса)`
+        : targetStatus === 'missed_penalty'
+        ? `сгорел 🔥 (-1 с баланса)`
+        : `отменен 🛑 (баланс сохранен)`;
 
-      writes.push(`${student.name}: урок ${date} ${actStr}`);
-      return { success: true, message: `Урок ученика ${student.name} за ${date} ${actStr}.` };
+      writes.push(`${student.name}: урок ${date} ${actStr}, баланс: ${newBalance} ур.`);
+      return { success: true, message: `Урок ученика ${student.name} за ${date} ${actStr}. Текущий остаток: ${newBalance} ур.` };
     },
 
     // 2. rescheduleLesson
@@ -265,17 +295,14 @@ function createToolbox(): Toolbox {
       }
 
       if (!lesson) {
-        // Find today's lesson
         lesson = studentLessons.find((l) => l.date.substring(0, 10) === today);
       }
 
       if (!lesson) {
-        // Check if there is already a lesson on toDate
         lesson = studentLessons.find((l) => l.date.substring(0, 10) === toDate);
       }
 
       if (!lesson && studentLessons.length > 0) {
-        // Pick the most recent lesson (past or planned)
         lesson = studentLessons[0];
       }
 
@@ -289,9 +316,6 @@ function createToolbox(): Toolbox {
           needs_makeup: false,
           notes: a.reason ? `Перенос с ${originalDate}: ${a.reason}` : `Перенос с ${originalDate}`,
         });
-        if (lesson.id && supabase) {
-          await supabase.from('tutor_makeups').delete().eq('missed_lesson_id', lesson.id);
-        }
       } else if (lesson && originalDate === toDate) {
         await updateLessonTime(lesson.id, a.toStartTime, toDate);
         await updateLessonDetails(lesson.id, {
@@ -333,51 +357,89 @@ function createToolbox(): Toolbox {
         name: a.name.trim(),
         monthly_target_lessons: a.monthlyTargetLessons || existing?.monthly_target_lessons || 12,
         billing_day: a.billingDay || existing?.billing_day || '10',
+        billing_type: a.billingType || existing?.billing_type || 'date_to_date',
+        lesson_rate: typeof a.lessonRate === 'number' ? a.lessonRate : (existing?.lesson_rate ?? 300000),
+        lessons_balance: typeof a.lessonsBalance === 'number' ? a.lessonsBalance : (existing?.lessons_balance ?? 0),
         recurring_schedule: slots.length > 0 ? slots : existing?.recurring_schedule || [],
       });
 
       if (slots.length > 0) {
-        await planRecurringLessonsForStudent(saved.id, slots, 4);
+        await planRecurringLessonsForStudent(saved.id, slots, 4, true);
       }
 
       cache = null;
       const act = existing ? 'обновлен' : 'создан';
-      writes.push(`Ученик ${saved.name} ${act}`);
-      return { success: true, student: saved.name, target: saved.monthly_target_lessons, billingDay: saved.billing_day };
+      writes.push(`Ученик ${saved.name} ${act} (ставка: ${saved.lesson_rate} сум, баланс: ${saved.lessons_balance} ур.)`);
+      return {
+        success: true,
+        student: saved.name,
+        billingType: saved.billing_type,
+        lessonRate: saved.lesson_rate,
+        lessonsBalance: saved.lessons_balance,
+        target: saved.monthly_target_lessons,
+        billingDay: saved.billing_day,
+      };
     },
 
-    // 4. getStudentArchiveReport
+    // 4. calculateStudentBilling
+    async calculateStudentBilling(a) {
+      const student = await pickStudent(a.studentName);
+      const calc = await calculateStudentBilling(student.id, a.startDate, a.endDate);
+      return {
+        success: true,
+        calculation: calc,
+        summary: calc.summaryText,
+      };
+    },
+
+    // 5. addStudentPayment
+    async addStudentPayment(a) {
+      const student = await pickStudent(a.studentName);
+      const count = Number(a.lessonsCount) || 0;
+      if (count <= 0) throw new Error('Количество уроков должно быть больше 0.');
+      const newBalance = await topUpStudentBalance(student.id, count);
+      cache = null;
+      writes.push(`${student.name}: оплата +${count} ур. (баланс: ${newBalance} ур.)`);
+      return {
+        success: true,
+        student: student.name,
+        lessonsAdded: count,
+        newBalance,
+        message: `Ученику ${student.name} успешно добавлено ${count} уроков. Новый баланс: ${newBalance} ур.`,
+      };
+    },
+
+    // 6. getStudentArchiveReport
     async getStudentArchiveReport(a) {
       const student = await pickStudent(a.studentName);
       const report = await generateStudentReport(student.id);
       if (!report) return { message: `Не удалось сформировать отчет для ${student.name}` };
       return {
         student: student.name,
+        billingType: student.billing_type,
+        lessonRate: student.lesson_rate,
+        lessonsBalance: student.lessons_balance,
         monthlyTarget: report.targetLessons,
         billingDay: student.billing_day,
         completedCount: report.completedLessons.length,
         missedCount: report.missedLessons.length,
         missedDetails: report.missedLessons.map((m) => `${m.date.substring(0, 10)}: ${m.miss_reason || 'Пропуск'}`),
-        pendingMakeups: report.pendingMakeups,
       };
     },
 
-    // 5. getWeeklyOrDailySummary
+    // 7. getWeeklyOrDailySummary
     async getWeeklyOrDailySummary(a) {
       const summary = await getAttendanceSummary(a.period === 'week' ? 'week' : 'month');
-      const makeups = await getPendingMakeups();
 
       return {
         period: a.period,
         completedCount: summary.completedCount,
         missedCount: summary.missedCount,
         missedList: summary.missedDetails,
-        pendingMakeupsCount: makeups.length,
-        pendingMakeupsList: makeups.map((m) => `${m.student_name} (${m.missed_date}): ${m.reason}`),
       };
     },
 
-    // 6. getSchedule
+    // 8. getSchedule
     async getSchedule(a) {
       let from = a.dateFrom ? assertDate(a.dateFrom, 'dateFrom') : today;
       let to = a.dateTo ? assertDate(a.dateTo, 'dateTo') : addDays(from, 30);
@@ -463,22 +525,28 @@ export async function processWithAI(text: string): Promise<string> {
 
     const students = await getStudents();
     const studentsBrief = students
-      .map((s) => `• ${s.name} (норма: ${s.monthly_target_lessons || 12} ур./мес., день оплаты: ${s.billing_day || '—'})`)
+      .map((s) => `• ${s.name} [тип: ${s.billing_type || 'date_to_date'}, ставка: ${(s.lesson_rate || 300000).toLocaleString('ru-RU')} сум, баланс: ${s.lessons_balance ?? 0} ур., оплата: ${s.billing_day || '10'}]`)
       .join('\n');
 
-    const systemPrompt = `Ты — умный ИИ-ассистент преподавателя в CRM Tutor Tracker 2.0.
+    const systemPrompt = `Ты — умный ИИ-ассистент преподавателя в CRM Tutor Tracker 2.0 (Модель Hybrid Billing & Balance Tracking).
 Текущее время (Ташкент, UTC+5): ${today} (${dayOfWeek}), ${timeNow}.
 
 Список учеников преподавателя:
 ${studentsBrief}
 
-ПРАВИЛА И КОНЦЕПЦИЯ:
-1. В системе НЕТ цен, оплат, сумов (UZS) и банковских реквизитов. Полный Zero-Finance. Никогда не считай и не упоминай деньги.
-2. Основная задача — ведение расписания, учет посещаемости (проведено / пропущен с указанием причины), отработки на воскресенье и архив учеников.
-3. Если ученик был на уроке — вызывай markLessonStatus со статусом completed.
-4. Если ученик пропустил занятие — вызывай markLessonStatus со статусом missed, обязательно передавай причину missReason (например: «Болеет», «Семейные обстоятельства») и sendToSundayMakeup: true, если просят отработать в воскресенье.
-5. Если просят перенести урок — ВСЕГДА вызывай rescheduleLesson. Можно переносить ЛЮБОЙ урок: как запланированный, так и тот, который «был» (проведенный) или пропущенный. При переносе на новую дату урок автоматически становится активным и запланированным (planned). Если пользователь не назвал дату исходного урока (например: «перенеси урок Фазилат на завтра на 10:00»), не отказывай и не переспрашивай — rescheduleLesson сам найдет подходящий урок ученика и перенесет его.
-6. Отвечай кратко, профессионально и по делу. Форматируй важные данные жирным текстом.`;
+ПРАВИЛА И СИСТЕМА УЧЕТА:
+1. Посещаемость (3 статуса):
+   - completed (✅ Проведен): списывает 1 урок с баланса ученика.
+   - missed_penalty (🔥 Сгорел / Пропуск без предупреждения): списывает 1 урок с баланса ученика (платный пропуск).
+   - missed_excused (🛑 Уважительная отмена): НЕ списывает урок (урок сохраняется на балансе).
+2. Биллинг и балансы:
+   - Каждый ученик имеет ставку за урок (lesson_rate, по умолчанию 300 000 сум) и баланс уроков (lessons_balance).
+   - Две модели: date_to_date (оплата по числу месяца billing_day, уроки считаются по календарному расписанию за период с учетом остатка) и package (оплата фиксированными пакетами уроков).
+   - Если спрашивают стоимость обучения, расчет или счет за период — вызывай calculateStudentBilling.
+   - Если сообщают об оплате уроков (например: «Аслан оплатил 8 уроков», «пополни баланс Фазилат на 12») — вызывай addStudentPayment.
+3. Перенос уроков:
+   - При переносе урока — ВСЕГДА вызывай rescheduleLesson. Можно переносить любой урок на новую дату/время. Если дата не указана, функция сама найдет подходящий урок.
+4. Отвечай кратко, профессионально и по делу. Форматируй важные цифры и балансы жирным шрифтом.`;
 
     const messages: any[] = [{ role: 'system', content: systemPrompt }];
 

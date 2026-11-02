@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Student, Lesson, LessonStatus } from '@/types';
-import { X, Check, Trash2, Calendar, Clock, AlertCircle } from 'lucide-react';
+import { X, Check, Trash2, Calendar, Clock, AlertCircle, Flame, Ban } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
 import { format, addDays } from 'date-fns';
 import { getTashkentNow } from '@/lib/formatters';
@@ -30,8 +30,6 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
   const [notes, setNotes] = useState('');
   const [currentStatus, setCurrentStatus] = useState<LessonStatus>('planned');
   const [missReason, setMissReason] = useState('');
-  const [needsMakeup, setNeedsMakeup] = useState(false);
-  const [isMakeup, setIsMakeup] = useState(false);
 
   useEffect(() => {
     if (isOpen && lesson) {
@@ -42,8 +40,6 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
       setNotes(lesson.notes || '');
       setCurrentStatus(lesson.status || 'planned');
       setMissReason(lesson.miss_reason || '');
-      setNeedsMakeup(Boolean(lesson.needs_makeup));
-      setIsMakeup(Boolean(lesson.is_makeup));
     }
   }, [isOpen, lesson]);
 
@@ -58,13 +54,14 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
       time_str: timeStr,
       notes,
       status: currentStatus,
-      miss_reason: currentStatus === 'missed' ? missReason.trim() : undefined,
-      needs_makeup: currentStatus === 'missed' ? needsMakeup : false,
-      is_makeup: isMakeup,
+      miss_reason: currentStatus === 'missed_penalty' || currentStatus === 'missed_excused' || currentStatus === 'missed' ? missReason.trim() : undefined,
+      needs_makeup: false,
     });
     hapticNotification('success');
     onClose();
   };
+
+  const isMissedState = currentStatus === 'missed_penalty' || currentStatus === 'missed_excused' || currentStatus === 'missed';
 
   return (
     <div className="fixed inset-0 z-[60] bg-[#f2f2f7] flex flex-col animate-in slide-in-from-bottom duration-200">
@@ -92,37 +89,27 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
             <div>
               <h3 className="text-lg font-black text-gray-900">{lesson.student_name}</h3>
               <p className="text-xs text-gray-500 font-semibold mt-0.5">
-                Норма: {student?.monthly_target_lessons || 12} ур./мес.
+                Норма: {student?.monthly_target_lessons || 12} ур./мес. • Ставка: {(student?.lesson_rate || 300000).toLocaleString('ru-RU')} сум
               </p>
             </div>
-            {isMakeup && (
-              <span className="text-xs font-bold text-blue-700 bg-blue-100 px-2.5 py-1 rounded-xl">
-                🔄 Отработка
-              </span>
-            )}
+            <span className="text-xs font-black text-blue-700 bg-blue-100 px-2.5 py-1 rounded-xl">
+              Баланс: {student?.lessons_balance ?? 0} ур.
+            </span>
           </div>
         </div>
 
-        {/* Date & Time */}
+        {/* Date & Time Settings */}
         <div className="bg-white rounded-3xl p-4 shadow-xs border border-gray-200/80 space-y-3">
           <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="text-[11px] font-bold text-gray-400 uppercase">
-                Дата урока
-              </label>
-              {lesson && lessonDate !== lesson.date.substring(0, 10) && (
-                <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md">
-                  Перенос с {lesson.date.substring(0, 10)}
-                </span>
-              )}
-            </div>
+            <label className="text-[11px] font-bold text-gray-400 uppercase block mb-1">
+              Дата урока
+            </label>
             <input
               type="date"
               value={lessonDate}
               onChange={(e) => {
                 const val = e.target.value;
                 setLessonDate(val);
-                // When moving a lesson to another date, auto-set status to planned
                 if (currentStatus !== 'planned') {
                   setCurrentStatus('planned');
                 }
@@ -185,16 +172,17 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
           </div>
         </div>
 
-        {/* Status Selector */}
+        {/* Status Selector (3-State Attendance + Planned) */}
         <div className="bg-white rounded-3xl p-4 shadow-xs border border-gray-200/80 space-y-3">
           <label className="text-[11px] font-bold text-gray-400 uppercase block">
-            Статус урока
+            Статус урока и списание баланса
           </label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {[
               { id: 'planned', label: '⏳ Запланирован' },
-              { id: 'completed', label: '✅ Проведен' },
-              { id: 'missed', label: '❌ Пропущен' },
+              { id: 'completed', label: '✅ Был (-1 с баланса)' },
+              { id: 'missed_penalty', label: '🔥 Сгорел (-1 с баланса)' },
+              { id: 'missed_excused', label: '🛑 Отмена (баланс сохранен)' },
             ].map((st) => (
               <button
                 key={st.id}
@@ -203,8 +191,8 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
                   hapticImpact('light');
                   setCurrentStatus(st.id as LessonStatus);
                 }}
-                className={`py-2 px-1 text-center text-xs font-bold rounded-xl border transition-all ${
-                  currentStatus === st.id
+                className={`py-2 px-2 text-center text-xs font-bold rounded-xl border transition-all ${
+                  currentStatus === st.id || (st.id === 'missed_penalty' && currentStatus === 'missed')
                     ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
                     : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
                 }`}
@@ -214,52 +202,33 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
             ))}
           </div>
 
-          {/* If missed, show reason input & needs_makeup toggle */}
-          {currentStatus === 'missed' && (
-            <div className="pt-2 space-y-3 border-t border-gray-100">
-              <div>
-                <label className="text-[11px] font-bold text-red-700 uppercase block mb-1">
-                  Причина пропуска
-                </label>
-                <div className="flex flex-wrap gap-1 mb-2">
-                  {['Болеет', 'Семейные обстоятельства', 'Уехал', 'Школьное мероприятие'].map(
-                    (chip) => (
-                      <button
-                        key={chip}
-                        type="button"
-                        onClick={() => setMissReason(chip)}
-                        className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-gray-100 hover:bg-gray-200 text-gray-700"
-                      >
-                        {chip}
-                      </button>
-                    )
-                  )}
-                </div>
-                <input
-                  type="text"
-                  value={missReason}
-                  onChange={(e) => setMissReason(e.target.value)}
-                  placeholder="Введите причину пропуска..."
-                  className="w-full text-xs font-semibold text-gray-900 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200"
-                />
+          {/* If missed/cancelled, show reason input */}
+          {isMissedState && (
+            <div className="pt-2 space-y-2 border-t border-gray-100">
+              <label className="text-[11px] font-bold text-gray-600 uppercase block">
+                Причина пропуска / отмены
+              </label>
+              <div className="flex flex-wrap gap-1 mb-1">
+                {['Болеет', 'Семейные обстоятельства', 'Уехал', 'Предупредил заранее', 'Не вышел на связь'].map(
+                  (chip) => (
+                    <button
+                      key={chip}
+                      type="button"
+                      onClick={() => setMissReason(chip)}
+                      className="px-2 py-0.5 rounded-md text-[11px] font-medium bg-gray-100 hover:bg-gray-200 text-gray-700"
+                    >
+                      {chip}
+                    </button>
+                  )
+                )}
               </div>
-
-              <div className="p-3 bg-amber-50 rounded-2xl flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-bold text-amber-900 block">
-                    На отработку в воскресенье
-                  </span>
-                  <span className="text-[10px] text-amber-700">
-                    {needsMakeup ? 'Появится в списке отработок' : 'Только в архив'}
-                  </span>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={needsMakeup}
-                  onChange={(e) => setNeedsMakeup(e.target.checked)}
-                  className="w-5 h-5 text-amber-600 rounded-md"
-                />
-              </div>
+              <input
+                type="text"
+                value={missReason}
+                onChange={(e) => setMissReason(e.target.value)}
+                placeholder="Укажите причину..."
+                className="w-full text-xs font-semibold text-gray-900 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200"
+              />
             </div>
           )}
         </div>
@@ -278,18 +247,17 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
           />
         </div>
 
-        {/* Delete */}
+        {/* Delete Lesson */}
         <div className="pt-2">
           <button
             type="button"
-            onClick={async () => {
-              if (confirm('Удалить этот урок?')) {
-                hapticNotification('warning');
-                await onDelete(lesson.id);
+            onClick={() => {
+              if (confirm('Вы уверены, что хотите удалить этот урок?')) {
+                onDelete(lesson.id);
                 onClose();
               }
             }}
-            className="w-full py-3 rounded-2xl bg-red-50 text-red-600 text-xs font-bold border border-red-200 flex items-center justify-center gap-1.5 active:scale-98"
+            className="w-full py-3 rounded-2xl bg-red-50 text-red-600 text-xs font-bold border border-red-200/80 flex items-center justify-center gap-1.5 active:scale-98"
           >
             <Trash2 className="w-4 h-4" />
             <span>Удалить урок</span>

@@ -1,4 +1,4 @@
-import { Student, Lesson, Makeup, AttendanceSummary, LessonStatus, RecurringSlot } from '@/types';
+import { Student, Lesson, Makeup, AttendanceSummary, LessonStatus, RecurringSlot, BillingType, BillingCalculation } from '@/types';
 import { supabase } from './supabase';
 import { getTashkentTodayStr, getTashkentNow, getTashkentDateString } from './formatters';
 import { generateUUID } from './uuid';
@@ -102,6 +102,9 @@ export async function getStudents(): Promise<Student[]> {
     }
 
     const target = Number(s.monthly_target_lessons) || 12;
+    const billingType = (s.billing_type === 'package' ? 'package' : 'date_to_date') as BillingType;
+    const lessonRate = typeof s.lesson_rate === 'number' ? s.lesson_rate : 300000;
+    const lessonsBalance = typeof s.lessons_balance === 'number' ? s.lessons_balance : 0;
 
     return {
       id: s.id,
@@ -109,6 +112,9 @@ export async function getStudents(): Promise<Student[]> {
       monthly_target_lessons: target,
       recurring_schedule: recurring,
       billing_day: s.billing_day || '10 число',
+      billing_type: billingType,
+      lesson_rate: lessonRate,
+      lessons_balance: lessonsBalance,
       phone: s.phone || '',
       telegram: s.telegram || '',
       schedule_notes: s.notes || '',
@@ -128,6 +134,9 @@ export async function saveStudent(student: {
   monthly_target_lessons?: number;
   recurring_schedule?: RecurringSlot[];
   billing_day?: string;
+  billing_type?: BillingType;
+  lesson_rate?: number;
+  lessons_balance?: number;
   phone?: string;
   telegram?: string;
   schedule_notes?: string;
@@ -144,28 +153,44 @@ export async function saveStudent(student: {
     name: student.name.trim(),
     monthly_target_lessons: target,
     recurring_schedule: student.recurring_schedule || [],
+    billing_day: student.billing_day || '10',
+    billing_type: student.billing_type || 'date_to_date',
+    lesson_rate: typeof student.lesson_rate === 'number' ? student.lesson_rate : 300000,
+    lessons_balance: typeof student.lessons_balance === 'number' ? student.lessons_balance : 0,
     phone: student.phone || '',
     telegram: student.telegram ? (student.telegram.startsWith('@') ? student.telegram : `@${student.telegram}`) : '',
     color: student.color || '#3B82F6',
-    billing_day: student.billing_day || '10',
     notes: student.schedule_notes || '',
     is_active: student.is_active !== false,
   };
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('tutor_students')
     .upsert([dbPayload])
     .select()
     .single();
+
+  if (error && error.message?.includes('column') && error.message?.includes('does not exist')) {
+    delete dbPayload.billing_type;
+    delete dbPayload.lesson_rate;
+    delete dbPayload.lessons_balance;
+    const retry = await supabase
+      .from('tutor_students')
+      .upsert([dbPayload])
+      .select()
+      .single();
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) {
     console.error('Supabase saveStudent error:', error);
     throw error;
   }
 
-  // If recurring_schedule provided, safely generate upcoming lessons
+  // If recurring_schedule provided, safely generate upcoming lessons (cleaning future untouched)
   if (student.recurring_schedule !== undefined && student.recurring_schedule.length > 0) {
-    await planRecurringLessonsForStudent(studentId, student.recurring_schedule, 4);
+    await planRecurringLessonsForStudent(studentId, student.recurring_schedule, 4, true);
   }
 
   return {
@@ -174,11 +199,14 @@ export async function saveStudent(student: {
     monthly_target_lessons: Number(data.monthly_target_lessons) || target,
     recurring_schedule: data.recurring_schedule || student.recurring_schedule || [],
     billing_day: data.billing_day || '10',
+    billing_type: (data.billing_type === 'package' ? 'package' : (student.billing_type || 'date_to_date')) as BillingType,
+    lesson_rate: typeof data.lesson_rate === 'number' ? data.lesson_rate : (student.lesson_rate ?? 300000),
+    lessons_balance: typeof data.lessons_balance === 'number' ? data.lessons_balance : (student.lessons_balance ?? 0),
     phone: data.phone || '',
     telegram: data.telegram || '',
     schedule_notes: data.notes || '',
     color: data.color || '#3B82F6',
-    created_at: data.created_at,
+    created_at: data.created_at || new Date().toISOString(),
     makeup_debt: 0,
     conducted_this_month: 0,
     missed_this_month: 0,
@@ -201,12 +229,11 @@ function mapLessonRow(l: any): Lesson {
   let status: LessonStatus = 'planned';
   if (l.status === 'completed') {
     status = 'completed';
-  } else if (
-    l.status === 'missed' ||
-    l.status === 'missed_excused' ||
-    l.status === 'missed_penalty' ||
-    l.status === 'missed_makeup'
-  ) {
+  } else if (l.status === 'missed_penalty') {
+    status = 'missed_penalty';
+  } else if (l.status === 'missed_excused') {
+    status = 'missed_excused';
+  } else if (l.status === 'missed' || l.status === 'missed_makeup') {
     status = 'missed';
   } else {
     status = 'planned';
@@ -224,7 +251,7 @@ function mapLessonRow(l: any): Lesson {
     date: isoDate,
     time_str: timeStr,
     status,
-    miss_reason: l.miss_reason || (l.status === 'missed_excused' ? 'Уважительная причина' : l.status === 'missed_penalty' ? 'Пропуск' : undefined),
+    miss_reason: l.miss_reason || (l.status === 'missed_excused' ? 'Уважительная причина' : l.status === 'missed_penalty' ? 'Пропуск (сгорел)' : undefined),
     needs_makeup: Boolean(l.needs_makeup || l.status === 'missed_excused'),
     is_makeup: Boolean(l.is_makeup),
     reminder_sent: Boolean(l.reminder_sent),
@@ -280,6 +307,254 @@ export async function getStudentLessonsArchive(studentId: string): Promise<Lesso
     return [];
   }
   return (data || []).map(mapLessonRow);
+}
+
+/**
+ * Loads lessons for a student within a symmetric or configurable horizon [today - days, today + days].
+ * Automatically ensures recurring schedule is generated up to 9 weeks (63 days) ahead.
+ */
+export async function getStudentHorizonLessons(
+  studentId: string,
+  daysHorizon: number = 30
+): Promise<Lesson[]> {
+  if (!supabase) return [];
+
+  // Automatically ensure recurring slots are generated up to 9 weeks (63 days) ahead
+  await ensureRecurringLessonsForStudent(studentId, 9).catch((e) => {
+    console.error('ensureRecurringLessonsForStudent error in getStudentHorizonLessons:', e);
+  });
+
+  const todayStr = getTashkentTodayStr();
+  const startDate = addDaysStr(todayStr, -daysHorizon);
+  const endDate = addDaysStr(todayStr, daysHorizon);
+
+  const { data, error } = await supabase
+    .from('tutor_lessons')
+    .select('*, tutor_students(name, color)')
+    .eq('student_id', studentId)
+    .gte('lesson_date', startDate)
+    .lte('lesson_date', endDate)
+    .order('lesson_date', { ascending: true })
+    .order('start_time', { ascending: true });
+
+  if (error) {
+    console.error('getStudentHorizonLessons error:', error);
+    return [];
+  }
+
+  return (data || []).map(mapLessonRow);
+}
+
+/**
+ * Returns all lessons for the student where lesson_date <= TODAY (in Asia/Tashkent)
+ * and status IN ('planned', 'scheduled'), ordered chronologically.
+ */
+export async function getUnmarkedPastLessons(studentId: string): Promise<Lesson[]> {
+  if (!supabase) return [];
+  const todayStr = getTashkentTodayStr();
+
+  const { data, error } = await supabase
+    .from('tutor_lessons')
+    .select('*, tutor_students(name, color)')
+    .eq('student_id', studentId)
+    .lte('lesson_date', todayStr)
+    .in('status', ['planned', 'scheduled'])
+    .order('lesson_date', { ascending: true })
+    .order('start_time', { ascending: true });
+
+  if (error) {
+    console.error('getUnmarkedPastLessons error:', error);
+    return [];
+  }
+
+  return (data || []).map(mapLessonRow);
+}
+
+/**
+ * Retroactive Package & Past Lessons Backfill Engine:
+ * Backfills lessons from startDate up to TODAY matching student's recurring schedule,
+ * sets lessons_balance = packageLessonsCount as starting baseline, marks completed
+ * (unless in excludedDates -> missed_excused), and sets remaining lessons_balance.
+ */
+export async function initializePackageFromPastDate(
+  studentId: string,
+  startDate: string,
+  packageLessonsCount: number,
+  excludedDates: string[] = []
+): Promise<{ updatedLessons: Lesson[]; finalBalance: number }> {
+  if (!supabase) throw new Error('Supabase is not initialized');
+
+  const { data: student, error: sErr } = await supabase
+    .from('tutor_students')
+    .select('*')
+    .eq('id', studentId)
+    .single();
+
+  if (sErr || !student) throw new Error('Student not found');
+
+  const todayStr = getTashkentTodayStr();
+  const startClean = getTashkentDateString(startDate);
+  if (startClean > todayStr) {
+    throw new Error('Начальная дата пакета не может быть позже сегодняшнего дня');
+  }
+
+  // Parse recurring slots
+  let recurring: RecurringSlot[] = [];
+  if (Array.isArray(student.recurring_schedule)) {
+    recurring = student.recurring_schedule;
+  } else if (typeof student.recurring_schedule === 'string') {
+    try {
+      recurring = JSON.parse(student.recurring_schedule);
+    } catch {}
+  }
+
+  const normalizedSlots = recurring.map((s) => {
+    const time = parseTimeRange(s.startTime + (s.endTime ? ` - ${s.endTime}` : ''), 60);
+    return {
+      dayOfWeek: Number(s.dayOfWeek),
+      start: time.start.substring(0, 5),
+      end: time.end.substring(0, 5),
+    };
+  });
+
+  // Fetch all existing lessons in [startClean, todayStr]
+  const { data: existingRows, error: eErr } = await supabase
+    .from('tutor_lessons')
+    .select('*')
+    .eq('student_id', studentId)
+    .gte('lesson_date', startClean)
+    .lte('lesson_date', todayStr);
+
+  if (eErr) {
+    console.error('Failed to query existing lessons for retro package:', eErr);
+    throw eErr;
+  }
+
+  const existingMap = new Map<string, any>();
+  (existingRows || []).forEach((r) => {
+    const d = getTashkentDateString(r.lesson_date);
+    const t = String(r.start_time || '').substring(0, 5);
+    existingMap.set(`${d}_${t}`, r);
+    existingMap.set(d, r);
+  });
+
+  const excludedSet = new Set(excludedDates.map((d) => getTashkentDateString(d)));
+  const lessonsToUpsert: any[] = [];
+  let cursor = startClean;
+
+  while (cursor <= todayStr) {
+    const dow = dayOfWeekOf(cursor);
+    const matchingSlots = normalizedSlots.filter((s) => s.dayOfWeek === dow);
+
+    for (const slot of matchingSlots) {
+      const slotKey = `${cursor}_${slot.start}`;
+      const existing = existingMap.get(slotKey) || (matchingSlots.length === 1 ? existingMap.get(cursor) : null);
+
+      const isExcluded = excludedSet.has(cursor);
+      const targetStatus: LessonStatus = isExcluded ? 'missed_excused' : 'completed';
+      const missReason = isExcluded ? 'Уважительная отмена / пропуск' : null;
+
+      if (existing) {
+        lessonsToUpsert.push({
+          id: existing.id,
+          student_id: studentId,
+          lesson_date: cursor,
+          start_time: existing.start_time || `${slot.start}:00`,
+          end_time: existing.end_time || `${slot.end}:00`,
+          status: targetStatus,
+          miss_reason: missReason,
+          needs_makeup: false,
+          is_makeup: Boolean(existing.is_makeup),
+          reminder_sent: Boolean(existing.reminder_sent),
+          notes: existing.notes || 'Пакетный урок',
+        });
+      } else {
+        lessonsToUpsert.push({
+          id: generateUUID(),
+          student_id: studentId,
+          lesson_date: cursor,
+          start_time: slot.start.length === 5 ? `${slot.start}:00` : slot.start,
+          end_time: slot.end.length === 5 ? `${slot.end}:00` : slot.end,
+          status: targetStatus,
+          miss_reason: missReason,
+          needs_makeup: false,
+          is_makeup: false,
+          reminder_sent: false,
+          notes: 'Периодическое расписание',
+        });
+      }
+    }
+
+    cursor = addDaysStr(cursor, 1);
+  }
+
+  // Include any extra existing lessons in this date range
+  (existingRows || []).forEach((r) => {
+    const d = getTashkentDateString(r.lesson_date);
+    const alreadyIncluded = lessonsToUpsert.some((u) => u.id === r.id);
+    if (!alreadyIncluded) {
+      const isExcluded = excludedSet.has(d);
+      const targetStatus: LessonStatus = isExcluded ? 'missed_excused' : 'completed';
+      const missReason = isExcluded ? 'Уважительная отмена / пропуск' : null;
+      lessonsToUpsert.push({
+        id: r.id,
+        student_id: studentId,
+        lesson_date: d,
+        start_time: r.start_time,
+        end_time: r.end_time,
+        status: targetStatus,
+        miss_reason: missReason,
+        needs_makeup: false,
+        is_makeup: Boolean(r.is_makeup),
+        reminder_sent: Boolean(r.reminder_sent),
+        notes: r.notes || '',
+      });
+    }
+  });
+
+  if (lessonsToUpsert.length > 0) {
+    const { error: upsertErr } = await supabase
+      .from('tutor_lessons')
+      .upsert(lessonsToUpsert, { onConflict: 'id' });
+
+    if (upsertErr) {
+      console.error('Failed to upsert lessons in initializePackageFromPastDate:', upsertErr);
+      throw upsertErr;
+    }
+  }
+
+  // Deduct 1 from packageLessonsCount for each 'completed' lesson in range
+  const completedCount = lessonsToUpsert.filter((l) => l.status === 'completed').length;
+  const finalBalance = packageLessonsCount - completedCount;
+
+  // Set student balance and ensure billing_type is 'package'
+  const { error: updErr } = await supabase
+    .from('tutor_students')
+    .update({
+      lessons_balance: finalBalance,
+      billing_type: 'package',
+      monthly_target_lessons: packageLessonsCount,
+    })
+    .eq('id', studentId);
+
+  if (updErr) {
+    console.warn('Failed to update student profile with new package balance:', updErr);
+  }
+
+  // Return fresh lessons for this student
+  const { data: refreshedLessons } = await supabase
+    .from('tutor_lessons')
+    .select('*, tutor_students(name, color)')
+    .eq('student_id', studentId)
+    .gte('lesson_date', startClean)
+    .lte('lesson_date', todayStr)
+    .order('lesson_date', { ascending: true })
+    .order('start_time', { ascending: true });
+
+  return {
+    updatedLessons: (refreshedLessons || []).map(mapLessonRow),
+    finalBalance,
+  };
 }
 
 export async function saveLesson(lessonData: {
@@ -414,82 +689,103 @@ export async function deleteLesson(lessonId: string): Promise<void> {
 }
 
 // -------------------------------------------------------------
-// ATTENDANCE & STATUS SWITCHING (Completed vs Missed with Reason)
+// BALANCE MANAGEMENT & TOP-UP
+// -------------------------------------------------------------
+export async function topUpStudentBalance(studentId: string, lessonsAdded: number): Promise<number> {
+  if (!supabase) throw new Error('Supabase is not initialized');
+  const { data: student, error } = await supabase
+    .from('tutor_students')
+    .select('lessons_balance')
+    .eq('id', studentId)
+    .single();
+
+  if (error || !student) throw new Error('Student not found');
+  const current = typeof student.lessons_balance === 'number' ? student.lessons_balance : 0;
+  const newBalance = current + lessonsAdded;
+
+  const { error: updErr } = await supabase
+    .from('tutor_students')
+    .update({ lessons_balance: newBalance })
+    .eq('id', studentId);
+
+  if (updErr) {
+    console.warn('Failed to update lessons_balance (column may need migration):', updErr);
+  }
+
+  return newBalance;
+}
+
+export async function adjustStudentBalance(studentId: string, delta: number): Promise<number> {
+  return topUpStudentBalance(studentId, delta);
+}
+
+// -------------------------------------------------------------
+// ATTENDANCE & STATUS SWITCHING (3-State Attendance + Strict Balance Tracking)
 // -------------------------------------------------------------
 export async function setLessonStatusDirect(
   lessonId: string,
   targetStatus: LessonStatus,
   missReason?: string,
-  needsMakeup: boolean = false
-): Promise<void> {
+  _needsMakeupLegacy?: boolean
+): Promise<{ previousStatus: string; newStatus: LessonStatus; studentId: string; newBalance: number }> {
   if (!supabase) throw new Error('Supabase is not initialized');
 
   const { data: lesson, error: lError } = await supabase
     .from('tutor_lessons')
-    .select('*, tutor_students(id, name)')
+    .select('*, tutor_students(id, name, lessons_balance)')
     .eq('id', lessonId)
     .single();
 
   if (lError || !lesson) throw new Error('Lesson not found');
 
   const studentId = lesson.student_id;
-  const studentName = lesson.tutor_students?.name || 'Ученик';
+  const prevStatus = lesson.status;
+
+  // Deducted statuses: 'completed' and 'missed_penalty' (plus legacy 'missed')
+  const isDeducted = (s: string) => s === 'completed' || s === 'missed_penalty' || s === 'missed';
+  const prevDeducted = isDeducted(prevStatus);
+  const targetDeducted = isDeducted(targetStatus);
+
+  let delta = 0;
+  if (!prevDeducted && targetDeducted) {
+    delta = -1; // non-deducted -> deducted: deduct 1 lesson
+  } else if (prevDeducted && !targetDeducted) {
+    delta = 1;  // deducted -> non-deducted (e.g. missed_excused or planned): refund 1 lesson
+  }
+
+  const updatePayload: any = {
+    status: targetStatus,
+    needs_makeup: false,
+  };
 
   if (targetStatus === 'completed') {
-    await supabase.from('tutor_lessons').update({
-      status: 'completed',
-      needs_makeup: false,
-    }).eq('id', lessonId);
-
-    // If it was a scheduled makeup, mark makeup as completed
-    await supabase.from('tutor_makeups')
-      .update({ status: 'completed' })
-      .eq('scheduled_lesson_id', lessonId);
-  } else if (targetStatus === 'missed' || targetStatus === 'missed_excused' || targetStatus === 'missed_penalty') {
-    const reason = missReason || (targetStatus === 'missed_penalty' ? 'Пропуск без отработки' : 'Пропуск занятия');
-    const wantsMakeup = needsMakeup || targetStatus === 'missed_excused';
-
-    const { error: updateErr } = await supabase.from('tutor_lessons').update({
-      status: 'missed',
-      miss_reason: reason,
-      needs_makeup: wantsMakeup,
-    }).eq('id', lessonId);
-
-    if (updateErr) {
-      await supabase.from('tutor_lessons').update({
-        status: 'missed_makeup',
-        miss_reason: reason,
-        needs_makeup: wantsMakeup,
-      }).eq('id', lessonId);
-    }
-
-    if (wantsMakeup) {
-      await supabase.from('tutor_makeups').upsert([
-        {
-          student_id: studentId,
-          student_name: studentName,
-          missed_lesson_id: lesson.id,
-          reason,
-          status: 'pending',
-          missed_date: lesson.lesson_date,
-        },
-      ]);
-    } else {
-      await supabase.from('tutor_makeups')
-        .update({ status: 'archived' })
-        .eq('missed_lesson_id', lesson.id)
-        .eq('status', 'pending');
-    }
+    updatePayload.miss_reason = null;
+  } else if (targetStatus === 'missed_penalty') {
+    updatePayload.miss_reason = missReason || 'Пропуск без предупреждения (сгорел)';
+  } else if (targetStatus === 'missed_excused') {
+    updatePayload.miss_reason = missReason || 'Уважительная отмена';
+  } else if (targetStatus === 'missed') {
+    updatePayload.miss_reason = missReason || 'Пропуск занятия';
   } else {
-    // Planned / revert
-    await supabase.from('tutor_lessons').update({
-      status: 'planned',
-      miss_reason: null,
-      needs_makeup: false,
-    }).eq('id', lessonId);
-
-    await supabase.from('tutor_makeups').delete().eq('missed_lesson_id', lesson.id);
+    // planned
+    updatePayload.miss_reason = null;
   }
+
+  await supabase.from('tutor_lessons').update(updatePayload).eq('id', lessonId);
+
+  // Update student balance if delta !== 0
+  let currentBalance = typeof lesson.tutor_students?.lessons_balance === 'number'
+    ? lesson.tutor_students.lessons_balance
+    : 0;
+
+  if (delta !== 0) {
+    currentBalance = await topUpStudentBalance(studentId, delta).catch((err) => {
+      console.warn('Could not update lessons_balance:', err);
+      return currentBalance + delta;
+    });
+  }
+
+  return { previousStatus: prevStatus, newStatus: targetStatus, studentId, newBalance: currentBalance };
 }
 
 // -------------------------------------------------------------
@@ -559,13 +855,15 @@ export async function archiveMakeup(makeupId: string): Promise<void> {
 }
 
 // -------------------------------------------------------------
-// SAFE RECURRING SCHEDULE GENERATOR (Strictly INSERT IF NOT EXISTS)
-// Never deletes or overwrites existing lessons or manual reschedules!
+// RECURRING SCHEDULE GENERATOR
+// When cleanFutureUntouched=true, cleans future untouched planned slots before generating new ones.
+// Preserves completed, missed, and custom rescheduled lessons!
 // -------------------------------------------------------------
 export async function planRecurringLessonsForStudent(
   studentId: string,
   schedule: RecurringSlot[],
-  weeksAhead: number = 4
+  weeksAhead: number = 9,
+  cleanFutureUntouched: boolean = false
 ): Promise<{ createdCount: number }> {
   if (!supabase || !schedule || schedule.length === 0) return { createdCount: 0 };
 
@@ -573,6 +871,28 @@ export async function planRecurringLessonsForStudent(
   const endDateStr = addDaysStr(todayStr, weeksAhead * 7);
   const now = getTashkentNow();
   const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+  if (cleanFutureUntouched) {
+    const { data: futureLessons } = await supabase
+      .from('tutor_lessons')
+      .select('id, notes, status')
+      .eq('student_id', studentId)
+      .gte('lesson_date', todayStr)
+      .in('status', ['planned', 'scheduled']);
+
+    if (futureLessons && futureLessons.length > 0) {
+      const idsToDelete = futureLessons
+        .filter((l) => {
+          const n = (l.notes || '').trim().toLowerCase();
+          return !n || n === 'периодическое расписание' || n === 'запланированный урок';
+        })
+        .map((l) => l.id);
+
+      if (idsToDelete.length > 0) {
+        await supabase.from('tutor_lessons').delete().in('id', idsToDelete);
+      }
+    }
+  }
 
   const normalizedSlots = schedule.map((s) => {
     const time = parseTimeRange(s.startTime + (s.endTime ? ` - ${s.endTime}` : ''), 60);
@@ -665,7 +985,7 @@ export async function planRecurringLessonsForStudent(
   return { createdCount: newLessons.length };
 }
 
-export async function ensureRecurringLessonsForStudent(studentId: string, weeksAhead: number = 4): Promise<number> {
+export async function ensureRecurringLessonsForStudent(studentId: string, weeksAhead: number = 9): Promise<number> {
   if (!supabase) return 0;
   const { data: student, error } = await supabase
     .from('tutor_students')
@@ -678,7 +998,7 @@ export async function ensureRecurringLessonsForStudent(studentId: string, weeksA
   return res.createdCount;
 }
 
-export async function ensureRecurringLessonsForAllActiveStudents(weeksAhead: number = 4): Promise<number> {
+export async function ensureRecurringLessonsForAllActiveStudents(weeksAhead: number = 9): Promise<number> {
   const students = await getStudents();
   let totalCreated = 0;
   for (const s of students) {
@@ -806,6 +1126,9 @@ export async function updateStudentSettings(
   updates: {
     monthly_target_lessons?: number;
     billing_day?: string;
+    billing_type?: BillingType;
+    lesson_rate?: number;
+    lessons_balance?: number;
     schedule_notes?: string;
     recurring_schedule?: RecurringSlot[];
   }
@@ -814,15 +1137,151 @@ export async function updateStudentSettings(
   const payload: any = {};
   if (updates.monthly_target_lessons !== undefined) payload.monthly_target_lessons = updates.monthly_target_lessons;
   if (updates.billing_day !== undefined) payload.billing_day = updates.billing_day.trim();
+  if (updates.billing_type !== undefined) payload.billing_type = updates.billing_type;
+  if (updates.lesson_rate !== undefined) payload.lesson_rate = updates.lesson_rate;
+  if (updates.lessons_balance !== undefined) payload.lessons_balance = updates.lessons_balance;
   if (updates.schedule_notes !== undefined) payload.notes = updates.schedule_notes.trim();
   if (updates.recurring_schedule !== undefined) payload.recurring_schedule = updates.recurring_schedule;
 
   if (Object.keys(payload).length > 0) {
-    await supabase.from('tutor_students').update(payload).eq('id', studentId);
+    const { error: updErr } = await supabase.from('tutor_students').update(payload).eq('id', studentId);
+    if (updErr && updErr.message?.includes('column') && updErr.message?.includes('does not exist')) {
+      delete payload.billing_type;
+      delete payload.lesson_rate;
+      delete payload.lessons_balance;
+      if (Object.keys(payload).length > 0) {
+        await supabase.from('tutor_students').update(payload).eq('id', studentId);
+      }
+    }
   }
 
-  // Update only this student's upcoming schedule
+  // Update only this student's upcoming schedule (cleaning future untouched)
   if (updates.recurring_schedule !== undefined && updates.recurring_schedule.length > 0) {
-    await planRecurringLessonsForStudent(studentId, updates.recurring_schedule, 4);
+    await planRecurringLessonsForStudent(studentId, updates.recurring_schedule, 9, true);
   }
+}
+
+// -------------------------------------------------------------
+// HYBRID BILLING CALCULATOR ENGINE (Strict Asia/Tashkent UTC+5)
+// -------------------------------------------------------------
+export async function calculateStudentBilling(
+  studentId: string,
+  customStartDate?: string,
+  customEndDate?: string
+): Promise<BillingCalculation> {
+  if (!supabase) throw new Error('Supabase is not initialized');
+
+  const { data: s, error } = await supabase
+    .from('tutor_students')
+    .select('*')
+    .eq('id', studentId)
+    .single();
+
+  if (error || !s) throw new Error('Student not found');
+
+  const billingType: BillingType = s.billing_type === 'package' ? 'package' : 'date_to_date';
+  const lessonRate = typeof s.lesson_rate === 'number' ? s.lesson_rate : 300000;
+  const lessonsBalance = typeof s.lessons_balance === 'number' ? s.lessons_balance : 0;
+  const targetLessons = Number(s.monthly_target_lessons) || 12;
+
+  let recurring: RecurringSlot[] = [];
+  if (Array.isArray(s.recurring_schedule)) {
+    recurring = s.recurring_schedule;
+  } else if (typeof s.recurring_schedule === 'string') {
+    try { recurring = JSON.parse(s.recurring_schedule); } catch {}
+  }
+
+  if (billingType === 'package') {
+    const packageSize = targetLessons;
+    const packageAmount = packageSize * lessonRate;
+    const summaryText = `📦 Пакетное обучение (${s.name}):
+• Размер пакета: ${packageSize} уроков
+• Ставка: ${lessonRate.toLocaleString('ru-RU')} сум/урок
+• Текущий баланс: ${lessonsBalance} ур.
+• Стоимость пакета: ${packageAmount.toLocaleString('ru-RU')} сум`;
+
+    return {
+      studentId: s.id,
+      studentName: s.name,
+      billingType: 'package',
+      lessonRate,
+      lessonsBalance,
+      packageSize,
+      packageAmount,
+      summaryText,
+    };
+  }
+
+  // date_to_date calculation
+  const match = String(s.billing_day || '10').match(/\d+/);
+  const bDay = match ? Math.min(31, Math.max(1, parseInt(match[0], 10))) : 10;
+
+  const now = getTashkentNow();
+  const curYear = now.getFullYear();
+  const curMonth = now.getMonth();
+  const curDay = now.getDate();
+
+  let startDateStr = customStartDate;
+  let endDateStr = customEndDate;
+
+  if (!startDateStr || !endDateStr) {
+    let sYear = curYear;
+    let sMonth = curMonth;
+    if (curDay < bDay - 2) {
+      sMonth = curMonth - 1;
+      if (sMonth < 0) {
+        sMonth = 11;
+        sYear -= 1;
+      }
+    }
+
+    const sDate = new Date(Date.UTC(sYear, sMonth, bDay));
+    let eYear = sYear;
+    let eMonth = sMonth + 1;
+    if (eMonth > 11) {
+      eMonth = 0;
+      eYear += 1;
+    }
+    const eDate = new Date(Date.UTC(eYear, eMonth, bDay));
+    eDate.setUTCDate(eDate.getUTCDate() - 1);
+
+    startDateStr = startDateStr || sDate.toISOString().substring(0, 10);
+    endDateStr = endDateStr || eDate.toISOString().substring(0, 10);
+  }
+
+  // Count scheduled slots matching recurring_schedule
+  let scheduledCount = 0;
+  let cursor = startDateStr;
+  while (cursor <= endDateStr) {
+    const dow = dayOfWeekOf(cursor);
+    const slotsOnDay = recurring.filter((slot) => Number(slot.dayOfWeek) === dow);
+    scheduledCount += slotsOnDay.length;
+    cursor = addDaysStr(cursor, 1);
+  }
+
+  const grossAmount = scheduledCount * lessonRate;
+  const lessonsToPay = Math.max(0, scheduledCount - lessonsBalance);
+  const netAmount = lessonsToPay * lessonRate;
+
+  const summaryText = `📅 Период оплаты (${s.name}):
+• Даты: с ${startDateStr} по ${endDateStr}
+• Уроков по расписанию: ${scheduledCount}
+• Ставка: ${lessonRate.toLocaleString('ru-RU')} сум/урок
+• Текущий баланс: ${lessonsBalance} ур.
+• К оплате: ${lessonsToPay} ур. = ${netAmount.toLocaleString('ru-RU')} сум`;
+
+  return {
+    studentId: s.id,
+    studentName: s.name,
+    billingType: 'date_to_date',
+    lessonRate,
+    lessonsBalance,
+    startDate: startDateStr,
+    endDate: endDateStr,
+    scheduledLessonsCount: scheduledCount,
+    grossAmount,
+    lessonsToPay,
+    netAmount,
+    summaryText,
+  };
 }

@@ -49,7 +49,7 @@ export async function GET(req: NextRequest) {
     const currentTotalMinutes = currentHours * 60 + currentMinutes;
     const currentDayOfWeek = now.getDay(); // 0 = Sunday
 
-    await ensureRecurringLessonsForAllActiveStudents(4).catch((e) => {
+    await ensureRecurringLessonsForAllActiveStudents(9).catch((e) => {
       console.error('Failed to auto-ensure recurring lessons in cron:', e);
     });
 
@@ -122,7 +122,7 @@ export async function GET(req: NextRequest) {
             .sort((a, b) => b.date.localeCompare(a.date))[0];
 
           let alertText = `🔔 <b>Через 15 минут урок: ${studentName} (${lesson.time_str || '16:00'})</b>\n\n`;
-          alertText += `📊 <b>Архив за месяц:</b> проведено <b>${conducted} из ${target}</b> | пропущено: <b>${missed}</b>\n`;
+          alertText += `⚖️ <b>Баланс уроков:</b> <b>${student?.lessons_balance ?? 0} ур.</b> | проведено в мес.: <b>${conducted}/${target}</b>\n`;
 
           if (studentPastMisses.length > 0) {
             studentPastMisses.forEach((m) => {
@@ -138,9 +138,11 @@ export async function GET(req: NextRequest) {
 
           const alertMarkup = {
             inline_keyboard: [
-              [{ text: '✅ Проведен', callback_data: `status:${lesson.id}:completed` }],
-              [{ text: '❌ Пропуск (указать причину)', callback_data: `status:${lesson.id}:miss_prompt` }],
-              [{ text: '🔄 На отработку в ВС', callback_data: `status:${lesson.id}:makeup_prompt` }],
+              [
+                { text: '✅ Был', callback_data: `status:${lesson.id}:completed` },
+                { text: '🔥 Сгорел', callback_data: `status:${lesson.id}:penalty` },
+                { text: '🛑 Отмена', callback_data: `status:${lesson.id}:excused` },
+              ],
             ],
           };
 
@@ -177,24 +179,23 @@ export async function GET(req: NextRequest) {
         });
 
         const completedWeek = weekLessons.filter((l) => l.status === 'completed');
-        const missedWeek = weekLessons.filter((l) => l.status === 'missed' || l.status === 'missed_excused' || l.status === 'missed_penalty');
-        const makeupsDoneToday = weekLessons.filter((l) => l.is_makeup && l.status === 'completed' && l.date.startsWith(todayStr));
+        const penaltyWeek = weekLessons.filter((l) => l.status === 'missed_penalty' || l.status === 'missed');
+        const excusedWeek = weekLessons.filter((l) => l.status === 'missed_excused');
 
         let weeklyText = `📈 <b>Итоги недели (${weekStart.split('-').slice(1).join('.')} – ${weekEnd.split('-').slice(1).join('.')}):</b>\n\n`;
-        weeklyText += `✅ Всего проведено: <b>${completedWeek.length} уроков</b>\n`;
-        weeklyText += `❌ Пропущено: <b>${missedWeek.length} уроков</b>\n`;
+        weeklyText += `✅ Проведено уроков: <b>${completedWeek.length}</b>\n`;
+        weeklyText += `🔥 Сгорело (платные пропуски): <b>${penaltyWeek.length}</b>\n`;
+        weeklyText += `🛑 Уважительных отмен: <b>${excusedWeek.length}</b>\n\n`;
 
-        if (missedWeek.length > 0) {
-          missedWeek.forEach((m) => {
+        if (penaltyWeek.length > 0 || excusedWeek.length > 0) {
+          weeklyText += `<b>Пропуски и отмены:</b>\n`;
+          [...penaltyWeek, ...excusedWeek].forEach((m) => {
             const d = m.date.substring(0, 10).split('-').reverse().slice(0, 2).join('.');
-            weeklyText += `• <b>${m.student_name}</b> (${d}) — <i>${m.miss_reason || 'Пропуск'}</i>\n`;
+            const icon = m.status === 'missed_excused' ? '🛑' : '🔥';
+            weeklyText += `• ${icon} <b>${m.student_name}</b> (${d}) — <i>${m.miss_reason || 'Пропуск'}</i>\n`;
           });
+          weeklyText += `\n`;
         }
-        weeklyText += `\n`;
-
-        weeklyText += `🔄 <b>Отработки и переносы на воскресенье:</b>\n`;
-        weeklyText += `• Проведено отработок сегодня: <b>${makeupsDoneToday.length}</b>\n`;
-        weeklyText += `• Остались не отработаны: <b>${pendingMakeups.length}</b>\n`;
 
         const weeklyMarkup = {
           inline_keyboard: [[{ text: '🚀 Открыть CRM', web_app: { url: APP_URL } }]],
@@ -204,8 +205,8 @@ export async function GET(req: NextRequest) {
           await sendTelegramMessage(chatId, weeklyText, weeklyMarkup);
         }
 
-        // Auto-extend recurring schedule +1 week ahead
-        const generatedCount = await ensureRecurringLessonsForAllActiveStudents(4);
+        // Auto-extend recurring schedule +1 week ahead (project up to 9 weeks / 63 days)
+        const generatedCount = await ensureRecurringLessonsForAllActiveStudents(9);
         notificationsSent.push(`Weekly summary sent, auto-extended ${generatedCount} lessons`);
       }
     }
