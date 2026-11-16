@@ -430,16 +430,24 @@ export async function initializePackageFromPastDate(
     throw eErr;
   }
 
+  // FIX 2: use only `d_t` composite key — date-only key caused overwrite for students
+  // with 2 slots on the same day, and incorrect fuzzy-matching for mismatched times.
   const existingMap = new Map<string, any>();
   (existingRows || []).forEach((r) => {
     const d = getTashkentDateString(r.lesson_date);
     const t = String(r.start_time || '').substring(0, 5);
     existingMap.set(`${d}_${t}`, r);
+    // date-only key is kept as LAST-resort fallback only for single-slot days;
+    // safe because we only use it when matchingSlots.length === 1 (see below).
     existingMap.set(d, r);
   });
 
   const excludedSet = new Set(excludedDates.map((d) => getTashkentDateString(d)));
+
+  // FIX 1: separate tracking — only lessons matched by the recurring template are "package lessons"
+  // and count toward completedCount. Manually-added extra lessons must NOT reduce the balance.
   const lessonsToUpsert: any[] = [];
+  const templateMatchedIds = new Set<string>(); // IDs of lessons upserted from the template loop
   let cursor = startClean;
 
   while (cursor <= todayStr) {
@@ -454,13 +462,16 @@ export async function initializePackageFromPastDate(
 
     for (const slot of matchingSlots) {
       const slotKey = `${cursor}_${slot.start}`;
-      const existing = existingMap.get(slotKey) || (matchingSlots.length === 1 ? existingMap.get(cursor) : null);
+      // FIX 2: prefer exact slot key; fall back to date-only only for single-slot days
+      const existing = existingMap.get(slotKey) ?? (matchingSlots.length === 1 ? existingMap.get(cursor) : undefined);
 
       const isExcluded = excludedSet.has(cursor);
       const targetStatus: LessonStatus = isExcluded ? 'missed_excused' : 'completed';
       const missReason = isExcluded ? 'Уважительная отмена / пропуск' : null;
 
+      let lessonId: string;
       if (existing) {
+        lessonId = existing.id;
         lessonsToUpsert.push({
           id: existing.id,
           student_id: studentId,
@@ -475,8 +486,9 @@ export async function initializePackageFromPastDate(
           notes: existing.notes || 'Пакетный урок',
         });
       } else {
+        lessonId = generateUUID();
         lessonsToUpsert.push({
-          id: generateUUID(),
+          id: lessonId,
           student_id: studentId,
           lesson_date: cursor,
           start_time: slot.start.length === 5 ? `${slot.start}:00` : slot.start,
@@ -489,12 +501,15 @@ export async function initializePackageFromPastDate(
           notes: 'Периодическое расписание',
         });
       }
+      // Track this lesson as a template-matched package lesson
+      templateMatchedIds.add(lessonId);
     }
 
     cursor = addDaysStr(cursor, 1);
   }
 
-  // Include any extra existing lessons in this date range
+  // Include any extra existing lessons in this date range (manual / rescheduled).
+  // These are preserved but NOT counted as package lessons (FIX 1).
   (existingRows || []).forEach((r) => {
     const d = getTashkentDateString(r.lesson_date);
     const alreadyIncluded = lessonsToUpsert.some((u) => u.id === r.id);
@@ -515,6 +530,7 @@ export async function initializePackageFromPastDate(
         reminder_sent: Boolean(r.reminder_sent),
         notes: r.notes || '',
       });
+      // NOTE: intentionally NOT added to templateMatchedIds — won't affect package balance
     }
   });
 
@@ -529,8 +545,11 @@ export async function initializePackageFromPastDate(
     }
   }
 
-  // Deduct 1 from packageLessonsCount for each 'completed' lesson in range
-  const completedCount = lessonsToUpsert.filter((l) => l.status === 'completed').length;
+  // FIX 1: count only template-matched lessons for balance calculation,
+  // not manually-added extra lessons that happened to fall in this date range.
+  const completedCount = lessonsToUpsert.filter(
+    (l) => l.status === 'completed' && templateMatchedIds.has(l.id)
+  ).length;
   const finalBalance = packageLessonsCount - completedCount;
 
   // Set student balance and ensure billing_type is 'package'
@@ -696,9 +715,26 @@ export async function deleteLesson(lessonId: string): Promise<void> {
 
 // -------------------------------------------------------------
 // BALANCE MANAGEMENT & TOP-UP
+// Uses atomic Postgres RPC (increment_lessons_balance) to prevent race conditions
+// when multiple status changes fire in quick succession (e.g. rapid UI taps).
+// Falls back to read-then-write if the RPC is not yet deployed.
 // -------------------------------------------------------------
 export async function topUpStudentBalance(studentId: string, lessonsAdded: number): Promise<number> {
   if (!supabase) throw new Error('Supabase is not initialized');
+
+  // FIX 3: atomic increment via RPC — no SELECT + UPDATE race condition
+  const { data: rpcResult, error: rpcErr } = await supabase
+    .rpc('increment_lessons_balance', { p_student_id: studentId, p_delta: lessonsAdded });
+
+  if (!rpcErr && typeof rpcResult === 'number') {
+    return rpcResult;
+  }
+
+  // Fallback: RPC not yet deployed — use read-then-write (acceptable for single-user sessions)
+  if (rpcErr) {
+    console.warn('[topUpStudentBalance] RPC not available, falling back to read-then-write:', rpcErr.message);
+  }
+
   const { data: student, error } = await supabase
     .from('tutor_students')
     .select('lessons_balance')
