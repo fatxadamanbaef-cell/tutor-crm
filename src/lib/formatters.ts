@@ -222,3 +222,26 @@ export function getStudentBillingPeriod(
     periodEndDateObj: endDateObj,
   };
 }
+
+/**
+ * Returns ISO day of week: 1 (Mon) .. 7 (Sun) strictly in Asia/Tashkent (UTC+5)
+ */
+export function dayOfWeekOf(dateStr: string): number {
+  const cleanDate = dateStr.includes('T') ? dateStr.substring(0, 10) : dateStr;
+  const d = new Date(`${cleanDate}T12:00:00+05:00`).getDay();
+  return d === 0 ? 7 : d;
+}
+
+/**
+ * Adds n days to a date string strictly in Asia/Tashkent (UTC+5) and returns YYYY-MM-DD
+ */
+export function addDaysStr(dateStr: string, n: number): string {
+  const cleanDate = dateStr.includes('T') ? dateStr.substring(0, 10) : dateStr;
+  const d = new Date(`${cleanDate}T12:00:00+05:00`);
+  d.setDate(d.getDate() + n);
+  return getTashkentDateString(d);
+}
+
+// 1-indexed weekday names matching dayOfWeekOf (1=Mon .. 7=Sun)
+export const WD_SHORT = ['', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
+export const WD_FULL = ['', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'];

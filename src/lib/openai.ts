@@ -16,7 +16,7 @@ import {
   calculateStudentBilling,
   topUpStudentBalance,
 } from './storage';
-import { getTashkentTodayStr, getTashkentNow } from './formatters';
+import { getTashkentTodayStr, getTashkentNow, dayOfWeekOf, addDaysStr, WD_SHORT, WD_FULL } from './formatters';
 import { resolveStudent } from './nameMatch';
 import { getHistory, appendHistory } from './botState';
 import { generateStudentReport } from './reports';
@@ -31,17 +31,6 @@ function getClient(): OpenAI {
   return _client;
 }
 
-const WD_SHORT = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
-const WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
-
-function dowOf(dateStr: string): number {
-  return new Date(`${dateStr}T00:00:00Z`).getUTCDay();
-}
-function addDays(dateStr: string, n: number): string {
-  const d = new Date(`${dateStr}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().substring(0, 10);
-}
 function assertDate(s: unknown, field = 'date'): string {
   if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s) || Number.isNaN(Date.parse(`${s}T00:00:00Z`))) {
     throw new Error(`Некорректная дата в поле ${field}: "${s}". Нужен формат YYYY-MM-DD.`);
@@ -252,7 +241,7 @@ function createToolbox(): Toolbox {
         lesson = await saveLesson({
           student_id: student.id,
           date,
-          status: targetStatus,
+          status: 'planned',
           miss_reason: a.missReason,
           notes: a.lessonNotes,
         });
@@ -302,8 +291,17 @@ function createToolbox(): Toolbox {
         lesson = studentLessons.find((l) => l.date.substring(0, 10) === toDate);
       }
 
-      if (!lesson && studentLessons.length > 0) {
-        lesson = studentLessons[0];
+      if (!lesson) {
+        // Fallback ONLY to upcoming planned/scheduled lessons, nearest first
+        const upcomingPlanned = studentLessons
+          .filter((l) => (l.status === 'planned' || l.status === 'scheduled') && l.date.substring(0, 10) >= today)
+          .sort((x, y) => x.date.localeCompare(y.date));
+        lesson = upcomingPlanned[0];
+      }
+
+      if (!lesson) {
+        // If no upcoming planned, check any planned/scheduled lesson
+        lesson = studentLessons.find((l) => l.status === 'planned' || l.status === 'scheduled');
       }
 
       const originalDate = lesson ? lesson.date.substring(0, 10) : null;
@@ -442,7 +440,7 @@ function createToolbox(): Toolbox {
     // 8. getSchedule
     async getSchedule(a) {
       let from = a.dateFrom ? assertDate(a.dateFrom, 'dateFrom') : today;
-      let to = a.dateTo ? assertDate(a.dateTo, 'dateTo') : addDays(from, 30);
+      let to = a.dateTo ? assertDate(a.dateTo, 'dateTo') : addDaysStr(from, 30);
       if (a.date) from = to = assertDate(a.date, 'date');
 
       const lessonsInRange = await getLessons(from, to);
@@ -461,7 +459,7 @@ function createToolbox(): Toolbox {
         total: list.length,
         lessons: list.slice(0, 60).map((l) => ({
           date: l.date.substring(0, 10),
-          weekday: WD_SHORT[dowOf(l.date.substring(0, 10))],
+          weekday: WD_SHORT[dayOfWeekOf(l.date.substring(0, 10))],
           time: l.time_str,
           student: l.student_name,
           status: STATUS_RU[l.status] || l.status,
@@ -521,7 +519,7 @@ export async function processWithAI(text: string): Promise<string> {
     const today = getTashkentTodayStr();
     const now = getTashkentNow();
     const timeNow = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const dayOfWeek = WD_FULL[dowOf(today)];
+    const dayOfWeek = WD_FULL[dayOfWeekOf(today)];
 
     const students = await getStudents();
     const studentsBrief = students

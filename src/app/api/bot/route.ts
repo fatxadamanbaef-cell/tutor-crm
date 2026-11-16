@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getLessons, getStudents, setLessonStatusDirect, updateLessonDetails, ensureRecurringLessonsForAllActiveStudents, calculateStudentBilling } from '@/lib/storage';
-import { formatTashkentHeaderDate, isTashkentToday, getTashkentNow } from '@/lib/formatters';
+import { formatTashkentHeaderDate, isTashkentToday, getTashkentNow, formatRuDateWithDay } from '@/lib/formatters';
 import { generateStudentReport, findStudentsByName } from '@/lib/reports';
 import { supabase } from '@/lib/supabase';
 import { claimUpdate, clearHistory, setPendingReason, popPendingReason } from '@/lib/botState';
@@ -124,7 +124,7 @@ export async function buildMorningDigest(firstName: string = 'Фархад') {
   }
 
   // 2. Package / low balance students (lessons_balance <= 2 or negative)
-  const lowBalanceStudents = students.filter((s) => (s.lessons_balance ?? 0) <= 2);
+  const lowBalanceStudents = students.filter((s) => s.billing_type === 'package' && (s.lessons_balance ?? 0) <= 2);
   const lowBalanceLines: string[] = [];
   for (const s of lowBalanceStudents) {
     const targetSize = s.monthly_target_lessons || 8;
@@ -371,6 +371,57 @@ export async function POST(req: NextRequest) {
             );
           }
         }
+        return NextResponse.json({ ok: true });
+      } else if (data.startsWith('lesson:')) {
+        const lessonId = data.replace('lesson:', '');
+        const lessons = await getLessons();
+        const lesson = lessons.find((l) => l.id === lessonId);
+        if (!lesson) {
+          await answerCallbackQuery(cq.id, 'Урок не найден');
+          return NextResponse.json({ ok: true });
+        }
+        await answerCallbackQuery(cq.id);
+
+        const students = await getStudents();
+        const student = students.find((s) => s.id === lesson.student_id);
+        const studentName = student?.name || lesson.student_name || 'Ученик';
+        const dateFormatted = formatRuDateWithDay(lesson.date);
+
+        const statusRu = lesson.status === 'completed'
+          ? '✅ Проведён'
+          : lesson.status === 'missed_penalty'
+          ? '🔥 Сгорел (списан)'
+          : lesson.status === 'missed_excused'
+          ? '🛑 Уважительная отмена'
+          : '⏳ Запланирован';
+
+        let lessonInfo = `📖 <b>Урок: ${escapeHtml(studentName)}</b>\n`;
+        lessonInfo += `📅 <b>Дата:</b> ${dateFormatted} (${lesson.time_str || '18:00'})\n`;
+        lessonInfo += `📊 <b>Статус:</b> ${statusRu}\n`;
+        lessonInfo += `⚖️ <b>Баланс ученика:</b> ${student?.lessons_balance ?? 0} ур.\n`;
+        if (lesson.notes) {
+          lessonInfo += `📝 <b>Заметка:</b> <i>${escapeHtml(lesson.notes)}</i>\n`;
+        }
+        if (lesson.miss_reason) {
+          lessonInfo += `⚠️ <b>Причина:</b> <i>${escapeHtml(lesson.miss_reason)}</i>\n`;
+        }
+        lessonInfo += `\nВыберите действие:`;
+
+        const actionMarkup = {
+          inline_keyboard: [
+            [
+              { text: '✅ Был', callback_data: `status:${lesson.id}:completed` },
+              { text: '🔥 Сгорел', callback_data: `status:${lesson.id}:penalty` },
+              { text: '🛑 Отмена', callback_data: `status:${lesson.id}:excused` },
+            ],
+            [
+              { text: '👤 Отчет ученика', callback_data: `report:${lesson.student_id}` },
+              { text: '📅 Расписание', callback_data: 'daily_schedule' },
+            ],
+          ],
+        };
+
+        await sendTelegramMessage(chatId, lessonInfo, actionMarkup);
         return NextResponse.json({ ok: true });
       } else if (data === 'list_students') {
         await answerCallbackQuery(cq.id);

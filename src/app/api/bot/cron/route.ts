@@ -3,6 +3,7 @@ import { getLessons, getStudents, getPendingMakeups, ensureRecurringLessonsForAl
 import { getTashkentNow, getTashkentTodayStr } from '@/lib/formatters';
 import { sendTelegramMessage, buildMorningDigest } from '../route';
 import { supabase } from '@/lib/supabase';
+import { claimNotification } from '@/lib/botState';
 import { format, parseISO, subDays, startOfWeek, endOfWeek } from 'date-fns';
 import { ru } from 'date-fns/locale';
 
@@ -15,7 +16,8 @@ const notifiedLessonsMap = new Set<string>();
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
-    const mode = url.searchParams.get('mode') || 'all'; // 'digest', 'reminders', 'weekly', 'all'
+    const mode = url.searchParams.get('mode') || 'reminders'; // 'digest', 'reminders', 'weekly', 'all' (default 'reminders' to prevent accidental bursts)
+    const force = url.searchParams.get('force') === 'true';
     const targetChatId = url.searchParams.get('chat_id') || TEACHER_TELEGRAM_CHAT_ID;
 
     // Fetch registered chats
@@ -64,11 +66,12 @@ export async function GET(req: NextRequest) {
     // =========================================================================
     // 1. MORNING DIGEST (08:30 Asia/Tashkent)
     // =========================================================================
-    if (mode === 'digest' || mode === 'all') {
+    const isMorningWindow = currentHours === 8 && currentMinutes >= 20 && currentMinutes <= 40;
+    if (mode === 'digest' || (mode === 'all' && isMorningWindow)) {
       const digestKey = `digest_${todayStr}`;
-      const isMorningWindow = currentHours === 8 && currentMinutes >= 20 && currentMinutes <= 40;
+      const shouldSend = force || (!notifiedLessonsMap.has(digestKey) && (await claimNotification(digestKey)));
 
-      if (mode === 'digest' || (isMorningWindow && !notifiedLessonsMap.has(digestKey))) {
+      if (shouldSend) {
         notifiedLessonsMap.add(digestKey);
         const { text: digestText, markup } = await buildMorningDigest('Фархад');
 
@@ -80,11 +83,11 @@ export async function GET(req: NextRequest) {
     }
 
     // =========================================================================
-    // 2. 15-MINUTE LESSON REMINDERS (Checks lessons starting in 13-17 mins)
+    // 2. 15-MINUTE LESSON REMINDERS (Checks lessons starting in 12-18 mins)
     // =========================================================================
     if (mode === 'reminders' || mode === 'all') {
       const todayPlannedLessons = lessons.filter(
-        (l) => l.date.startsWith(todayStr) && l.status === 'planned' && !l.reminder_sent
+        (l) => l.date.startsWith(todayStr) && (l.status === 'planned' || l.status === 'scheduled') && !l.reminder_sent
       );
 
       for (const lesson of todayPlannedLessons) {
@@ -100,8 +103,11 @@ export async function GET(req: NextRequest) {
         const minutesUntilStart = lessonStartMinutes - currentTotalMinutes;
         const reminderKey = `reminder_15m_${lesson.id}_${todayStr}`;
 
-        // 13 to 17 minutes before start
-        if (minutesUntilStart >= 12 && minutesUntilStart <= 18 && !notifiedLessonsMap.has(reminderKey)) {
+        // 12 to 18 minutes before start
+        if (minutesUntilStart >= 12 && minutesUntilStart <= 18) {
+          const shouldSend = force || (!notifiedLessonsMap.has(reminderKey) && (await claimNotification(reminderKey)));
+          if (!shouldSend) continue;
+
           notifiedLessonsMap.add(reminderKey);
 
           const student = students.find((s) => s.id === lesson.student_id);
@@ -163,11 +169,12 @@ export async function GET(req: NextRequest) {
     // =========================================================================
     // 3. WEEKLY SUMMARY & AUTO-SCHEDULE EXTENSION (Sunday 21:00)
     // =========================================================================
-    if (mode === 'weekly' || mode === 'all') {
+    const isSundayEvening = currentDayOfWeek === 0 && currentHours === 21 && currentMinutes >= 0 && currentMinutes <= 30;
+    if (mode === 'weekly' || (mode === 'all' && isSundayEvening)) {
       const weeklyKey = `weekly_${todayStr}`;
-      const isSundayEvening = currentDayOfWeek === 0 && currentHours === 21 && currentMinutes >= 0 && currentMinutes <= 30;
+      const shouldSend = force || (!notifiedLessonsMap.has(weeklyKey) && (await claimNotification(weeklyKey)));
 
-      if (mode === 'weekly' || (isSundayEvening && !notifiedLessonsMap.has(weeklyKey))) {
+      if (shouldSend) {
         notifiedLessonsMap.add(weeklyKey);
 
         const weekStart = format(startOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');

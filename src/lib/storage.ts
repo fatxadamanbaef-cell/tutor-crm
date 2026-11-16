@@ -1,24 +1,12 @@
 import { Student, Lesson, Makeup, AttendanceSummary, LessonStatus, RecurringSlot, BillingType, BillingCalculation } from '@/types';
 import { supabase } from './supabase';
-import { getTashkentTodayStr, getTashkentNow, getTashkentDateString } from './formatters';
+import { getTashkentTodayStr, getTashkentNow, getTashkentDateString, dayOfWeekOf, addDaysStr } from './formatters';
 import { generateUUID } from './uuid';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subMonths, addDays } from 'date-fns';
 
 // -------------------------------------------------------------
 // DATE / TIME HELPERS (Strict UTC+5 Tashkent strings)
 // -------------------------------------------------------------
-function addDaysStr(dateStr: string, n: number): string {
-  const d = new Date(`${dateStr}T12:00:00+05:00`);
-  d.setDate(d.getDate() + n);
-  return getTashkentDateString(d);
-}
-
-function dayOfWeekOf(dateStr: string): number {
-  // Returns 1 (Mon) .. 7 (Sun)
-  const d = new Date(`${dateStr}T12:00:00+05:00`).getDay();
-  return d === 0 ? 7 : d;
-}
-
 function toMinutes(t: string): number {
   const [h, m] = t.split(':').map(Number);
   return (h || 0) * 60 + (m || 0);
@@ -600,7 +588,10 @@ export async function saveLesson(lessonData: {
 
   let dbStatus = 'scheduled';
   if (lessonData.status === 'completed') dbStatus = 'completed';
+  else if (lessonData.status === 'missed_penalty') dbStatus = 'missed_penalty';
+  else if (lessonData.status === 'missed_excused') dbStatus = 'missed_excused';
   else if (lessonData.status === 'missed') dbStatus = 'missed';
+  else if (lessonData.status === 'planned') dbStatus = 'scheduled';
 
   const payload: any = {
     id: lessonId,
@@ -647,7 +638,10 @@ export async function saveBatchLessons(lessons: Array<{
     const time = parseTimeRange(l.time_str || '18:00 - 19:30');
     let dbStatus = 'scheduled';
     if (l.status === 'completed') dbStatus = 'completed';
+    else if (l.status === 'missed_penalty') dbStatus = 'missed_penalty';
+    else if (l.status === 'missed_excused') dbStatus = 'missed_excused';
     else if (l.status === 'missed') dbStatus = 'missed';
+    else if (l.status === 'planned') dbStatus = 'scheduled';
 
     return {
       id: generateUUID(),
@@ -699,7 +693,17 @@ export async function updateLessonDetails(lessonId: string, updates: Partial<Les
   if (updates.is_makeup !== undefined) payload.is_makeup = updates.is_makeup;
 
   if (updates.status) {
-    payload.status = updates.status === 'completed' ? 'completed' : updates.status === 'missed' ? 'missed' : 'planned';
+    payload.status = updates.status === 'completed'
+      ? 'completed'
+      : updates.status === 'missed_penalty'
+      ? 'missed_penalty'
+      : updates.status === 'missed_excused'
+      ? 'missed_excused'
+      : updates.status === 'missed'
+      ? 'missed'
+      : updates.status === 'scheduled'
+      ? 'scheduled'
+      : 'planned';
   }
 
   const { error } = await supabase.from('tutor_lessons').update(payload).eq('id', lessonId);

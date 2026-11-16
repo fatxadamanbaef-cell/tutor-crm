@@ -1,4 +1,4 @@
-export type LessonStatus = 'planned' | 'completed' | 'missed' | 'missed_excused' | 'missed_penalty';
+export type LessonStatus = 'planned' | 'completed' | 'missed' | 'missed_excused' | 'missed_penalty' | 'scheduled';
 
 export type BillingType = 'date_to_date' | 'package';
 

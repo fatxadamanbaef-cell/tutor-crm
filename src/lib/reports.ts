@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { Student, Lesson } from '@/types';
+import { Student, Lesson, LessonStatus } from '@/types';
 import { format, parseISO, startOfMonth, endOfMonth } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { getTashkentNow } from './formatters';
@@ -121,13 +121,23 @@ export async function generateStudentReport(
     const timeStr = `${startTimeClean} - ${endTimeClean}`;
     const isoDate = `${l.lesson_date}T${startTimeClean}:00+05:00`;
 
+    const realStatus: LessonStatus = l.status === 'completed'
+      ? 'completed'
+      : l.status === 'planned' || l.status === 'scheduled'
+      ? 'planned'
+      : l.status === 'missed_penalty'
+      ? 'missed_penalty'
+      : l.status === 'missed_excused'
+      ? 'missed_excused'
+      : 'missed';
+
     const lessonItem: Lesson = {
       id: l.id,
       student_id: l.student_id,
       student_name: student.name,
       date: isoDate,
       time_str: timeStr,
-      status: l.status === 'completed' ? 'completed' : l.status === 'planned' || l.status === 'scheduled' ? 'planned' : 'missed',
+      status: realStatus,
       miss_reason: l.miss_reason || l.notes || undefined,
       needs_makeup: Boolean(l.needs_makeup),
       is_makeup: Boolean(l.is_makeup),
@@ -135,10 +145,22 @@ export async function generateStudentReport(
       created_at: l.created_at,
     };
 
-    if (lessonItem.status === 'completed') completedLessons.push(lessonItem);
-    else if (lessonItem.status === 'missed') missedLessons.push(lessonItem);
-    else plannedLessons.push(lessonItem);
+    if (lessonItem.status === 'completed') {
+      completedLessons.push(lessonItem);
+    } else if (
+      lessonItem.status === 'missed' ||
+      lessonItem.status === 'missed_penalty' ||
+      lessonItem.status === 'missed_excused'
+    ) {
+      missedLessons.push(lessonItem);
+    } else {
+      plannedLessons.push(lessonItem);
+    }
   });
+
+  const penaltyCount = missedLessons.filter((l) => l.status === 'missed_penalty').length;
+  const excusedCount = missedLessons.filter((l) => l.status === 'missed_excused').length;
+  const legacyMissedCount = missedLessons.filter((l) => l.status === 'missed').length;
 
   // 4. Build Telegram HTML
   let html = `📋 <b>Отчет по ученику: ${student.name}</b>\n`;
@@ -148,7 +170,15 @@ export async function generateStudentReport(
 
   html += `📊 <b>Посещаемость:</b>\n`;
   html += `• Проведено: <b>${completedLessons.length} из ${target}</b> ✅\n`;
-  html += `• Пропущено: <b>${missedLessons.length}</b> ❌\n`;
+  if (penaltyCount > 0) {
+    html += `• Сгорело (платный пропуск): <b>${penaltyCount}</b> 🔥\n`;
+  }
+  if (excusedCount > 0) {
+    html += `• Уважительных отмен: <b>${excusedCount}</b> 🛑\n`;
+  }
+  if (legacyMissedCount > 0 || (penaltyCount === 0 && excusedCount === 0 && missedLessons.length > 0)) {
+    html += `• Пропущено: <b>${legacyMissedCount || missedLessons.length}</b> ❌\n`;
+  }
   html += `• Запланировано: <b>${plannedLessons.length}</b> ⏳\n`;
   if (pendingMakeups.length > 0) {
     html += `• Долг по отработкам в ВС: <b>${pendingMakeups.length}</b> 🔄\n`;
@@ -167,13 +197,15 @@ export async function generateStudentReport(
   }
 
   if (missedLessons.length > 0) {
-    html += `❌ <b>Пропуски:</b>\n`;
+    html += `⚠️ <b>Пропуски и отмены:</b>\n`;
     missedLessons.forEach((l, i) => {
       const d = formatRuDate(l.date);
       const day = formatRuDay(l.date);
+      const icon = l.status === 'missed_excused' ? '🛑' : l.status === 'missed_penalty' ? '🔥' : '❌';
+      const statusLabel = l.status === 'missed_excused' ? 'Отмена' : l.status === 'missed_penalty' ? 'Сгорел' : 'Пропуск';
       const reason = l.miss_reason ? ` — <i>${l.miss_reason}</i>` : '';
       const mk = l.needs_makeup ? ' [на отработке]' : '';
-      html += `${i + 1}. ${d} (${day})${reason}${mk}\n`;
+      html += `${i + 1}. ${icon} <b>${statusLabel}:</b> ${d} (${day})${reason}${mk}\n`;
     });
     html += `\n`;
   }
@@ -183,7 +215,15 @@ export async function generateStudentReport(
   parentText += `📊 Итоги месяца:\n`;
   parentText += `• Норма уроков: ${target} ${getLessonPlural(target)}\n`;
   parentText += `• Проведено занятий: ${completedLessons.length}\n`;
-  parentText += `• Пропущено: ${missedLessons.length}\n`;
+  if (penaltyCount > 0) {
+    parentText += `• Сгорело (платные пропуски): ${penaltyCount}\n`;
+  }
+  if (excusedCount > 0) {
+    parentText += `• Уважительных отмен: ${excusedCount}\n`;
+  }
+  if (legacyMissedCount > 0 || (penaltyCount === 0 && excusedCount === 0 && missedLessons.length > 0)) {
+    parentText += `• Пропущено: ${legacyMissedCount || missedLessons.length}\n`;
+  }
   if (pendingMakeups.length > 0) {
     parentText += `• Ожидают отработки в воскресенье: ${pendingMakeups.length}\n`;
   }
@@ -201,12 +241,14 @@ export async function generateStudentReport(
   }
 
   if (missedLessons.length > 0) {
-    parentText += `❌ Пропущенные занятия:\n`;
+    parentText += `⚠️ Пропуски и отмены:\n`;
     missedLessons.forEach((l, idx) => {
       const d = formatRuDate(l.date);
       const day = formatRuDay(l.date);
+      const icon = l.status === 'missed_excused' ? '🛑' : l.status === 'missed_penalty' ? '🔥' : '❌';
+      const statusLabel = l.status === 'missed_excused' ? 'Уважительная отмена' : l.status === 'missed_penalty' ? 'Сгорел' : 'Пропуск';
       const reason = l.miss_reason ? ` (${l.miss_reason})` : '';
-      parentText += `${idx + 1}. ${d} (${day})${reason}\n`;
+      parentText += `${idx + 1}. ${icon} ${statusLabel}: ${d} (${day})${reason}\n`;
     });
     parentText += `\n`;
   }
@@ -285,12 +327,110 @@ export interface MonthlyExportData {
 }
 
 export async function generateMonthlyExportData(): Promise<MonthlyExportData> {
+  const now = getTashkentNow();
+  const startStr = format(startOfMonth(now), 'yyyy-MM-dd');
+  const endStr = format(endOfMonth(now), 'yyyy-MM-dd');
+  const rawMonthName = format(now, 'LLLL yyyy', { locale: ru });
+  const monthName = rawMonthName.charAt(0).toUpperCase() + rawMonthName.slice(1);
+
+  if (!supabase) {
+    return {
+      monthName,
+      totalEarned: 0,
+      totalCompleted: 0,
+      studentsBreakdown: [],
+      csvContent: '',
+      formattedText: '',
+    };
+  }
+
+  const { data: studentsData, error: sErr } = await supabase
+    .from('tutor_students')
+    .select('*')
+    .not('name', 'like', '_BOT_%')
+    .eq('is_active', true)
+    .order('name');
+
+  if (sErr || !studentsData) {
+    return {
+      monthName,
+      totalEarned: 0,
+      totalCompleted: 0,
+      studentsBreakdown: [],
+      csvContent: '',
+      formattedText: '',
+    };
+  }
+
+  const { data: lessonsData } = await supabase
+    .from('tutor_lessons')
+    .select('*')
+    .gte('lesson_date', startStr)
+    .lte('lesson_date', endStr);
+
+  const lessons = lessonsData || [];
+
+  const studentsBreakdown: Array<{
+    name: string;
+    price: number;
+    completedInMonth: number;
+    earnedUzs: number;
+    remaining: number;
+    debtUzs: number;
+  }> = [];
+
+  let totalCompleted = 0;
+  let totalEarned = 0;
+
+  for (const s of studentsData) {
+    const price = typeof s.lesson_rate === 'number' ? s.lesson_rate : 300000;
+    const studentLessons = lessons.filter((l) => l.student_id === s.id);
+    const completedInMonth = studentLessons.filter((l) => l.status === 'completed').length;
+    const penaltyInMonth = studentLessons.filter((l) => l.status === 'missed_penalty').length;
+    // Billable: conducted + penalty (burned)
+    const earnedUzs = (completedInMonth + penaltyInMonth) * price;
+    const balance = typeof s.lessons_balance === 'number' ? s.lessons_balance : 0;
+    const debtUzs = balance < 0 ? Math.abs(balance) * price : 0;
+
+    totalCompleted += completedInMonth;
+    totalEarned += earnedUzs;
+
+    studentsBreakdown.push({
+      name: s.name,
+      price,
+      completedInMonth,
+      earnedUzs,
+      remaining: balance,
+      debtUzs,
+    });
+  }
+
+  // Build CSV
+  const csvRows: string[] = [
+    'Ученик,Ставка (UZS),Проведено,Заработано (UZS),Баланс (ур.),Задолженность (UZS)',
+  ];
+  for (const item of studentsBreakdown) {
+    csvRows.push(
+      `"${item.name.replace(/"/g, '""')}",${item.price},${item.completedInMonth},${item.earnedUzs},${item.remaining},${item.debtUzs}`
+    );
+  }
+  const csvContent = csvRows.join('\n');
+
+  // Formatted Text
+  let formattedText = `📊 <b>Финансовый отчет за ${monthName}</b>\n\n`;
+  formattedText += `✅ Всего проведено уроков: <b>${totalCompleted}</b>\n`;
+  formattedText += `💰 Фактический доход: <b>${totalEarned.toLocaleString('ru-RU')} сум</b>\n\n`;
+  formattedText += `<b>Детализация по ученикам:</b>\n`;
+  for (const item of studentsBreakdown) {
+    formattedText += `• <b>${item.name}</b>: ${item.completedInMonth} ур. × ${item.price.toLocaleString('ru-RU')} = <b>${item.earnedUzs.toLocaleString('ru-RU')} сум</b> (баланс: ${item.remaining} ур.${item.debtUzs > 0 ? `, долг: ${item.debtUzs.toLocaleString('ru-RU')} сум` : ''})\n`;
+  }
+
   return {
-    monthName: 'Текущий месяц',
-    totalEarned: 0,
-    totalCompleted: 0,
-    studentsBreakdown: [],
-    csvContent: '',
-    formattedText: '',
+    monthName,
+    totalEarned,
+    totalCompleted,
+    studentsBreakdown,
+    csvContent,
+    formattedText,
   };
 }

@@ -29,6 +29,7 @@ interface BotState {
   processed: number[];
   history: HistoryMessage[];
   pendingReason?: PendingReasonState | null;
+  notifiedKeys?: string[];
 }
 
 interface StateRow {
@@ -38,7 +39,7 @@ interface StateRow {
 }
 
 function emptyState(): BotState {
-  return { processed: [], history: [], pendingReason: null };
+  return { processed: [], history: [], pendingReason: null, notifiedKeys: [] };
 }
 
 function parseState(raw: unknown): BotState {
@@ -49,6 +50,7 @@ function parseState(raw: unknown): BotState {
       processed: Array.isArray(parsed.processed) ? parsed.processed : [],
       history: Array.isArray(parsed.history) ? parsed.history : [],
       pendingReason: parsed.pendingReason || null,
+      notifiedKeys: Array.isArray(parsed.notifiedKeys) ? parsed.notifiedKeys : [],
     };
   } catch {
     return emptyState();
@@ -107,12 +109,46 @@ async function mutateState(fn: (s: BotState) => BotState | null): Promise<boolea
       .from('tutor_students')
       .update(updatePayload)
       .eq('id', row.id)
+      .eq('monthly_target_lessons', row.version)
       .select('id');
 
     if (!error && data && data.length === 1) return true;
     await new Promise((r) => setTimeout(r, 40 + Math.random() * 60));
   }
   return false;
+}
+
+export async function claimNotification(key: string): Promise<boolean> {
+  try {
+    let duplicate = false;
+    const ok = await mutateState((s) => {
+      const keys = Array.isArray(s.notifiedKeys) ? s.notifiedKeys : [];
+      if (keys.includes(key)) {
+        duplicate = true;
+        return null;
+      }
+      return {
+        ...s,
+        notifiedKeys: [...keys, key].slice(-120),
+      };
+    });
+    return ok && !duplicate;
+  } catch (e) {
+    console.error('claimNotification failed:', e);
+    return false;
+  }
+}
+
+export async function hasNotification(key: string): Promise<boolean> {
+  try {
+    const row = await loadRow();
+    if (!row) return false;
+    const keys = Array.isArray(row.state.notifiedKeys) ? row.state.notifiedKeys : [];
+    return keys.includes(key);
+  } catch (e) {
+    console.error('hasNotification failed:', e);
+    return false;
+  }
 }
 
 export async function claimUpdate(updateId: number): Promise<boolean> {
