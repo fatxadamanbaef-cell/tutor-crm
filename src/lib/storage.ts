@@ -1162,6 +1162,68 @@ export async function updateStudentSettings(
 }
 
 // -------------------------------------------------------------
+// BILLING PERIOD HELPERS (strict Asia/Tashkent UTC+5)
+// -------------------------------------------------------------
+
+/**
+ * Returns the last day of a given year/month (UTC), so we can safely clamp
+ * billing_day=31 in February (→28 or 29) or April (→30) etc.
+ */
+function lastDayOfMonth(year: number, month: number /* 0-based */): number {
+  return new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+}
+
+/**
+ * Builds the billing period window [startDate, endDate] for a student's
+ * billing_day, strictly based on current Tashkent time (UTC+5).
+ *
+ * Rules (no fuzz/tolerance):
+ *   - If today >= billing_day  → period: [billing_day THIS month, billing_day NEXT month − 1]
+ *   - If today <  billing_day  → period: [billing_day PREV month, billing_day THIS month − 1]
+ *   - billing_day > last-day-of-month is clamped to the actual last day.
+ *
+ * Returns "YYYY-MM-DD" strings.
+ */
+function buildBillingPeriod(bDay: number, now: Date): { startDate: string; endDate: string } {
+  const curYear  = now.getFullYear();
+  const curMonth = now.getMonth();   // 0-based
+  const curDay   = now.getDate();
+
+  // Determine start month
+  let sYear: number;
+  let sMonth: number; // 0-based
+
+  if (curDay >= bDay) {
+    // We are on or past the billing day → period started this month
+    sYear  = curYear;
+    sMonth = curMonth;
+  } else {
+    // We are before the billing day → period started last month
+    sMonth = curMonth - 1;
+    sYear  = curYear;
+    if (sMonth < 0) { sMonth = 11; sYear -= 1; }
+  }
+
+  // End month = start month + 1
+  let eYear  = sYear;
+  let eMonth = sMonth + 1;
+  if (eMonth > 11) { eMonth = 0; eYear += 1; }
+
+  // Clamp bDay to the actual number of days in each month
+  const startDay = Math.min(bDay, lastDayOfMonth(sYear, sMonth));
+  const endDay   = Math.min(bDay, lastDayOfMonth(eYear, eMonth));
+
+  // startDate = billing_day of start month
+  const sDate = new Date(Date.UTC(sYear, sMonth, startDay));
+  // endDate   = one day before billing_day of end month
+  const eDate = new Date(Date.UTC(eYear, eMonth, endDay));
+  eDate.setUTCDate(eDate.getUTCDate() - 1);
+
+  const fmt = (d: Date) => d.toISOString().substring(0, 10);
+  return { startDate: fmt(sDate), endDate: fmt(eDate) };
+}
+
+// -------------------------------------------------------------
 // HYBRID BILLING CALCULATOR ENGINE (Strict Asia/Tashkent UTC+5)
 // -------------------------------------------------------------
 export async function calculateStudentBilling(
@@ -1212,41 +1274,23 @@ export async function calculateStudentBilling(
     };
   }
 
-  // date_to_date calculation
+  // date_to_date: derive period from billing_day using buildBillingPeriod()
   const match = String(s.billing_day || '10').match(/\d+/);
   const bDay = match ? Math.min(31, Math.max(1, parseInt(match[0], 10))) : 10;
 
   const now = getTashkentNow();
-  const curYear = now.getFullYear();
-  const curMonth = now.getMonth();
-  const curDay = now.getDate();
 
-  let startDateStr = customStartDate;
-  let endDateStr = customEndDate;
+  // Use custom dates if both are explicitly provided, otherwise compute from billing_day
+  let startDateStr: string;
+  let endDateStr: string;
 
-  if (!startDateStr || !endDateStr) {
-    let sYear = curYear;
-    let sMonth = curMonth;
-    if (curDay < bDay - 2) {
-      sMonth = curMonth - 1;
-      if (sMonth < 0) {
-        sMonth = 11;
-        sYear -= 1;
-      }
-    }
-
-    const sDate = new Date(Date.UTC(sYear, sMonth, bDay));
-    let eYear = sYear;
-    let eMonth = sMonth + 1;
-    if (eMonth > 11) {
-      eMonth = 0;
-      eYear += 1;
-    }
-    const eDate = new Date(Date.UTC(eYear, eMonth, bDay));
-    eDate.setUTCDate(eDate.getUTCDate() - 1);
-
-    startDateStr = startDateStr || sDate.toISOString().substring(0, 10);
-    endDateStr = endDateStr || eDate.toISOString().substring(0, 10);
+  if (customStartDate && customEndDate) {
+    startDateStr = customStartDate;
+    endDateStr   = customEndDate;
+  } else {
+    const period = buildBillingPeriod(bDay, now);
+    startDateStr = customStartDate || period.startDate;
+    endDateStr   = customEndDate   || period.endDate;
   }
 
   // Count scheduled slots matching recurring_schedule
