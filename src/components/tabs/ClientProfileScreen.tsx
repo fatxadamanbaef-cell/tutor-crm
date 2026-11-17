@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { Student, Lesson, RecurringSlot, BillingType, BillingCalculation, LessonStatus } from '@/types';
-import { X, Check, Calendar, Clock, Edit2, Trash2, Plus, AlertCircle, RotateCcw, Wallet, ChevronDown, ChevronUp, Package, Sparkles } from 'lucide-react';
+import { X, Check, Calendar, Clock, Edit2, Trash2, Plus, AlertCircle, RotateCcw, Wallet, ChevronDown, ChevronUp, Package, Sparkles, Loader2 } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
 import { format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -50,6 +50,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
   onOpenLesson,
 }) => {
   const [activeTab, setActiveTab] = useState<'archive' | 'settings'>('archive');
+  const [isSaving, setIsSaving] = useState(false);
 
   // Profile fields state
   const [studentName, setStudentName] = useState(student.name);
@@ -350,25 +351,40 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     [timelineLessons, todayStr]
   );
 
-  const handleSaveAllSettings = () => {
-    hapticNotification('success');
-    if (onSaveStudentInfo) {
-      onSaveStudentInfo(student.id, {
-        name: studentName,
-        phone: studentPhone,
-        telegram: studentTelegram,
-        monthly_target_lessons: Number(monthlyTarget) || 12,
-        billing_day: billingDay,
-        billing_type: billingType,
-        lesson_rate: Number(lessonRate) || 300000,
-        lessons_balance: Number(lessonsBalance) || 0,
-        color: studentColor,
-        schedule_notes: scheduleNotes,
-        recurring_schedule: recurringSlots,
-      });
+  const handleSaveAllSettings = async () => {
+    if (isSaving) return;
+    if (!studentName.trim()) {
+      alert('Пожалуйста, введите имя ученика');
+      return;
     }
-    // FIX: Do NOT call onBack() automatically — user should close manually.
-    // onBack() was causing the profile to close immediately after save.
+
+    setIsSaving(true);
+    hapticImpact('medium');
+
+    try {
+      if (onSaveStudentInfo) {
+        await onSaveStudentInfo(student.id, {
+          name: studentName.trim(),
+          phone: studentPhone.trim(),
+          telegram: studentTelegram.trim(),
+          monthly_target_lessons: Number(monthlyTarget) || 12,
+          billing_day: billingDay.trim(),
+          billing_type: billingType,
+          lesson_rate: Number(lessonRate) || 300000,
+          lessons_balance: Number(lessonsBalance) || 0,
+          color: studentColor,
+          schedule_notes: scheduleNotes,
+          recurring_schedule: recurringSlots,
+        });
+      }
+      hapticNotification('success');
+      onBack();
+    } catch (e: any) {
+      console.error('Save settings error:', e);
+      hapticNotification('error');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleAddRecurringSlot = () => {
@@ -581,10 +597,16 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
 
         <button
           type="button"
+          disabled={isSaving}
           onClick={handleSaveAllSettings}
-          className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-600 text-white shadow-md shadow-blue-500/20 active:scale-90 transition-transform"
+          className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-600 disabled:opacity-50 text-white shadow-md shadow-blue-500/20 active:scale-90 transition-transform"
+          title="Сохранить настройки"
         >
-          <Check className="w-5 h-5" strokeWidth={3} />
+          {isSaving ? (
+            <Loader2 className="w-5 h-5 animate-spin" />
+          ) : (
+            <Check className="w-5 h-5" strokeWidth={3} />
+          )}
         </button>
       </div>
 
@@ -1322,8 +1344,30 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
               )}
             </div>
 
+            {/* Save Button */}
+            <div className="pt-2">
+              <button
+                type="button"
+                disabled={isSaving}
+                onClick={handleSaveAllSettings}
+                className="w-full py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-black shadow-lg shadow-blue-500/25 flex items-center justify-center gap-2 active:scale-98 transition-all"
+              >
+                {isSaving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Сохранение...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4 stroke-[3]" />
+                    <span>Сохранить настройки ученика</span>
+                  </>
+                )}
+              </button>
+            </div>
+
             {/* Delete Student */}
-            <div className="pt-4">
+            <div className="pt-2">
               <button
                 type="button"
                 onClick={() => {

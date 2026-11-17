@@ -200,16 +200,18 @@ export default function Dashboard() {
   }, []);
 
   const handleSaveStudentInfo = useCallback(async (studentId: string, updates: any) => {
-    // FIX: capture whether profile is still open BEFORE async operation
-    // We do NOT call setSelectedStudent(refreshed) to avoid re-opening a closed profile.
-    // The profile reads from its own local state; student list is refreshed in the background.
     try {
       await updateStudentSettings(studentId, updates);
-      const updatedStudents = await getStudents();
+      const [updatedStudents, updatedLessons] = await Promise.all([
+        getStudents(),
+        getLessons(),
+      ]);
       setStudents(updatedStudents);
-      getLessons().then(setLessons).catch(() => {});
-    } catch (e) {
+      setLessons(updatedLessons);
+    } catch (e: any) {
       console.error('Failed to save student info:', e);
+      alert('Ошибка при сохранении: ' + (e?.message || String(e)));
+      throw e;
     }
   }, []);
 

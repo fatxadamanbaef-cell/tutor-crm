@@ -1202,6 +1202,11 @@ export async function getStudentArchive(studentId: string, monthDate: Date = get
 export async function updateStudentSettings(
   studentId: string,
   updates: {
+    name?: string;
+    phone?: string;
+    telegram?: string;
+    color?: string;
+    is_active?: boolean;
     monthly_target_lessons?: number;
     billing_day?: string;
     billing_type?: BillingType;
@@ -1213,22 +1218,52 @@ export async function updateStudentSettings(
 ): Promise<void> {
   if (!supabase) throw new Error('Supabase is not initialized');
   const payload: any = {};
-  if (updates.monthly_target_lessons !== undefined) payload.monthly_target_lessons = updates.monthly_target_lessons;
+  if (updates.name !== undefined) payload.name = updates.name.trim();
+  if (updates.phone !== undefined) payload.phone = updates.phone.trim();
+  if (updates.telegram !== undefined) {
+    const tg = updates.telegram.trim();
+    payload.telegram = tg ? (tg.startsWith('@') ? tg : `@${tg}`) : '';
+  }
+  if (updates.color !== undefined) payload.color = updates.color;
+  if (updates.is_active !== undefined) payload.is_active = updates.is_active;
+  if (updates.monthly_target_lessons !== undefined) {
+    payload.monthly_target_lessons = updates.monthly_target_lessons;
+    payload.package_total_lessons = updates.monthly_target_lessons;
+  }
   if (updates.billing_day !== undefined) payload.billing_day = updates.billing_day.trim();
-  if (updates.billing_type !== undefined) payload.billing_type = updates.billing_type;
-  if (updates.lesson_rate !== undefined) payload.lesson_rate = updates.lesson_rate;
-  if (updates.lessons_balance !== undefined) payload.lessons_balance = updates.lessons_balance;
+  if (updates.billing_type !== undefined) {
+    payload.billing_type = updates.billing_type;
+    payload.payment_type = updates.billing_type;
+  }
+  if (updates.lesson_rate !== undefined) {
+    payload.lesson_rate = updates.lesson_rate;
+    payload.price_per_lesson = updates.lesson_rate;
+  }
+  if (updates.lessons_balance !== undefined) {
+    payload.lessons_balance = updates.lessons_balance;
+    payload.package_remaining_lessons = updates.lessons_balance;
+  }
   if (updates.schedule_notes !== undefined) payload.notes = updates.schedule_notes.trim();
   if (updates.recurring_schedule !== undefined) payload.recurring_schedule = updates.recurring_schedule;
 
   if (Object.keys(payload).length > 0) {
     const { error: updErr } = await supabase.from('tutor_students').update(payload).eq('id', studentId);
-    if (updErr && updErr.message?.includes('column') && updErr.message?.includes('does not exist')) {
-      delete payload.billing_type;
-      delete payload.lesson_rate;
-      delete payload.lessons_balance;
-      if (Object.keys(payload).length > 0) {
-        await supabase.from('tutor_students').update(payload).eq('id', studentId);
+    if (updErr) {
+      if (updErr.message?.includes('column') && updErr.message?.includes('does not exist')) {
+        delete payload.billing_type;
+        delete payload.lesson_rate;
+        delete payload.lessons_balance;
+        delete payload.monthly_target_lessons;
+        if (Object.keys(payload).length > 0) {
+          const { error: retryErr } = await supabase.from('tutor_students').update(payload).eq('id', studentId);
+          if (retryErr) {
+            console.error('Retry update failed:', retryErr);
+            throw retryErr;
+          }
+        }
+      } else {
+        console.error('Update student settings failed:', updErr);
+        throw updErr;
       }
     }
   }
