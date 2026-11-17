@@ -367,7 +367,8 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
         recurring_schedule: recurringSlots,
       });
     }
-    onBack();
+    // FIX: Do NOT call onBack() automatically — user should close manually.
+    // onBack() was causing the profile to close immediately after save.
   };
 
   const handleAddRecurringSlot = () => {
@@ -560,7 +561,9 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
       {/* Top Bar */}
       <div className="flex items-center justify-between px-4 pt-4 pb-3 bg-white border-b border-gray-200">
         <button
-          onClick={() => {
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
             hapticImpact('light');
             onBack();
           }}
@@ -577,6 +580,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
         </div>
 
         <button
+          type="button"
           onClick={handleSaveAllSettings}
           className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-600 text-white shadow-md shadow-blue-500/20 active:scale-90 transition-transform"
         >
@@ -587,6 +591,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
       {/* Tabs Switcher */}
       <div className="flex bg-white px-4 py-2 gap-2 border-b border-gray-200">
         <button
+          type="button"
           onClick={() => {
             hapticImpact('light');
             setActiveTab('archive');
@@ -598,6 +603,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
           Расписание и баланс
         </button>
         <button
+          type="button"
           onClick={() => {
             hapticImpact('light');
             setActiveTab('settings');

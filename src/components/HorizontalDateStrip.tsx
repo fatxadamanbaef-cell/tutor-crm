@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Lesson } from '@/types';
 import {
   getTashkentDateStrip,
@@ -38,15 +38,14 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
   const [isMonthView, setIsMonthView] = useState(false);
   const [currentMonthDate, setCurrentMonthDate] = useState(selectedDate);
 
-  const daysStrip = getTashkentDateStrip(5, 14); // 5 days in past, today, 14 days in future
+  const daysStrip = useMemo(() => getTashkentDateStrip(5, 14), []); // stable: 5 past, today, 14 future
   const isSelectedToday = isSameDay(selectedDate, getTashkentNow());
 
   const handleDayClick = (date: Date) => {
     hapticSelection();
     onSelectDate(date);
-    if (isMonthView) {
-      setIsMonthView(false);
-    }
+    // Always close month view on day selection — single source of truth
+    setIsMonthView(false);
   };
 
   const handleTodayClick = () => {
@@ -54,14 +53,17 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
     const today = getTashkentNow();
     setCurrentMonthDate(today);
     onSelectDate(today);
+    setIsMonthView(false);
   };
 
-  // Month Grid Calculation
-  const monthStart = startOfMonth(currentMonthDate);
-  const monthEnd = endOfMonth(monthStart);
-  const startDate = startOfWeek(monthStart, { weekStartsOn: 1 });
-  const endDate = endOfWeek(monthEnd, { weekStartsOn: 1 });
-  const monthDays = eachDayOfInterval({ start: startDate, end: endDate });
+  // Month Grid Calculation — memoized on currentMonthDate change only
+  const monthDays = useMemo(() => {
+    const monthStart = startOfMonth(currentMonthDate);
+    const monthEnd = endOfMonth(monthStart);
+    const startDate = startOfWeek(monthStart, { weekStartsOn: 1 });
+    const endDate = endOfWeek(monthEnd, { weekStartsOn: 1 });
+    return eachDayOfInterval({ start: startDate, end: endDate });
+  }, [currentMonthDate]);
 
   const getDayStatusSummary = (day: Date) => {
     const dayLessons = lessons.filter((l) => isSameTashkentDate(l.date, day));
@@ -95,6 +97,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
         <div className="flex items-center gap-1.5">
           {!isSelectedToday && (
             <button
+              type="button"
               onClick={handleTodayClick}
               className="text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-lg active:scale-95 transition-all"
             >
@@ -103,6 +106,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
           )}
 
           <button
+            type="button"
             onClick={() => {
               hapticImpact('light');
               setIsMonthView(!isMonthView);
@@ -205,6 +209,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
           {/* Month Navigator */}
           <div className="flex items-center justify-between">
             <button
+              type="button"
               onClick={() => {
                 hapticImpact('light');
                 setCurrentMonthDate(subMonths(currentMonthDate, 1));
@@ -219,6 +224,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
             </span>
 
             <button
+              type="button"
               onClick={() => {
                 hapticImpact('light');
                 setCurrentMonthDate(addMonths(currentMonthDate, 1));

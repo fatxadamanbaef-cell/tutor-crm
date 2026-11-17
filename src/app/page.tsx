@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Student, Lesson, Makeup, LessonStatus } from '@/types';
 import {
   getStudents,
@@ -17,7 +17,7 @@ import {
   scheduleSundayMakeup,
   archiveMakeup,
 } from '@/lib/storage';
-import { initTelegramApp } from '@/lib/telegram';
+import { initTelegramApp, getTelegramWebApp } from '@/lib/telegram';
 import { Loader2 } from 'lucide-react';
 
 import { BottomNav, TabType } from '@/components/BottomNav';
@@ -45,10 +45,15 @@ export default function Dashboard() {
 
   useEffect(() => {
     initTelegramApp();
+    // Disable vertical swipe-to-close inside the app
+    const tg = getTelegramWebApp();
+    if (tg?.disableVerticalSwipes) {
+      try { tg.disableVerticalSwipes(); } catch {}
+    }
     refreshData();
   }, []);
 
-  const refreshData = async () => {
+  const refreshData = useCallback(async () => {
     try {
       const [sData, lData, mData] = await Promise.all([
         getStudents(),
@@ -76,9 +81,9 @@ export default function Dashboard() {
       console.error('Data load error:', e);
       setLoading(false);
     }
-  };
+  }, []);
 
-  const handleSetLessonStatus = async (
+  const handleSetLessonStatus = useCallback(async (
     lessonId: string,
     status: LessonStatus,
     missReason?: string
@@ -122,9 +127,9 @@ export default function Dashboard() {
       console.error('Status change failed:', e);
       refreshData();
     }
-  };
+  }, [lessons, refreshData]);
 
-  const handleScheduleSundayMakeup = async (makeupIdOrLessonId: string, sundayDate: string, timeStr: string) => {
+  const handleScheduleSundayMakeup = useCallback(async (makeupIdOrLessonId: string, sundayDate: string, timeStr: string) => {
     try {
       const makeup = makeups.find(m => m.id === makeupIdOrLessonId || m.missed_lesson_id === makeupIdOrLessonId);
       if (makeup) {
@@ -149,9 +154,9 @@ export default function Dashboard() {
       console.error('Failed to schedule Sunday makeup:', e);
       refreshData();
     }
-  };
+  }, [makeups, lessons, refreshData]);
 
-  const handleArchiveMakeup = async (makeupIdOrLessonId: string) => {
+  const handleArchiveMakeup = useCallback(async (makeupIdOrLessonId: string) => {
     try {
       const makeup = makeups.find(m => m.id === makeupIdOrLessonId || m.missed_lesson_id === makeupIdOrLessonId);
       if (makeup) {
@@ -167,9 +172,9 @@ export default function Dashboard() {
       console.error('Failed to archive makeup:', e);
       refreshData();
     }
-  };
+  }, [makeups, refreshData]);
 
-  const handleDeleteStudent = async (studentId: string) => {
+  const handleDeleteStudent = useCallback(async (studentId: string) => {
     try {
       setStudents((prev) => prev.filter((s) => s.id !== studentId));
       setLessons((prev) => prev.filter((l) => l.student_id !== studentId));
@@ -179,9 +184,9 @@ export default function Dashboard() {
       console.error('Delete error:', e);
       refreshData();
     }
-  };
+  }, [refreshData]);
 
-  const handleSaveStudent = async (data: any) => {
+  const handleSaveStudent = useCallback(async (data: any) => {
     try {
       const saved = await saveStudent(data);
       setStudents((prev) => [...prev.filter((s) => s.id !== saved.id), saved]);
@@ -192,22 +197,23 @@ export default function Dashboard() {
       console.error('Save error:', e);
       alert('Ошибка при сохранении: ' + (e.message || String(e)));
     }
-  };
+  }, []);
 
-  const handleSaveStudentInfo = async (studentId: string, updates: any) => {
+  const handleSaveStudentInfo = useCallback(async (studentId: string, updates: any) => {
+    // FIX: capture whether profile is still open BEFORE async operation
+    // We do NOT call setSelectedStudent(refreshed) to avoid re-opening a closed profile.
+    // The profile reads from its own local state; student list is refreshed in the background.
     try {
       await updateStudentSettings(studentId, updates);
       const updatedStudents = await getStudents();
       setStudents(updatedStudents);
-      const refreshed = updatedStudents.find((s) => s.id === studentId);
-      if (refreshed) setSelectedStudent(refreshed);
       getLessons().then(setLessons).catch(() => {});
     } catch (e) {
       console.error('Failed to save student info:', e);
     }
-  };
+  }, []);
 
-  const handleUpdateLessonTime = async (lessonId: string, timeStr: string, dateStr?: string) => {
+  const handleUpdateLessonTime = useCallback(async (lessonId: string, timeStr: string, dateStr?: string) => {
     try {
       setLessons((prev) =>
         prev.map((l) =>
@@ -225,9 +231,9 @@ export default function Dashboard() {
       console.error('Failed to update lesson time:', e);
       refreshData();
     }
-  };
+  }, [refreshData]);
 
-  const handleUpdateLessonMissReason = async (lessonId: string, missReason: string) => {
+  const handleUpdateLessonMissReason = useCallback(async (lessonId: string, missReason: string) => {
     try {
       setLessons((prev) =>
         prev.map((l) => (l.id === lessonId ? { ...l, miss_reason: missReason } : l))
@@ -236,7 +242,7 @@ export default function Dashboard() {
     } catch (e) {
       console.error('Failed to update miss reason:', e);
     }
-  };
+  }, []);
 
   if (loading) {
     return (
@@ -246,10 +252,26 @@ export default function Dashboard() {
     );
   }
 
+  // Determine modal/overlay stack depth for BackButton
+  const hasOverlay = Boolean(selectedLesson) || isAddStudentOpen || isAddLessonOpen;
+  const hasProfile = Boolean(selectedStudent);
+
   return (
     <div className="h-screen bg-[#f2f2f7] overflow-hidden relative selection:bg-blue-100">
+      {/* Telegram BackButton controller */}
+      <TelegramBackButtonController
+        hasProfile={hasProfile}
+        hasOverlay={hasOverlay}
+        onCloseOverlay={() => {
+          if (selectedLesson) { setSelectedLesson(null); return; }
+          if (isAddStudentOpen) { setIsAddStudentOpen(false); return; }
+          if (isAddLessonOpen) { setIsAddLessonOpen(false); return; }
+        }}
+        onCloseProfile={() => setSelectedStudent(null)}
+      />
+
       {/* Main Tab Content */}
-      <div className="h-full overflow-y-auto">
+      <div className="h-full overflow-y-auto overscroll-none">
         {activeTab === 'schedule' && (
           <ScheduleTab
             students={students}
@@ -352,4 +374,44 @@ export default function Dashboard() {
       />
     </div>
   );
+}
+
+// ─── Telegram BackButton controller ──────────────────────────────────────────
+// Manages show/hide and click handler with proper cleanup to avoid ghost-clicks.
+interface BackBtnProps {
+  hasProfile: boolean;
+  hasOverlay: boolean;
+  onCloseOverlay: () => void;
+  onCloseProfile: () => void;
+}
+
+function TelegramBackButtonController({ hasProfile, hasOverlay, onCloseOverlay, onCloseProfile }: BackBtnProps) {
+  useEffect(() => {
+    const tg = getTelegramWebApp();
+    if (!tg?.BackButton) return;
+
+    const shouldShow = hasProfile || hasOverlay;
+
+    if (!shouldShow) {
+      tg.BackButton.hide();
+      return;
+    }
+
+    const handler = () => {
+      if (hasOverlay) {
+        onCloseOverlay();
+      } else if (hasProfile) {
+        onCloseProfile();
+      }
+    };
+
+    tg.BackButton.show();
+    tg.BackButton.onClick(handler);
+
+    return () => {
+      tg.BackButton.offClick(handler);
+    };
+  }, [hasProfile, hasOverlay, onCloseOverlay, onCloseProfile]);
+
+  return null;
 }

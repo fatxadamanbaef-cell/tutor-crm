@@ -14,13 +14,13 @@ interface LessonCardProps {
   onEditLesson?: (lesson: Lesson) => void;
 }
 
-export const LessonCard: React.FC<LessonCardProps> = ({
+export const LessonCard: React.FC<LessonCardProps> = React.memo(function LessonCardInner({
   lesson,
   student,
   onToggleStatus,
   onSetStatus,
   onEditLesson,
-}) => {
+}) {
   const isCompleted = lesson.status === 'completed';
   const isPenalty = lesson.status === 'missed_penalty' || (lesson.status === 'missed' && !lesson.needs_makeup);
   const isExcused = lesson.status === 'missed_excused';
@@ -192,7 +192,8 @@ export const LessonCard: React.FC<LessonCardProps> = ({
           {/* Button 4: Reschedule / Edit */}
           <button
             type="button"
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               hapticImpact('light');
               if (onEditLesson) onEditLesson(lesson);
             }}
@@ -205,4 +206,4 @@ export const LessonCard: React.FC<LessonCardProps> = ({
       </div>
     </div>
   );
-};
+});

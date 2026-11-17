@@ -85,8 +85,16 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-end sm:items-center justify-center p-3">
-      <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl space-y-4 animate-in slide-in-from-bottom-6 max-h-[90vh] overflow-y-auto border border-slate-200">
+    <div
+      className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-3"
+      onClick={(e) => { e.stopPropagation(); onClose(); }}
+      style={{ touchAction: 'none' }}
+    >
+      <div
+        className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl space-y-4 animate-in slide-in-from-bottom-6 max-h-[90vh] overflow-y-auto border border-slate-200"
+        onClick={(e) => e.stopPropagation()}
+        style={{ touchAction: 'pan-y', overscrollBehaviorY: 'contain' } as React.CSSProperties}
+      >
         {/* Header */}
         <div className="flex justify-between items-center pb-2 border-b border-slate-100">
           <div className="flex items-center gap-2">
@@ -99,7 +107,8 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
             </div>
           </div>
           <button
-            onClick={onClose}
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onClose(); }}
             className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors"
           >
             <X className="w-4 h-4" />

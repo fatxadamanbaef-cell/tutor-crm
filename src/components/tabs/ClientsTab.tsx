@@ -27,8 +27,9 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ students, onOpenStudent,
             <h1 className="text-2xl font-black text-gray-900 tracking-tight">Ученики</h1>
             <p className="text-xs text-gray-500 font-semibold mt-0.5">Всего: {students.length} учеников</p>
           </div>
-          <button 
-            onClick={() => { hapticImpact('light'); onAddStudent(); }}
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); hapticImpact('light'); onAddStudent(); }}
             className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-md shadow-blue-500/20 active:scale-90 transition-transform"
           >
             <Plus className="w-5 h-5" strokeWidth={2.5} />

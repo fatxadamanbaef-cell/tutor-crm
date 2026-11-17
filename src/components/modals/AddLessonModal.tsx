@@ -108,18 +108,24 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-end justify-center animate-in fade-in duration-150">
-      <div className="w-full max-w-md bg-white rounded-t-3xl p-5 space-y-4 max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom duration-200 text-xs text-gray-900 shadow-2xl">
+    <div
+      className="fixed inset-0 z-50 bg-black/40 flex items-end justify-center animate-in fade-in duration-150"
+      onClick={(e) => { e.stopPropagation(); onClose(); }}
+      style={{ touchAction: 'none' }}
+    >
+      <div
+        className="w-full max-w-md bg-white rounded-t-3xl p-5 space-y-4 max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom duration-200 text-xs text-gray-900 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+        style={{ touchAction: 'pan-y', overscrollBehaviorY: 'contain' } as React.CSSProperties}
+      >
         <div className="flex items-center justify-between pb-2 border-b border-gray-100">
           <h3 className="text-base font-extrabold text-black flex items-center gap-2">
             <CalendarPlus className="w-4 h-4 text-blue-500" />
             <span>Новое занятие</span>
           </h3>
           <button
-            onClick={() => {
-              hapticImpact('light');
-              onClose();
-            }}
+            type="button"
+            onClick={(e) => { e.stopPropagation(); hapticImpact('light'); onClose(); }}
             className="p-1.5 rounded-full text-gray-400 hover:bg-gray-100 transition-colors"
           >
             <X className="w-4 h-4" />

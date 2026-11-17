@@ -33,3 +33,15 @@ body {
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom, 16px);
 }
+
+/* Perf: prevent iOS elastic bounce on fixed overlays */
+.overscroll-contain {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* GPU-accelerate fixed panels without heavy backdrop-blur */
+.panel-elevated {
+  transform: translateZ(0);
+  will-change: transform;
+}

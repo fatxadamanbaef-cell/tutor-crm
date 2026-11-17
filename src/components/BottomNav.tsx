@@ -20,7 +20,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onChangeTab }) 
   ] as const;
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-xl border-t border-gray-200 pb-safe z-40">
+    <div className="fixed bottom-0 left-0 right-0 bg-white/95 border-t border-gray-200 pb-safe z-40">
       <div className="flex items-center justify-around max-w-md mx-auto px-2 py-2">
         {tabs.map((tab) => {
           const Icon = tab.icon;
@@ -28,6 +28,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, onChangeTab }) 
           return (
             <button
               key={tab.id}
+              type="button"
               onClick={() => {
                 if (!isActive) hapticImpact('light');
                 onChangeTab(tab.id);
