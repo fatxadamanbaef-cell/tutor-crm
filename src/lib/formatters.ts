@@ -29,16 +29,15 @@ export function getTashkentDateString(input?: Date | string | null): string {
     return format(getTashkentNow(), 'yyyy-MM-dd');
   }
   if (typeof input === 'string') {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
-    const d = new Date(input);
+    const trimmed = input.trim();
+    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed) && !trimmed.endsWith('Z')) {
+      return trimmed.substring(0, 10);
+    }
+    const d = new Date(trimmed);
     if (isNaN(d.getTime())) return format(getTashkentNow(), 'yyyy-MM-dd');
-    const utc = d.getTime() + d.getTimezoneOffset() * 60000;
-    const tashkentDate = new Date(utc + TASHKENT_OFFSET_MS);
-    return format(tashkentDate, 'yyyy-MM-dd');
+    return new Date(d.getTime() + TASHKENT_OFFSET_MS).toISOString().substring(0, 10);
   }
-  const utc = input.getTime() + input.getTimezoneOffset() * 60000;
-  const tashkentDate = new Date(utc + TASHKENT_OFFSET_MS);
-  return format(tashkentDate, 'yyyy-MM-dd');
+  return format(input, 'yyyy-MM-dd');
 }
 
 /**
@@ -207,8 +206,12 @@ export function getStudentBillingPeriod(
     }
   }
 
-  const startDateObj = new Date(startYear, startMonth, billingDay);
-  const nextMonthStart = addMonths(startDateObj, 1);
+  const clampedStartDay = Math.min(billingDay, new Date(startYear, startMonth + 1, 0).getDate());
+  const startDateObj = new Date(startYear, startMonth, clampedStartDay);
+  const nextMonth = startMonth + 1 > 11 ? 0 : startMonth + 1;
+  const nextYear = startMonth + 1 > 11 ? startYear + 1 : startYear;
+  const clampedNextDay = Math.min(billingDay, new Date(nextYear, nextMonth + 1, 0).getDate());
+  const nextMonthStart = new Date(nextYear, nextMonth, clampedNextDay);
   const endDateObj = subDays(nextMonthStart, 1);
 
   return {
@@ -228,8 +231,9 @@ export function getStudentBillingPeriod(
  */
 export function dayOfWeekOf(dateStr: string): number {
   const cleanDate = dateStr.includes('T') ? dateStr.substring(0, 10) : dateStr;
-  const d = new Date(`${cleanDate}T12:00:00+05:00`).getDay();
-  return d === 0 ? 7 : d;
+  const [y, m, d] = cleanDate.split('-').map(Number);
+  const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return dow === 0 ? 7 : dow;
 }
 
 /**
@@ -237,9 +241,9 @@ export function dayOfWeekOf(dateStr: string): number {
  */
 export function addDaysStr(dateStr: string, n: number): string {
   const cleanDate = dateStr.includes('T') ? dateStr.substring(0, 10) : dateStr;
-  const d = new Date(`${cleanDate}T12:00:00+05:00`);
-  d.setDate(d.getDate() + n);
-  return getTashkentDateString(d);
+  const [y, m, d] = cleanDate.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + n));
+  return dt.toISOString().substring(0, 10);
 }
 
 // 1-indexed weekday names matching dayOfWeekOf (1=Mon .. 7=Sun)

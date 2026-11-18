@@ -17,7 +17,7 @@ import {
   topUpStudentBalance,
 } from './storage';
 import { getTashkentTodayStr, getTashkentNow, dayOfWeekOf, addDaysStr, WD_SHORT, WD_FULL } from './formatters';
-import { resolveStudent } from './nameMatch';
+import { resolveStudent, findExistingByName } from './nameMatch';
 import { getHistory, appendHistory } from './botState';
 import { generateStudentReport } from './reports';
 import { supabase } from './supabase';
@@ -184,13 +184,26 @@ const TOOLS = [
   // 9. Удаление урока
   fn(
     'deleteLesson',
-    'Удаляет запланированный урок.',
+    'Удаляет урок ученика на указанную дату.',
     {
       studentName: studentNameProp,
       date: { type: 'string', description: 'Дата урока YYYY-MM-DD' },
-      time: { type: 'string', description: "Время начала 'HH:MM'" },
+      time: { type: 'string', description: "Время начала 'HH:MM' (необязательно)" },
     },
     ['studentName', 'date']
+  ),
+
+  // 10. Добавление разового/дополнительного урока
+  fn(
+    'addLesson',
+    'Добавляет разовый или дополнительный урок ученика на указанную дату и время без переноса или изменения существующих уроков.',
+    {
+      studentName: studentNameProp,
+      date: { type: 'string', description: 'Дата урока YYYY-MM-DD' },
+      startTime: { type: 'string', description: "Время 'HH:MM' или 'HH:MM - HH:MM' (например '14:00' или '14:00 - 15:30')" },
+      notes: { type: 'string', description: 'Заметка или тема урока (необязательно)' },
+    },
+    ['studentName', 'date', 'startTime']
   ),
 ];
 
@@ -318,6 +331,8 @@ function createToolbox(): Toolbox {
         await updateLessonTime(lesson.id, a.toStartTime, toDate);
         await updateLessonDetails(lesson.id, {
           status: 'planned',
+          miss_reason: undefined,
+          needs_makeup: false,
           notes: a.reason ? `Перенос: ${a.reason}` : (lesson.notes || 'Запланированный урок'),
         });
       } else {
@@ -338,7 +353,7 @@ function createToolbox(): Toolbox {
     // 3. setupOrUpdateStudent
     async setupOrUpdateStudent(a) {
       const { students } = await load();
-      const existing = students.find((s) => s.name.toLowerCase() === a.name.trim().toLowerCase());
+      const existing = findExistingByName(a.name.trim(), students);
 
       const slots: RecurringSlot[] = (a.recurringDaysAndTimes || []).map((s: any) => {
         const timeStr = String(s.timeStr || '16:00');
@@ -352,7 +367,7 @@ function createToolbox(): Toolbox {
 
       const saved = await saveStudent({
         id: existing?.id,
-        name: a.name.trim(),
+        name: existing?.name || a.name.trim(),
         monthly_target_lessons: a.monthlyTargetLessons || existing?.monthly_target_lessons || 12,
         billing_day: a.billingDay || existing?.billing_day || '10',
         billing_type: a.billingType || existing?.billing_type || 'date_to_date',
@@ -362,7 +377,7 @@ function createToolbox(): Toolbox {
       });
 
       if (slots.length > 0) {
-        await planRecurringLessonsForStudent(saved.id, slots, 4, true);
+        await planRecurringLessonsForStudent(saved.id, slots, 9, true);
       }
 
       cache = null;
@@ -427,10 +442,11 @@ function createToolbox(): Toolbox {
 
     // 7. getWeeklyOrDailySummary
     async getWeeklyOrDailySummary(a) {
-      const summary = await getAttendanceSummary(a.period === 'week' ? 'week' : 'month');
+      const period = a.period === 'today' ? 'today' : a.period === 'week' ? 'week' : 'month';
+      const summary = await getAttendanceSummary(period);
 
       return {
-        period: a.period,
+        period,
         completedCount: summary.completedCount,
         missedCount: summary.missedCount,
         missedList: summary.missedDetails,
@@ -451,7 +467,15 @@ function createToolbox(): Toolbox {
         student = await pickStudent(a.studentName);
         list = list.filter((l) => l.student_id === student!.id);
       }
-      if (a.status && a.status !== 'all') list = list.filter((l) => l.status === a.status);
+      if (a.status && a.status !== 'all') {
+        if (a.status === 'missed') {
+          list = list.filter((l) => l.status === 'missed' || l.status === 'missed_penalty' || l.status === 'missed_excused');
+        } else if (a.status === 'planned') {
+          list = list.filter((l) => l.status === 'planned' || (l.status as string) === 'scheduled');
+        } else {
+          list = list.filter((l) => l.status === a.status);
+        }
+      }
 
       return {
         period: `${from} … ${to}`,
@@ -469,23 +493,54 @@ function createToolbox(): Toolbox {
       };
     },
 
-    // 7. deleteLesson
+    // 9. deleteLesson
     async deleteLesson(a) {
       const student = await pickStudent(a.studentName);
       const date = assertDate(a.date);
       const { lessons } = await load();
 
-      const lesson = lessons.find(
-        (l) => l.student_id === student.id && l.date.substring(0, 10) === date && l.status === 'planned'
+      let sameDay = lessons.filter(
+        (l) => l.student_id === student.id && l.date.substring(0, 10) === date
       );
+      if (sameDay.length === 0) {
+        const rangeLessons = await getLessons(date, date);
+        sameDay = rangeLessons.filter((l) => l.student_id === student.id);
+      }
+
+      let lesson = sameDay[0];
+      if (a.time && sameDay.length > 0) {
+        const cleanTime = String(a.time).trim().substring(0, 5);
+        lesson = sameDay.find((l) => timeOf(l).startsWith(cleanTime)) || lesson;
+      }
       if (!lesson) {
-        throw new Error(`Запланированный урок ученика ${student.name} на ${date} не найден.`);
+        throw new Error(`Урок ученика ${student.name} на ${date} не найден.`);
       }
 
       await deleteLesson(lesson.id);
       cache = null;
-      writes.push(`${student.name}: удален урок на ${date}`);
-      return { success: true, message: `Урок на ${date} удален.` };
+      writes.push(`${student.name}: удален урок на ${date} (${lesson.time_str || ''})`);
+      return { success: true, message: `Урок на ${date} (${lesson.time_str || ''}) удален.` };
+    },
+
+    // 10. addLesson
+    async addLesson(a) {
+      const student = await pickStudent(a.studentName);
+      const date = assertDate(a.date, 'date');
+      const parsed = parseTimeRange(a.startTime || '16:00', 90);
+      const timeStr = `${parsed.start} - ${parsed.end}`;
+      await saveLesson({
+        student_id: student.id,
+        date,
+        time_str: timeStr,
+        status: 'planned',
+        notes: a.notes || 'Дополнительное занятие',
+      });
+      cache = null;
+      writes.push(`${student.name}: добавлен урок на ${date} в ${timeStr}`);
+      return {
+        success: true,
+        message: `Добавлен урок для ${student.name} на ${date} (${timeStr}) ✅.`,
+      };
     },
   };
 
@@ -542,8 +597,9 @@ ${studentsBrief}
    - Две модели: date_to_date (оплата по числу месяца billing_day, уроки считаются по календарному расписанию за период с учетом остатка) и package (оплата фиксированными пакетами уроков).
    - Если спрашивают стоимость обучения, расчет или счет за период — вызывай calculateStudentBilling.
    - Если сообщают об оплате уроков (например: «Аслан оплатил 8 уроков», «пополни баланс Фазилат на 12») — вызывай addStudentPayment.
-3. Перенос уроков:
+3. Перенос и добавление уроков:
    - При переносе урока — ВСЕГДА вызывай rescheduleLesson. Можно переносить любой урок на новую дату/время. Если дата не указана, функция сама найдет подходящий урок.
+   - Для добавления разового или дополнительного урока (не меняя старые уроки) — вызывай addLesson.
 4. Отвечай кратко, профессионально и по делу. Форматируй важные цифры и балансы жирным шрифтом.`;
 
     const messages: any[] = [{ role: 'system', content: systemPrompt }];

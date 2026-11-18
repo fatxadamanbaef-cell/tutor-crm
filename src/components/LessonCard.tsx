@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Lesson, Student, LessonStatus } from '@/types';
-import { Clock, Check, X, CalendarClock, Flame, Ban } from 'lucide-react';
+import { Clock, Check, CalendarClock, Flame, Ban, ChevronRight } from 'lucide-react';
 import { hapticImpact, hapticNotification, hapticSelection } from '@/lib/telegram';
 
 interface LessonCardProps {
@@ -12,6 +12,7 @@ interface LessonCardProps {
   onSetStatus?: (id: string, status: LessonStatus, missReason?: string) => void;
   onDeleteLesson?: (id: string) => void;
   onEditLesson?: (lesson: Lesson) => void;
+  onOpenStudent?: (student: Student) => void;
 }
 
 export const LessonCard: React.FC<LessonCardProps> = React.memo(function LessonCardInner({
@@ -20,6 +21,7 @@ export const LessonCard: React.FC<LessonCardProps> = React.memo(function LessonC
   onToggleStatus,
   onSetStatus,
   onEditLesson,
+  onOpenStudent,
 }) {
   const isCompleted = lesson.status === 'completed';
   const isPenalty = lesson.status === 'missed_penalty' || (lesson.status === 'missed' && !lesson.needs_makeup);
@@ -95,9 +97,25 @@ export const LessonCard: React.FC<LessonCardProps> = React.memo(function LessonC
             </span>
           </div>
 
-          <div className="font-black text-sm text-gray-900 truncate mt-1">
-            {lesson.student_name || student?.name || 'Ученик'}
-          </div>
+          {student && onOpenStudent ? (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                hapticImpact('light');
+                onOpenStudent(student);
+              }}
+              className="mt-1 inline-flex items-center gap-1 font-black text-sm text-gray-900 hover:text-blue-600 active:opacity-70 transition-colors max-w-full text-left"
+              title="Открыть профиль ученика"
+            >
+              <span className="truncate">{lesson.student_name || student.name}</span>
+              <ChevronRight className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+            </button>
+          ) : (
+            <div className="font-black text-sm text-gray-900 truncate mt-1">
+              {lesson.student_name || student?.name || 'Ученик'}
+            </div>
+          )}
 
           {lesson.notes && (
             <div className="text-[11px] text-gray-500 truncate mt-0.5">

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { Student, Lesson, Makeup, LessonStatus } from '@/types';
 import {
   getStudents,
@@ -16,8 +16,11 @@ import {
   setLessonStatusDirect,
   scheduleSundayMakeup,
   archiveMakeup,
+  isDeductedStatus,
 } from '@/lib/storage';
+import { getTashkentNow } from '@/lib/formatters';
 import { initTelegramApp, getTelegramWebApp } from '@/lib/telegram';
+import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { Loader2 } from 'lucide-react';
 
 import { BottomNav, TabType } from '@/components/BottomNav';
@@ -37,21 +40,12 @@ export default function Dashboard() {
   const [makeups, setMakeups] = useState<Makeup[]>([]);
 
   const [loading, setLoading] = useState(true);
-  const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
   const [isAddLessonOpen, setIsAddLessonOpen] = useState(false);
   const [selectedDateForNewLesson, setSelectedDateForNewLesson] = useState<Date | undefined>(undefined);
+  const [preselectedStudentIdForLesson, setPreselectedStudentIdForLesson] = useState<string | undefined>(undefined);
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
-
-  useEffect(() => {
-    initTelegramApp();
-    // Disable vertical swipe-to-close inside the app
-    const tg = getTelegramWebApp();
-    if (tg?.disableVerticalSwipes) {
-      try { tg.disableVerticalSwipes(); } catch {}
-    }
-    refreshData();
-  }, []);
 
   const refreshData = useCallback(async () => {
     try {
@@ -83,19 +77,68 @@ export default function Dashboard() {
     }
   }, []);
 
+  useEffect(() => {
+    initTelegramApp();
+    // Disable vertical swipe-to-close inside the app
+    const tg = getTelegramWebApp();
+    if (tg?.disableVerticalSwipes) {
+      try { tg.disableVerticalSwipes(); } catch {}
+    }
+    refreshData();
+  }, [refreshData]);
+
+  // Live recalculated monthly attendance stats from current lessons
+  const liveStudents = useMemo(() => {
+    const now = getTashkentNow();
+    const mStart = format(startOfMonth(now), 'yyyy-MM-dd');
+    const mEnd = format(endOfMonth(now), 'yyyy-MM-dd');
+    const conductedMap: Record<string, number> = {};
+    const missedMap: Record<string, number> = {};
+
+    for (const l of lessons) {
+      const d = l.date.substring(0, 10);
+      if (d < mStart || d > mEnd) continue;
+      if (l.status === 'completed') {
+        conductedMap[l.student_id] = (conductedMap[l.student_id] || 0) + 1;
+      } else if (
+        l.status === 'missed' ||
+        l.status === 'missed_excused' ||
+        l.status === 'missed_penalty'
+      ) {
+        missedMap[l.student_id] = (missedMap[l.student_id] || 0) + 1;
+      }
+    }
+
+    return students.map((s) => ({
+      ...s,
+      conducted_this_month: conductedMap[s.id] ?? 0,
+      missed_this_month: missedMap[s.id] ?? 0,
+    }));
+  }, [students, lessons]);
+
+  const selectedStudent = useMemo(
+    () => (selectedStudentId ? liveStudents.find((s) => s.id === selectedStudentId) || null : null),
+    [selectedStudentId, liveStudents]
+  );
+
+  const handleOpenStudent = useCallback((student: Student) => {
+    setSelectedStudentId(student.id);
+  }, []);
+
   const handleSetLessonStatus = useCallback(async (
     lessonId: string,
     status: LessonStatus,
     missReason?: string
   ) => {
     try {
-      const isDeducted = (s: string) => s === 'completed' || s === 'missed_penalty' || s === 'missed';
       const prevLesson = lessons.find((l) => l.id === lessonId);
-      const prevDeducted = prevLesson ? isDeducted(prevLesson.status) : false;
-      const targetDeducted = isDeducted(status);
+      const prevDeducted = prevLesson ? isDeductedStatus(prevLesson.status) : false;
+      const targetDeducted = isDeductedStatus(status);
       let delta = 0;
       if (!prevDeducted && targetDeducted) delta = -1;
       else if (prevDeducted && !targetDeducted) delta = 1;
+
+      const isClearingReason = status === 'planned' || status === 'scheduled' || status === 'completed';
 
       // Optimistic local state update for lessons
       setLessons((prev) =>
@@ -104,7 +147,11 @@ export default function Dashboard() {
             ? {
                 ...l,
                 status,
-                miss_reason: missReason !== undefined ? missReason : l.miss_reason,
+                miss_reason: isClearingReason
+                  ? undefined
+                  : missReason !== undefined
+                  ? missReason
+                  : l.miss_reason,
                 needs_makeup: false,
               }
             : l
@@ -122,7 +169,14 @@ export default function Dashboard() {
         );
       }
 
-      await setLessonStatusDirect(lessonId, status, missReason);
+      const res = await setLessonStatusDirect(lessonId, status, missReason);
+      if (typeof res.newBalance === 'number') {
+        setStudents((prev) =>
+          prev.map((s) =>
+            s.id === res.studentId ? { ...s, lessons_balance: res.newBalance } : s
+          )
+        );
+      }
     } catch (e) {
       console.error('Status change failed:', e);
       refreshData();
@@ -178,7 +232,7 @@ export default function Dashboard() {
     try {
       setStudents((prev) => prev.filter((s) => s.id !== studentId));
       setLessons((prev) => prev.filter((l) => l.student_id !== studentId));
-      setSelectedStudent(null);
+      setSelectedStudentId(null);
       await deleteStudent(studentId);
     } catch (e) {
       console.error('Delete error:', e);
@@ -269,23 +323,25 @@ export default function Dashboard() {
           if (isAddStudentOpen) { setIsAddStudentOpen(false); return; }
           if (isAddLessonOpen) { setIsAddLessonOpen(false); return; }
         }}
-        onCloseProfile={() => setSelectedStudent(null)}
+        onCloseProfile={() => setSelectedStudentId(null)}
       />
 
       {/* Main Tab Content */}
       <div className="h-full overflow-y-auto overscroll-none">
         {activeTab === 'schedule' && (
           <ScheduleTab
-            students={students}
+            students={liveStudents}
             lessons={lessons}
             makeups={makeups}
-            onAddLesson={() => {
-              setSelectedDateForNewLesson(new Date());
+            onAddLesson={(date) => {
+              setSelectedDateForNewLesson(date || getTashkentNow());
+              setPreselectedStudentIdForLesson(undefined);
               setIsAddLessonOpen(true);
             }}
             onOpenLesson={(lesson) => {
               setSelectedLesson(lesson);
             }}
+            onOpenStudent={handleOpenStudent}
             onUpdateLessonTime={handleUpdateLessonTime}
             onSetLessonStatus={handleSetLessonStatus}
             onScheduleSundayMakeup={handleScheduleSundayMakeup}
@@ -295,13 +351,19 @@ export default function Dashboard() {
         )}
         {activeTab === 'clients' && (
           <ClientsTab
-            students={students}
-            onOpenStudent={setSelectedStudent}
+            students={liveStudents}
+            onOpenStudent={handleOpenStudent}
             onAddStudent={() => setIsAddStudentOpen(true)}
           />
         )}
-        {activeTab === 'stats' && <StatsTab lessons={lessons} students={students} />}
-        {activeTab === 'settings' && <SettingsTab />}
+        {activeTab === 'stats' && (
+          <StatsTab
+            lessons={lessons}
+            students={liveStudents}
+            onOpenStudent={handleOpenStudent}
+          />
+        )}
+        {activeTab === 'settings' && <SettingsTab onRefresh={refreshData} />}
       </div>
 
       {/* Navigation */}
@@ -310,15 +372,22 @@ export default function Dashboard() {
       {/* Full-Screen Profile Screen */}
       {selectedStudent && (
         <ClientProfileScreen
+          key={selectedStudent.id}
           student={selectedStudent}
           lessons={lessons}
           onBack={() => {
-            setSelectedStudent(null);
+            setSelectedStudentId(null);
           }}
           onDeleteStudent={handleDeleteStudent}
           onSaveStudentInfo={handleSaveStudentInfo}
           onUpdateLessonMissReason={handleUpdateLessonMissReason}
           onOpenLesson={(lesson) => setSelectedLesson(lesson)}
+          onRefresh={refreshData}
+          onAddLessonForStudent={(studentId) => {
+            setSelectedDateForNewLesson(getTashkentNow());
+            setPreselectedStudentIdForLesson(studentId);
+            setIsAddLessonOpen(true);
+          }}
         />
       )}
 
@@ -332,12 +401,22 @@ export default function Dashboard() {
       <AddLessonModal
         isOpen={isAddLessonOpen}
         onClose={() => setIsAddLessonOpen(false)}
-        students={students}
+        students={liveStudents}
         initialDate={selectedDateForNewLesson}
+        initialStudentId={preselectedStudentIdForLesson}
         onSave={async (data) => {
           try {
             const newLesson = await saveLesson(data);
             setLessons((prev) => [...prev, newLesson]);
+            if (isDeductedStatus(data.status)) {
+              setStudents((prev) =>
+                prev.map((s) =>
+                  s.id === data.student_id
+                    ? { ...s, lessons_balance: (s.lessons_balance ?? 0) - 1 }
+                    : s
+                )
+              );
+            }
             setIsAddLessonOpen(false);
           } catch (e) {
             console.error('Failed to save lesson:', e);
@@ -350,9 +429,26 @@ export default function Dashboard() {
         isOpen={Boolean(selectedLesson)}
         onClose={() => setSelectedLesson(null)}
         lesson={selectedLesson}
-        student={selectedLesson ? students.find((s) => s.id === selectedLesson.student_id) || null : null}
+        student={selectedLesson ? liveStudents.find((s) => s.id === selectedLesson.student_id) || null : null}
         onSave={async (lessonId, updates) => {
           try {
+            const prevLesson = lessons.find((l) => l.id === lessonId);
+            if (prevLesson && updates.status) {
+              const prevDeducted = isDeductedStatus(prevLesson.status);
+              const nextDeducted = isDeductedStatus(updates.status);
+              let delta = 0;
+              if (!prevDeducted && nextDeducted) delta = -1;
+              else if (prevDeducted && !nextDeducted) delta = 1;
+              if (delta !== 0) {
+                setStudents((prev) =>
+                  prev.map((s) =>
+                    s.id === prevLesson.student_id
+                      ? { ...s, lessons_balance: (s.lessons_balance ?? 0) + delta }
+                      : s
+                  )
+                );
+              }
+            }
             setLessons((prev) =>
               prev.map((l) => (l.id === lessonId ? { ...l, ...updates } : l))
             );
@@ -365,6 +461,16 @@ export default function Dashboard() {
         }}
         onDelete={async (lessonId) => {
           try {
+            const prevLesson = lessons.find((l) => l.id === lessonId);
+            if (prevLesson && isDeductedStatus(prevLesson.status)) {
+              setStudents((prev) =>
+                prev.map((s) =>
+                  s.id === prevLesson.student_id
+                    ? { ...s, lessons_balance: (s.lessons_balance ?? 0) + 1 }
+                    : s
+                )
+              );
+            }
             setLessons((prev) => prev.filter((l) => l.id !== lessonId));
             await deleteLesson(lessonId);
             setSelectedLesson(null);

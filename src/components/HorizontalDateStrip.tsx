@@ -1,12 +1,15 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Lesson } from '@/types';
 import {
   getTashkentDateStrip,
   formatCalendarChip,
   isSameTashkentDate,
   getTashkentNow,
+  getTashkentTodayStr,
+  getTashkentDateString,
+  addDaysStr,
   formatTashkentHeaderDate,
 } from '@/lib/formatters';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, LayoutGrid, List } from 'lucide-react';
@@ -20,6 +23,8 @@ import {
   eachDayOfInterval,
   addMonths,
   subMonths,
+  addDays,
+  subDays,
   format,
 } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -37,14 +42,39 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
 }) => {
   const [isMonthView, setIsMonthView] = useState(false);
   const [currentMonthDate, setCurrentMonthDate] = useState(selectedDate);
+  const selectedChipRef = useRef<HTMLButtonElement | null>(null);
 
-  const daysStrip = useMemo(() => getTashkentDateStrip(5, 14), []); // stable: 5 past, today, 14 future
-  const isSelectedToday = isSameDay(selectedDate, getTashkentNow());
+  const todayStr = getTashkentTodayStr();
+  const selectedStr = getTashkentDateString(selectedDate);
+  const defaultStartStr = addDaysStr(todayStr, -5);
+  const defaultEndStr = addDaysStr(todayStr, 14);
+  const isInsideDefault = selectedStr >= defaultStartStr && selectedStr <= defaultEndStr;
+
+  const daysStrip = useMemo(() => {
+    if (isInsideDefault) {
+      return getTashkentDateStrip(5, 14);
+    }
+    const [y, m, d] = selectedStr.split('-').map(Number);
+    const anchor = new Date(y, m - 1, d);
+    const start = subDays(anchor, 5);
+    return Array.from({ length: 20 }).map((_, i) => addDays(start, i));
+  }, [isInsideDefault, selectedStr]);
+
+  const isSelectedToday = selectedStr === todayStr;
+
+  useEffect(() => {
+    if (!isMonthView && selectedChipRef.current) {
+      selectedChipRef.current.scrollIntoView({
+        behavior: 'smooth',
+        block: 'nearest',
+        inline: 'center',
+      });
+    }
+  }, [selectedStr, isMonthView]);
 
   const handleDayClick = (date: Date) => {
     hapticSelection();
     onSelectDate(date);
-    // Always close month view on day selection — single source of truth
     setIsMonthView(false);
   };
 
@@ -68,9 +98,13 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
   const getDayStatusSummary = (day: Date) => {
     const dayLessons = lessons.filter((l) => isSameTashkentDate(l.date, day));
     const hasCompleted = dayLessons.some((l) => l.status === 'completed');
-    const hasBurned = dayLessons.some((l) => l.status === 'missed_penalty');
+    const hasBurned = dayLessons.some(
+      (l) => l.status === 'missed_penalty' || (l.status === 'missed' && !l.needs_makeup)
+    );
     const hasMakeup = dayLessons.some((l) => l.status === 'missed_excused');
-    const hasPlanned = dayLessons.some((l) => l.status === 'planned');
+    const hasPlanned = dayLessons.some(
+      (l) => l.status === 'planned' || (l.status as string) === 'scheduled'
+    );
 
     return {
       total: dayLessons.length,
@@ -138,12 +172,14 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-0.5 no-scrollbar scroll-smooth">
           {daysStrip.map((day) => {
             const chip = formatCalendarChip(day);
-            const isSelected = isSameDay(day, selectedDate);
+            const dayStr = getTashkentDateString(day);
+            const isSelected = dayStr === selectedStr;
             const statusSummary = getDayStatusSummary(day);
 
             return (
               <button
-                key={day.toISOString()}
+                key={dayStr}
+                ref={isSelected ? selectedChipRef : null}
                 onClick={() => handleDayClick(day)}
                 className={`flex flex-col items-center justify-between min-w-[46px] h-[60px] py-1.5 rounded-2xl border transition-all active:scale-95 shrink-0 relative ${
                   isSelected
@@ -274,6 +310,9 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
                   {/* Micro indicator */}
                   {statusSummary.total > 0 && (
                     <div className="flex gap-0.5 mt-0.5">
+                      {statusSummary.hasBurned && (
+                        <span className={`w-1 h-1 rounded-full ${isSelected ? 'bg-rose-200' : 'bg-rose-500'}`} />
+                      )}
                       {statusSummary.hasCompleted && (
                         <span className={`w-1 h-1 rounded-full ${isSelected ? 'bg-emerald-200' : 'bg-emerald-500'}`} />
                       )}

@@ -177,8 +177,8 @@ export async function saveStudent(student: {
   }
 
   // If recurring_schedule provided, safely generate upcoming lessons (cleaning future untouched)
-  if (student.recurring_schedule !== undefined && student.recurring_schedule.length > 0) {
-    await planRecurringLessonsForStudent(studentId, student.recurring_schedule, 4, true);
+  if (student.recurring_schedule !== undefined) {
+    await planRecurringLessonsForStudent(studentId, student.recurring_schedule, 9, true);
   }
 
   return {
@@ -194,6 +194,7 @@ export async function saveStudent(student: {
     telegram: data.telegram || '',
     schedule_notes: data.notes || '',
     color: data.color || '#3B82F6',
+    is_active: data.is_active !== false,
     created_at: data.created_at || new Date().toISOString(),
     makeup_debt: 0,
     conducted_this_month: 0,
@@ -570,6 +571,10 @@ export async function initializePackageFromPastDate(
   };
 }
 
+export function isDeductedStatus(status?: string | null): boolean {
+  return status === 'completed' || status === 'missed_penalty' || status === 'missed';
+}
+
 export async function saveLesson(lessonData: {
   student_id: string;
   date: string;
@@ -616,6 +621,12 @@ export async function saveLesson(lessonData: {
   if (error) {
     console.error('Supabase saveLesson error:', error);
     throw error;
+  }
+
+  if (isDeductedStatus(dbStatus)) {
+    await topUpStudentBalance(lessonData.student_id, -1).catch((err) => {
+      console.warn('Could not deduct balance in saveLesson:', err);
+    });
   }
 
   return mapLessonRow(data);
@@ -681,6 +692,19 @@ export async function updateLessonDetails(lessonId: string, updates: Partial<Les
   if (!supabase) throw new Error('Supabase is not initialized');
   const payload: any = {};
 
+  let prevStatus: string | undefined;
+  let studentId: string | undefined;
+  if (updates.status) {
+    const { data: existingLesson, error: fetchErr } = await supabase
+      .from('tutor_lessons')
+      .select('status, student_id')
+      .eq('id', lessonId)
+      .single();
+    if (fetchErr || !existingLesson) throw new Error('Lesson not found');
+    prevStatus = existingLesson.status;
+    studentId = existingLesson.student_id;
+  }
+
   if (updates.date) payload.lesson_date = getTashkentDateString(updates.date);
   if (updates.time_str) {
     const time = parseTimeRange(updates.time_str);
@@ -688,7 +712,7 @@ export async function updateLessonDetails(lessonId: string, updates: Partial<Les
     payload.end_time = time.end;
   }
   if (updates.notes !== undefined) payload.notes = updates.notes;
-  if (updates.miss_reason !== undefined) payload.miss_reason = updates.miss_reason;
+  if ('miss_reason' in updates) payload.miss_reason = updates.miss_reason ?? null;
   if (updates.needs_makeup !== undefined) payload.needs_makeup = updates.needs_makeup;
   if (updates.is_makeup !== undefined) payload.is_makeup = updates.is_makeup;
 
@@ -708,13 +732,38 @@ export async function updateLessonDetails(lessonId: string, updates: Partial<Les
 
   const { error } = await supabase.from('tutor_lessons').update(payload).eq('id', lessonId);
   if (error) throw error;
+
+  if (updates.status && studentId && prevStatus !== undefined) {
+    const prevDeducted = isDeductedStatus(prevStatus);
+    const nextDeducted = isDeductedStatus(payload.status);
+    let delta = 0;
+    if (!prevDeducted && nextDeducted) delta = -1;
+    else if (prevDeducted && !nextDeducted) delta = 1;
+    if (delta !== 0) {
+      await topUpStudentBalance(studentId, delta).catch((err) => {
+        console.warn('Could not update lessons_balance in updateLessonDetails:', err);
+      });
+    }
+  }
 }
 
 export async function deleteLesson(lessonId: string): Promise<void> {
   if (!supabase) throw new Error('Supabase is not initialized');
+  const { data: existingLesson } = await supabase
+    .from('tutor_lessons')
+    .select('status, student_id')
+    .eq('id', lessonId)
+    .single();
+
   await supabase.from('tutor_makeups').delete().eq('missed_lesson_id', lessonId);
   const { error } = await supabase.from('tutor_lessons').delete().eq('id', lessonId);
   if (error) throw error;
+
+  if (existingLesson && isDeductedStatus(existingLesson.status)) {
+    await topUpStudentBalance(existingLesson.student_id, 1).catch((err) => {
+      console.warn('Could not refund balance in deleteLesson:', err);
+    });
+  }
 }
 
 // -------------------------------------------------------------
@@ -912,7 +961,7 @@ export async function planRecurringLessonsForStudent(
   weeksAhead: number = 9,
   cleanFutureUntouched: boolean = false
 ): Promise<{ createdCount: number }> {
-  if (!supabase || !schedule || schedule.length === 0) return { createdCount: 0 };
+  if (!supabase) return { createdCount: 0 };
 
   const todayStr = getTashkentTodayStr();
   const endDateStr = addDaysStr(todayStr, weeksAhead * 7);
@@ -921,7 +970,7 @@ export async function planRecurringLessonsForStudent(
 
   // Build normalized slots up front — used for both cleanup and generation.
   // dayOfWeek follows dayOfWeekOf() convention: 1=Mon … 7=Sun
-  const normalizedSlots = schedule.map((s) => {
+  const normalizedSlots = (schedule || []).map((s) => {
     const time = parseTimeRange(s.startTime + (s.endTime ? ` - ${s.endTime}` : ''), 60);
     return {
       dayOfWeek: Number(s.dayOfWeek),
@@ -931,10 +980,10 @@ export async function planRecurringLessonsForStudent(
   });
 
   if (cleanFutureUntouched) {
-    // Fetch future planned/scheduled lessons including date and start_time for template matching
+    // Fetch future planned/scheduled lessons including date, start_time and end_time for template matching
     const { data: futureLessons } = await supabase
       .from('tutor_lessons')
-      .select('id, lesson_date, start_time, notes, status')
+      .select('id, lesson_date, start_time, end_time, notes, status')
       .eq('student_id', studentId)
       .gte('lesson_date', todayStr)
       .in('status', ['planned', 'scheduled']);
@@ -947,16 +996,20 @@ export async function planRecurringLessonsForStudent(
           const isAutoGenerated = !n || n === 'периодическое расписание' || n === 'запланированный урок';
           if (!isAutoGenerated) return false;
 
-          // CRITICAL FIX: delete only if the lesson's date+time does NOT match the new template.
-          // This removes "garbage" lessons on wrong days while keeping correct-day lessons in place.
           const lessonDate = typeof l.lesson_date === 'string'
             ? l.lesson_date.substring(0, 10)
             : getTashkentDateString(l.lesson_date);
-          const dow = dayOfWeekOf(lessonDate);
           const lessonStart = String(l.start_time || '').substring(0, 5);
+          const lessonEnd = String(l.end_time || '').substring(0, 5);
 
+          // Keep today's lessons that already started or passed
+          if (lessonDate === todayStr && toMinutes(lessonStart) <= currentMinutes) {
+            return false;
+          }
+
+          const dow = dayOfWeekOf(lessonDate);
           const matchesTemplate = normalizedSlots.some(
-            (s) => s.dayOfWeek === dow && s.start === lessonStart
+            (s) => s.dayOfWeek === dow && s.start === lessonStart && s.end === lessonEnd
           );
           // Keep if it matches the template; delete if it's stale garbage
           return !matchesTemplate;
@@ -969,6 +1022,8 @@ export async function planRecurringLessonsForStudent(
       }
     }
   }
+
+  if (!schedule || schedule.length === 0) return { createdCount: 0 };
 
   // Fetch ALL remaining existing lessons in this period to avoid duplicates
   const { data: existing, error } = await supabase
@@ -1095,7 +1150,7 @@ export async function ensureRecurringLessonsForAllActiveStudents(weeksAhead: num
 // -------------------------------------------------------------
 // ATTENDANCE SUMMARY & ARCHIVE
 // -------------------------------------------------------------
-export async function getAttendanceSummary(period: 'week' | 'month' = 'month'): Promise<AttendanceSummary> {
+export async function getAttendanceSummary(period: 'today' | 'week' | 'month' = 'month'): Promise<AttendanceSummary> {
   if (!supabase) {
     return {
       period,
@@ -1109,8 +1164,15 @@ export async function getAttendanceSummary(period: 'week' | 'month' = 'month'): 
   }
 
   const now = getTashkentNow();
-  const startStr = format(period === 'week' ? startOfWeek(now, { weekStartsOn: 1 }) : startOfMonth(now), 'yyyy-MM-dd');
-  const endStr = format(period === 'week' ? endOfWeek(now, { weekStartsOn: 1 }) : endOfMonth(now), 'yyyy-MM-dd');
+  const todayStr = getTashkentTodayStr();
+  const startStr =
+    period === 'today'
+      ? todayStr
+      : format(period === 'week' ? startOfWeek(now, { weekStartsOn: 1 }) : startOfMonth(now), 'yyyy-MM-dd');
+  const endStr =
+    period === 'today'
+      ? todayStr
+      : format(period === 'week' ? endOfWeek(now, { weekStartsOn: 1 }) : endOfMonth(now), 'yyyy-MM-dd');
 
   const [lessonsRes, studentsRes, makeupsRes] = await Promise.all([
     supabase
@@ -1228,20 +1290,16 @@ export async function updateStudentSettings(
   if (updates.is_active !== undefined) payload.is_active = updates.is_active;
   if (updates.monthly_target_lessons !== undefined) {
     payload.monthly_target_lessons = updates.monthly_target_lessons;
-    payload.package_total_lessons = updates.monthly_target_lessons;
   }
   if (updates.billing_day !== undefined) payload.billing_day = updates.billing_day.trim();
   if (updates.billing_type !== undefined) {
     payload.billing_type = updates.billing_type;
-    payload.payment_type = updates.billing_type;
   }
   if (updates.lesson_rate !== undefined) {
     payload.lesson_rate = updates.lesson_rate;
-    payload.price_per_lesson = updates.lesson_rate;
   }
   if (updates.lessons_balance !== undefined) {
     payload.lessons_balance = updates.lessons_balance;
-    payload.package_remaining_lessons = updates.lessons_balance;
   }
   if (updates.schedule_notes !== undefined) payload.notes = updates.schedule_notes.trim();
   if (updates.recurring_schedule !== undefined) payload.recurring_schedule = updates.recurring_schedule;
@@ -1269,7 +1327,7 @@ export async function updateStudentSettings(
   }
 
   // Update only this student's upcoming schedule (cleaning future untouched)
-  if (updates.recurring_schedule !== undefined && updates.recurring_schedule.length > 0) {
+  if (updates.recurring_schedule !== undefined) {
     await planRecurringLessonsForStudent(studentId, updates.recurring_schedule, 9, true);
   }
 }

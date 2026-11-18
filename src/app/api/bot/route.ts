@@ -100,39 +100,86 @@ export async function buildMorningDigest(firstName: string = 'Фархад') {
 
   // 💰 БИЛЛИНГ И БАЛАНСЫ
   const now = getTashkentNow();
-  const todayDayNumber = now.getDate();
+  const curYear = now.getFullYear();
+  const curMonth = now.getMonth();
+  const curDay = now.getDate();
+  const daysInCurMonth = new Date(curYear, curMonth + 1, 0).getDate();
+  const activeStudents = students.filter((s) => s.is_active !== false);
 
   // 1. Date-to-date students whose billing_day is today or in 1–2 days
   const billingAlertLines: string[] = [];
-  const dateToDateStudents = students.filter((s) => s.billing_type !== 'package');
+  const dateToDateStudents = activeStudents.filter((s) => s.billing_type !== 'package');
   for (const s of dateToDateStudents) {
     const match = String(s.billing_day || '').match(/\d+/);
     if (!match) continue;
-    const bDay = Number(match[0]);
-    // check if bDay is today or in 1-2 days
-    const diff = (bDay - todayDayNumber + 31) % 31;
+    const bDay = Math.min(31, Math.max(1, Number(match[0])));
+    const clampedThisMonth = Math.min(bDay, daysInCurMonth);
+
+    let diff: number;
+    let targetYear: number;
+    let targetMonth: number;
+    let targetDay: number;
+
+    if (curDay <= clampedThisMonth) {
+      diff = clampedThisMonth - curDay;
+      targetYear = curYear;
+      targetMonth = curMonth;
+      targetDay = clampedThisMonth;
+    } else {
+      targetMonth = (curMonth + 1) % 12;
+      targetYear = curMonth === 11 ? curYear + 1 : curYear;
+      targetDay = Math.min(bDay, new Date(targetYear, targetMonth + 1, 0).getDate());
+      diff = (daysInCurMonth - curDay) + targetDay;
+    }
+
     if (diff >= 0 && diff <= 2) {
       try {
-        const calc = await calculateStudentBilling(s.id);
-        const isToday = diff === 0;
-        const prefix = isToday ? '🔴 <b>СЕГОДНЯ ОПЛАТА:</b>' : `🟡 <b>Оплата через ${diff} дн.:</b>`;
-        billingAlertLines.push(
-          `${prefix} <b>${escapeHtml(s.name)}</b> (${s.billing_day || bDay + ' число'}) — <b>${(calc.netAmount || 0).toLocaleString('ru-RU')} сум</b> (${calc.scheduledLessonsCount || 0} ур., баланс: ${s.lessons_balance ?? 0} ур.)`
-        );
+        let calc;
+        if (diff === 0) {
+          calc = await calculateStudentBilling(s.id);
+        } else {
+          const afterMonth = (targetMonth + 1) % 12;
+          const afterYear = targetMonth === 11 ? targetYear + 1 : targetYear;
+          const afterDay = Math.min(bDay, new Date(afterYear, afterMonth + 1, 0).getDate());
+          const upcomingStart = new Date(Date.UTC(targetYear, targetMonth, targetDay)).toISOString().substring(0, 10);
+          const afterDate = new Date(Date.UTC(afterYear, afterMonth, afterDay));
+          afterDate.setUTCDate(afterDate.getUTCDate() - 1);
+          const upcomingEnd = afterDate.toISOString().substring(0, 10);
+          calc = await calculateStudentBilling(s.id, upcomingStart, upcomingEnd);
+        }
+        if ((calc.netAmount || 0) > 0) {
+          const isToday = diff === 0;
+          const prefix = isToday ? '🔴 <b>СЕГОДНЯ ОПЛАТА:</b>' : `🟡 <b>Оплата через ${diff} дн.:</b>`;
+          billingAlertLines.push(
+            `${prefix} <b>${escapeHtml(s.name)}</b> (${s.billing_day || bDay + ' число'}) — <b>${(calc.netAmount || 0).toLocaleString('ru-RU')} сум</b> (${calc.scheduledLessonsCount || 0} ур., баланс: ${s.lessons_balance ?? 0} ур.)`
+          );
+        }
       } catch {}
     }
   }
 
-  // 2. Package / low balance students (lessons_balance <= 2 or negative)
-  const lowBalanceStudents = students.filter((s) => s.billing_type === 'package' && (s.lessons_balance ?? 0) <= 2);
+  // 2. Low balance / debt students (package <= 2 or date_to_date <= 0)
+  const lowBalanceStudents = activeStudents.filter((s) =>
+    s.billing_type === 'package'
+      ? (s.lessons_balance ?? 0) <= 2
+      : (s.lessons_balance ?? 0) <= 0
+  );
   const lowBalanceLines: string[] = [];
   for (const s of lowBalanceStudents) {
-    const targetSize = s.monthly_target_lessons || 8;
+    const bal = s.lessons_balance ?? 0;
     const rate = s.lesson_rate || 300000;
-    const packageSum = targetSize * rate;
-    lowBalanceLines.push(
-      `⚠️ <b>${escapeHtml(s.name)}</b>: осталось <b>${s.lessons_balance ?? 0} ур.</b> (к оплате пакет ${targetSize} ур. = <b>${packageSum.toLocaleString('ru-RU')} сум</b>)`
-    );
+    if (s.billing_type === 'package') {
+      const targetSize = s.monthly_target_lessons || 8;
+      const packageSum = targetSize * rate;
+      lowBalanceLines.push(
+        `⚠️ <b>${escapeHtml(s.name)}</b> (пакет): осталось <b>${bal} ур.</b> (новый пакет ${targetSize} ур. = <b>${packageSum.toLocaleString('ru-RU')} сум</b>)`
+      );
+    } else {
+      const debtText = bal < 0 ? ` — долг <b>${(Math.abs(bal) * rate).toLocaleString('ru-RU')} сум</b>` : '';
+      lowBalanceLines.push(
+        `⚠️ <b>${escapeHtml(s.name)}</b> (по датам): баланс <b>${bal} ур.</b>${debtText}`
+      );
+    }
   }
 
   if (billingAlertLines.length > 0 || lowBalanceLines.length > 0) {

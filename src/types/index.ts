@@ -58,7 +58,7 @@ export interface Makeup {
 }
 
 export interface AttendanceSummary {
-  period: 'week' | 'month';
+  period: 'today' | 'week' | 'month';
   completedCount: number;
   targetCount: number;
   missedCount: number;

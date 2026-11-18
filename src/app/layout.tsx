@@ -19,7 +19,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",
-  themeColor: "#0f172a",
+  themeColor: "#ffffff",
 };
 
 export default function RootLayout({
@@ -28,14 +28,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="ru" className={`h-full dark ${inter.variable}`} suppressHydrationWarning>
+    <html lang="ru" className={`h-full ${inter.variable}`} suppressHydrationWarning>
       <head>
         <Script
           src="https://telegram.org/js/telegram-web-app.js"
           strategy="beforeInteractive"
         />
       </head>
-      <body className="min-h-full bg-slate-950 text-slate-100 antialiased select-none font-sans overflow-x-hidden" suppressHydrationWarning>
+      <body className="min-h-full bg-[#f2f2f7] text-gray-900 antialiased select-none font-sans overflow-x-hidden" suppressHydrationWarning>
         {children}
       </body>
     </html>

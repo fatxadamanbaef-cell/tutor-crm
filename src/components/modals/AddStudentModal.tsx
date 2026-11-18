@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { RecurringSlot, BillingType } from '@/types';
 import { X, UserPlus, Clock } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
@@ -31,6 +31,13 @@ const WEEKDAYS = [
   { id: 7, label: 'Вс' },
 ];
 
+function addMinutes(timeStr: string, minutes: number): string {
+  const [h, m] = timeStr.split(':').map(Number);
+  if (isNaN(h) || isNaN(m)) return '17:30';
+  const total = (h * 60 + m + minutes) % (24 * 60);
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`;
+}
+
 export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSave }) => {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -46,6 +53,22 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
   const [startTime, setStartTime] = useState('16:00');
   const [endTime, setEndTime] = useState('17:30');
 
+  useEffect(() => {
+    if (isOpen) {
+      setName('');
+      setPhone('');
+      setTelegram('');
+      setMonthlyTarget(12);
+      setBillingDay('10');
+      setBillingType('date_to_date');
+      setLessonRate(300000);
+      setLessonsBalance(0);
+      setSelectedDays([1, 3, 5]);
+      setStartTime('16:00');
+      setEndTime('17:30');
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const toggleDay = (dayId: number) => {
@@ -53,6 +76,13 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
     setSelectedDays((prev) =>
       prev.includes(dayId) ? prev.filter((d) => d !== dayId) : [...prev, dayId].sort()
     );
+  };
+
+  const handleStartTimeChange = (newStart: string) => {
+    setStartTime(newStart);
+    if (newStart && endTime <= newStart) {
+      setEndTime(addMinutes(newStart, 90));
+    }
   };
 
   const handleSave = () => {
@@ -281,7 +311,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
               <input
                 type="time"
                 value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
+                onChange={(e) => handleStartTimeChange(e.target.value)}
                 className="bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-black text-slate-900 focus:border-blue-600 focus:outline-hidden"
               />
               <span className="text-slate-400 text-xs font-bold">–</span>

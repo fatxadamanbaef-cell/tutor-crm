@@ -1,10 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Student, LessonStatus } from '@/types';
-import { X, CalendarPlus, Clock } from 'lucide-react';
+import { X, CalendarPlus } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
-import { getTashkentTodayStr } from '@/lib/formatters';
+import { getTashkentTodayStr, dayOfWeekOf } from '@/lib/formatters';
 import { format } from 'date-fns';
 
 interface AddLessonModalProps {
@@ -12,6 +12,7 @@ interface AddLessonModalProps {
   onClose: () => void;
   students: Student[];
   initialDate?: Date;
+  initialStudentId?: string;
   onSave: (lesson: {
     student_id: string;
     date: string;
@@ -21,11 +22,21 @@ interface AddLessonModalProps {
   }) => void;
 }
 
+function slotDurationMinutes(start: string, end?: string): number {
+  if (!end) return 90;
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) return 90;
+  const diff = eh * 60 + em - (sh * 60 + sm);
+  return diff >= 15 && diff <= 300 ? diff : 90;
+}
+
 export const AddLessonModal: React.FC<AddLessonModalProps> = ({
   isOpen,
   onClose,
   students,
   initialDate,
+  initialStudentId,
   onSave,
 }) => {
   const [studentId, setStudentId] = useState(students[0]?.id || '');
@@ -35,31 +46,48 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({
   const [notes, setNotes] = useState('');
   const [lessonStatus, setLessonStatus] = useState<LessonStatus>('planned');
 
-  // Sync state whenever modal opens or students load
+  const applyStudentSlotDefaults = useCallback(
+    (targetStudentId: string, targetDateStr: string) => {
+      const student = students.find((s) => s.id === targetStudentId);
+      const slots = student?.recurring_schedule || [];
+      if (slots.length === 0) return;
+      const dow = dayOfWeekOf(targetDateStr);
+      const matched = slots.find((sl) => Number(sl.dayOfWeek) === dow) || slots[0];
+      if (matched?.startTime) {
+        const cleanStart = matched.startTime.substring(0, 5);
+        setStartTime(cleanStart);
+        setDuration(slotDurationMinutes(cleanStart, matched.endTime?.substring(0, 5)));
+      }
+    },
+    [students]
+  );
+
+  // Sync state whenever modal opens
   useEffect(() => {
     if (isOpen) {
-      if (students.length > 0) {
-        if (!studentId || !students.some((s) => s.id === studentId)) {
-          setStudentId(students[0].id);
-        }
-      }
+      const targetStudentId = initialStudentId && students.some((s) => s.id === initialStudentId)
+        ? initialStudentId
+        : studentId && students.some((s) => s.id === studentId)
+        ? studentId
+        : students[0]?.id || '';
+
+      setStudentId(targetStudentId);
+
+      let dateFormatted = getTashkentTodayStr();
       if (initialDate) {
         try {
-          const dateFormatted = format(initialDate, 'yyyy-MM-dd');
-          setLessonDate(dateFormatted);
-          if (dateFormatted < getTashkentTodayStr()) {
-            setLessonStatus('completed');
-          } else {
-            setLessonStatus('planned');
-          }
-        } catch {
-          setLessonDate(getTashkentTodayStr());
-        }
-      } else {
-        setLessonDate(getTashkentTodayStr());
+          dateFormatted = format(initialDate, 'yyyy-MM-dd');
+        } catch {}
+      }
+      setLessonDate(dateFormatted);
+      setLessonStatus(dateFormatted < getTashkentTodayStr() ? 'completed' : 'planned');
+      setNotes('');
+
+      if (targetStudentId) {
+        applyStudentSlotDefaults(targetStudentId, dateFormatted);
       }
     }
-  }, [isOpen, students, initialDate]);
+  }, [isOpen, initialDate, initialStudentId, students]);
 
   if (!isOpen) return null;
 
@@ -80,7 +108,17 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({
     setLessonDate(newDate);
     if (newDate < getTashkentTodayStr()) {
       setLessonStatus('completed');
+    } else {
+      setLessonStatus('planned');
     }
+    if (studentId) {
+      applyStudentSlotDefaults(studentId, newDate);
+    }
+  };
+
+  const handleStudentChange = (newId: string) => {
+    setStudentId(newId);
+    applyStudentSlotDefaults(newId, lessonDate);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -144,7 +182,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({
             ) : (
               <select
                 value={studentId || students[0]?.id}
-                onChange={(e) => setStudentId(e.target.value)}
+                onChange={(e) => handleStudentChange(e.target.value)}
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-black font-bold focus:outline-none focus:border-blue-500"
               >
                 {students.map((s) => (
@@ -223,7 +261,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({
                 {startTime} → {calculateEndTime(startTime, duration)} ({duration} мин)
               </span>
             </div>
-            
+
             <div className="grid grid-cols-4 gap-1.5 mb-2">
               {[45, 60, 90, 120].map((d) => (
                 <button
@@ -281,5 +319,3 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({
     </div>
   );
 };
-
-

@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Student, Lesson, RecurringSlot, BillingType, BillingCalculation, LessonStatus } from '@/types';
-import { X, Check, Calendar, Clock, Edit2, Trash2, Plus, AlertCircle, RotateCcw, Wallet, ChevronDown, ChevronUp, Package, Sparkles, Loader2 } from 'lucide-react';
+import { X, Check, Calendar, Clock, Edit2, Trash2, Plus, Wallet, ChevronDown, ChevronUp, Package, Sparkles, Loader2, Copy, FileText } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
 import { format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -15,6 +15,8 @@ import {
   calculateStudentBilling,
   setLessonStatusDirect,
 } from '@/lib/storage';
+import { generateStudentReport } from '@/lib/reports';
+import { getTutorSettings } from '@/lib/settings';
 
 interface ClientProfileScreenProps {
   student: Student;
@@ -26,6 +28,8 @@ interface ClientProfileScreenProps {
   onSaveStudentInfo?: (studentId: string, updates: any) => void;
   onUpdateLessonMissReason?: (lessonId: string, missReason: string) => Promise<void>;
   onOpenLesson?: (lesson: Lesson) => void;
+  onRefresh?: () => Promise<void> | void;
+  onAddLessonForStudent?: (studentId: string) => void;
   onAddPayment?: any;
   onToggleCalendarDate?: any;
 }
@@ -48,6 +52,8 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
   onSaveStudentInfo,
   onUpdateLessonMissReason,
   onOpenLesson,
+  onRefresh,
+  onAddLessonForStudent,
 }) => {
   const [activeTab, setActiveTab] = useState<'archive' | 'settings'>('archive');
   const [isSaving, setIsSaving] = useState(false);
@@ -63,14 +69,18 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
   const [lessonsBalance, setLessonsBalance] = useState<number>(student.lessons_balance ?? 0);
   const [studentColor, setStudentColor] = useState<string>(student.color || '#3B82F6');
   const [scheduleNotes, setScheduleNotes] = useState<string>(student.schedule_notes || '');
+  const [isActive, setIsActive] = useState<boolean>(student.is_active !== false);
   const [recurringSlots, setRecurringSlots] = useState<RecurringSlot[]>(student.recurring_schedule || []);
   const [billingCalc, setBillingCalc] = useState<BillingCalculation | null>(null);
+  const [copyState, setCopyState] = useState<'invoice' | 'report' | null>(null);
+  const [isCopyingReport, setIsCopyingReport] = useState(false);
 
   // Horizon & Timeline state (7 / 14 / 30 / 60 days)
   const [daysHorizon, setDaysHorizon] = useState<7 | 14 | 30 | 60>(30);
   const [directionFilter, setDirectionFilter] = useState<'all' | 'past' | 'upcoming'>('all');
   const [horizonLessons, setHorizonLessons] = useState<Lesson[]>([]);
   const [isLoadingHorizon, setIsLoadingHorizon] = useState<boolean>(false);
+  const prevHorizonKeyRef = useRef<string>('');
 
   // Unmarked past lessons state
   const [unmarkedLessons, setUnmarkedLessons] = useState<Lesson[]>([]);
@@ -93,7 +103,8 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
         y -= 1;
       }
     }
-    const d = new Date(Date.UTC(y, m, bNum));
+    const maxDayInMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+    const d = new Date(Date.UTC(y, m, Math.min(bNum, maxDayInMonth)));
     return d.toISOString().substring(0, 10);
   });
   const [retroPackageCount, setRetroPackageCount] = useState<number>(student.monthly_target_lessons || 12);
@@ -112,10 +123,30 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
 
   const todayStr = getTashkentTodayStr();
 
+  // Keep lessonsBalance synced with parent student updates
+  useEffect(() => {
+    setLessonsBalance(student.lessons_balance ?? 0);
+  }, [student.id, student.lessons_balance]);
+
+  // Track changes to this student's lessons in parent state (e.g. EditLessonModal or AddLessonModal)
+  const studentLessonsSignature = useMemo(
+    () =>
+      lessons
+        .filter((l) => l.student_id === student.id)
+        .map((l) => `${l.id}:${l.date}:${l.time_str}:${l.status}:${l.miss_reason || ''}:${l.notes || ''}`)
+        .join('|'),
+    [lessons, student.id]
+  );
+
   // Load horizon lessons and unmarked past lessons
   useEffect(() => {
     let isMounted = true;
-    setIsLoadingHorizon(true);
+    const key = `${student.id}_${daysHorizon}`;
+    if (prevHorizonKeyRef.current !== key) {
+      prevHorizonKeyRef.current = key;
+      setIsLoadingHorizon(true);
+    }
+
     Promise.all([
       getUnmarkedPastLessons(student.id),
       getStudentHorizonLessons(student.id, daysHorizon),
@@ -135,7 +166,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [student.id, daysHorizon]);
+  }, [student.id, daysHorizon, studentLessonsSignature]);
 
   // Load billing calculation
   useEffect(() => {
@@ -165,6 +196,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
       const newBal = await topUpStudentBalance(student.id, delta);
       setLessonsBalance(newBal);
       calculateStudentBilling(student.id).then(setBillingCalc).catch(() => {});
+      await onRefresh?.();
     } catch {
       setLessonsBalance((prev) => prev + delta);
     }
@@ -203,6 +235,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
         setLessonsBalance(res.newBalance);
       }
       calculateStudentBilling(student.id).then(setBillingCalc).catch(() => {});
+      await onRefresh?.();
     } catch (err) {
       console.error('Failed to update lesson status directly:', err);
       await refreshAllLessons();
@@ -229,7 +262,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     }
 
     calculateStudentBilling(student.id).then(setBillingCalc).catch(() => {});
-    refreshAllLessons();
+    await Promise.all([refreshAllLessons(), Promise.resolve(onRefresh?.())]);
   };
 
   // Retroactive package preview slots
@@ -296,12 +329,70 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
       setBillingType('package');
       setMonthlyTarget(retroPackageCount);
       setIsRetroWizardOpen(false);
-      await refreshAllLessons();
+      await Promise.all([refreshAllLessons(), Promise.resolve(onRefresh?.())]);
       calculateStudentBilling(student.id).then(setBillingCalc).catch(() => {});
     } catch (e: any) {
       alert(e?.message || 'Ошибка применения пакета с прошлой даты');
     } finally {
       setIsApplyingRetro(false);
+    }
+  };
+
+  const handleCopyInvoice = async () => {
+    hapticImpact('light');
+    try {
+      const calc = billingCalc || (await calculateStudentBilling(student.id));
+      const settings = getTutorSettings();
+      let msg = `Здравствуйте! 📚 Направляю информацию по оплате занятий (${studentName}):\n\n`;
+      if (calc.billingType === 'package') {
+        const size = calc.packageSize || monthlyTarget || 12;
+        const sum = calc.packageAmount || size * lessonRate;
+        msg += `📦 Абонемент: ${size} уроков\n`;
+        msg += `💳 Стоимость пакета: ${sum.toLocaleString('ru-RU')} сум (${lessonRate.toLocaleString('ru-RU')} сум/урок)\n`;
+        msg += `⚖️ Текущий баланс: ${lessonsBalance} ур.\n`;
+        if (lessonsBalance < 0) {
+          const debt = Math.abs(lessonsBalance) * lessonRate;
+          msg += `⚠️ Задолженность за ${Math.abs(lessonsBalance)} ур.: ${debt.toLocaleString('ru-RU')} сум\n`;
+        }
+      } else {
+        const sD = calc.startDate?.split('-').reverse().join('.') || '';
+        const eD = calc.endDate?.split('-').reverse().join('.') || '';
+        msg += `📅 Расчётный период: ${sD} – ${eD}\n`;
+        msg += `🗓 Занятий по графику: ${calc.scheduledLessonsCount || 0} ур.\n`;
+        msg += `⚖️ Текущий баланс: ${lessonsBalance} ур.\n`;
+        msg += `💳 К оплате: ${calc.lessonsToPay ?? 0} ур. = ${(calc.netAmount ?? 0).toLocaleString('ru-RU')} сум\n`;
+      }
+      if (settings.cardNumber) {
+        msg += `\n💳 Реквизиты для оплаты:\n${settings.bankName}: ${settings.cardNumber}\nПолучатель: ${settings.cardHolder || settings.tutorName}\n`;
+      }
+      msg += `\nБуду рад(а) подтверждению после перевода! 🙏`;
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(msg);
+        setCopyState('invoice');
+        hapticNotification('success');
+        setTimeout(() => setCopyState(null), 2000);
+      }
+    } catch (e) {
+      console.error('Copy invoice failed:', e);
+    }
+  };
+
+  const handleCopyParentReport = async () => {
+    hapticImpact('light');
+    setIsCopyingReport(true);
+    try {
+      const report = await generateStudentReport(student.id);
+      if (report?.parentForwardText && navigator.clipboard) {
+        const withBalance = `${report.parentForwardText}\n\n⚖️ Текущий баланс уроков: ${lessonsBalance} ур.`;
+        await navigator.clipboard.writeText(withBalance);
+        setCopyState('report');
+        hapticNotification('success');
+        setTimeout(() => setCopyState(null), 2000);
+      }
+    } catch (e) {
+      console.error('Copy report failed:', e);
+    } finally {
+      setIsCopyingReport(false);
     }
   };
 
@@ -374,6 +465,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
           lessons_balance: Number(lessonsBalance) || 0,
           color: studentColor,
           schedule_notes: scheduleNotes,
+          is_active: isActive,
           recurring_schedule: recurringSlots,
         });
       }
@@ -750,6 +842,40 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
               </div>
             </div>
 
+            {/* Parent Communication: Invoice & Attendance Report */}
+            <div className="bg-white rounded-3xl p-4 shadow-xs border border-gray-200/80 space-y-2.5">
+              <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wide block">
+                📤 Счёт и отчёт для родителей
+              </span>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopyInvoice}
+                  className={`py-2.5 px-3 rounded-2xl text-xs font-bold border flex items-center justify-center gap-1.5 active:scale-95 transition-all ${
+                    copyState === 'invoice'
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200/80'
+                  }`}
+                >
+                  {copyState === 'invoice' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copyState === 'invoice' ? 'Скопировано!' : 'Счёт на оплату'}</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isCopyingReport}
+                  onClick={handleCopyParentReport}
+                  className={`py-2.5 px-3 rounded-2xl text-xs font-bold border flex items-center justify-center gap-1.5 active:scale-95 transition-all disabled:opacity-60 ${
+                    copyState === 'report'
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-gray-50 hover:bg-gray-100 text-gray-800 border-gray-200'
+                  }`}
+                >
+                  {copyState === 'report' ? <Check className="w-3.5 h-3.5" /> : <FileText className="w-3.5 h-3.5" />}
+                  <span>{copyState === 'report' ? 'Скопировано!' : isCopyingReport ? 'Готовлю...' : 'Отчёт по урокам'}</span>
+                </button>
+              </div>
+            </div>
+
             {/* PART B: Retroactive Package Wizard Inline Panel */}
             {isRetroWizardOpen && (
               <div className="bg-white rounded-3xl p-4 shadow-sm border border-indigo-200 space-y-3.5 animate-in fade-in-50 duration-150">
@@ -947,13 +1073,28 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
 
             {/* PART 4: INTERACTIVE 7 / 14 / 30 / 60-DAY SCHEDULE HORIZON */}
             <div className="bg-white rounded-3xl p-4 shadow-xs border border-gray-200/80 space-y-3">
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-wide">
                   Горизонт расписания
                 </span>
-                <span className="text-[11px] font-bold text-gray-500">
-                  Всего: {timelineLessons.length} ур.
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-bold text-gray-500">
+                    Всего: {timelineLessons.length} ур.
+                  </span>
+                  {onAddLessonForStudent && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        hapticImpact('light');
+                        onAddLessonForStudent(student.id);
+                      }}
+                      className="px-2.5 py-1 rounded-xl bg-blue-600 text-white font-bold text-[11px] flex items-center gap-1 shadow-xs active:scale-95"
+                    >
+                      <Plus className="w-3 h-3 stroke-[3]" />
+                      <span>Урок</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Horizon Selector (7, 14, 30, 60 days) */}
@@ -1249,6 +1390,45 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                     className="w-full text-xs font-black text-gray-900 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 focus:outline-hidden focus:border-blue-500"
                   />
                 </div>
+              </div>
+            </div>
+
+            {/* Notes & Active Status */}
+            <div className="bg-white rounded-3xl p-4 shadow-xs border border-gray-200/80 space-y-3">
+              <div>
+                <label className="text-[11px] font-bold text-gray-400 uppercase block mb-1.5">
+                  Заметки об ученике / Цель обучения
+                </label>
+                <textarea
+                  rows={3}
+                  value={scheduleNotes}
+                  onChange={(e) => setScheduleNotes(e.target.value)}
+                  placeholder="Уровень, цель (IELTS, ЕГЭ, школьная программа), особенности..."
+                  className="w-full text-xs font-medium text-gray-900 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 focus:outline-hidden focus:border-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+                <div>
+                  <span className="text-xs font-bold text-gray-900 block">Статус ученика</span>
+                  <span className="text-[11px] text-gray-500">
+                    {isActive ? 'Активен (участвует в авто-генерации и отчетах)' : 'На паузе / в архиве'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    hapticImpact('light');
+                    setIsActive((prev) => !prev);
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition-all active:scale-95 ${
+                    isActive
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-gray-100 text-gray-600 border-gray-300'
+                  }`}
+                >
+                  {isActive ? '✅ Активен' : '⏸ На паузе'}
+                </button>
               </div>
             </div>
 
