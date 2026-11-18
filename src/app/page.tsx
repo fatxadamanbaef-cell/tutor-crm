@@ -18,9 +18,8 @@ import {
   archiveMakeup,
   isDeductedStatus,
 } from '@/lib/storage';
-import { getTashkentNow } from '@/lib/formatters';
+import { getTashkentNow, getStudentBillingPeriod } from '@/lib/formatters';
 import { initTelegramApp, getTelegramWebApp } from '@/lib/telegram';
-import { format, startOfMonth, endOfMonth } from 'date-fns';
 import { Loader2 } from 'lucide-react';
 
 import { BottomNav, TabType } from '@/components/BottomNav';
@@ -96,17 +95,22 @@ export default function Dashboard() {
     refreshData();
   }, [refreshData]);
 
-  // Live recalculated monthly attendance stats from current lessons
+  // Live recalculated attendance stats per student's individual billing period (from billing_day)
   const liveStudents = useMemo(() => {
     const now = getTashkentNow();
-    const mStart = format(startOfMonth(now), 'yyyy-MM-dd');
-    const mEnd = format(endOfMonth(now), 'yyyy-MM-dd');
+    const periodMap: Record<string, { startDate: string; endDate: string }> = {};
+    for (const s of students) {
+      const p = getStudentBillingPeriod(s.billing_day || '10', now);
+      periodMap[s.id] = { startDate: p.startDate, endDate: p.endDate };
+    }
+
     const conductedMap: Record<string, number> = {};
     const missedMap: Record<string, number> = {};
 
     for (const l of lessons) {
+      const p = periodMap[l.student_id];
       const d = l.date.substring(0, 10);
-      if (d < mStart || d > mEnd) continue;
+      if (p && (d < p.startDate || d > p.endDate)) continue;
       if (l.status === 'completed') {
         conductedMap[l.student_id] = (conductedMap[l.student_id] || 0) + 1;
       } else if (

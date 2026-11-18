@@ -163,10 +163,13 @@ export function generateStudentScheduleDates(
 }
 
 export interface StudentBillingPeriod {
+  billingDay: number;
   startDate: string; // YYYY-MM-DD
   endDate: string;   // YYYY-MM-DD
   startFormatted: string; // "10 сентября"
   endFormatted: string;   // "9 октября"
+  startShort: string;     // "10 сен"
+  endShort: string;       // "9 окт"
   nextBillingFormatted: string; // "10 октября"
   monthName: string; // "Сентябрь 2026"
   periodStartDateObj: Date;
@@ -174,17 +177,41 @@ export interface StudentBillingPeriod {
 }
 
 /**
- * Calculates student's individual billing period based on billing day (e.g. 10th of each month)
+ * Safely extracts day of month (1..31) from any billing_day string or number
+ * (e.g. "15", "15 число", "с 15 числа", "2026-11-15", "15.11")
+ */
+export function extractBillingDayNumber(billingDayProp?: number | string | null): number {
+  if (typeof billingDayProp === 'number' && !isNaN(billingDayProp)) {
+    return Math.min(31, Math.max(1, Math.round(billingDayProp)));
+  }
+  const str = String(billingDayProp || '').trim();
+  if (!str) return 10;
+
+  // Check YYYY-MM-DD format first
+  const isoMatch = str.match(/^\d{4}-\d{2}-(\d{1,2})/);
+  if (isoMatch) {
+    const d = parseInt(isoMatch[1], 10);
+    if (d >= 1 && d <= 31) return d;
+  }
+
+  // Otherwise extract first number
+  const numMatch = str.match(/\d+/);
+  if (numMatch) {
+    const d = parseInt(numMatch[0], 10);
+    if (d >= 1 && d <= 31) return d;
+  }
+  return 10;
+}
+
+/**
+ * Calculates student's individual billing period based on billing day (e.g. 15th of each month -> 15 Nov to 14 Dec)
  */
 export function getStudentBillingPeriod(
   billingDayProp: number | string = 10,
   targetDate: Date = getTashkentNow(),
   monthOffset: number = 0
 ): StudentBillingPeriod {
-  let billingDay = typeof billingDayProp === 'string' ? parseInt(billingDayProp, 10) : billingDayProp;
-  if (isNaN(billingDay) || billingDay < 1 || billingDay > 31) {
-    billingDay = 10;
-  }
+  const billingDay = extractBillingDayNumber(billingDayProp);
 
   let base = targetDate;
   if (monthOffset !== 0) {
@@ -215,10 +242,13 @@ export function getStudentBillingPeriod(
   const endDateObj = subDays(nextMonthStart, 1);
 
   return {
+    billingDay,
     startDate: format(startDateObj, 'yyyy-MM-dd'),
     endDate: format(endDateObj, 'yyyy-MM-dd'),
     startFormatted: format(startDateObj, 'd MMMM', { locale: ru }),
     endFormatted: format(endDateObj, 'd MMMM', { locale: ru }),
+    startShort: format(startDateObj, 'd MMM', { locale: ru }).replace('.', ''),
+    endShort: format(endDateObj, 'd MMM', { locale: ru }).replace('.', ''),
     nextBillingFormatted: format(nextMonthStart, 'd MMMM', { locale: ru }),
     monthName: format(startDateObj, 'LLLL yyyy', { locale: ru }),
     periodStartDateObj: startDateObj,

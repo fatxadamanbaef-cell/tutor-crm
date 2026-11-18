@@ -14,7 +14,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
-import { WD_SHORT } from '@/lib/formatters';
+import { WD_SHORT, getStudentBillingPeriod } from '@/lib/formatters';
 import { calculateStudentBilling, topUpStudentBalance } from '@/lib/storage';
 import { getTutorSettings } from '@/lib/settings';
 
@@ -279,6 +279,7 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
             const scheduleSummary = formatRecurringSummary(student.recurring_schedule);
             const isPaused = student.is_active === false;
             const tgUrl = getTelegramUrl(student.telegram);
+            const billingPeriod = getStudentBillingPeriod(student.billing_day || '10');
             const progressPct = Math.min(100, Math.round((conducted / target) * 100));
 
             return (
@@ -331,9 +332,7 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                         <span>{Math.round(rate / 1000)} тыс/ур.</span>
                         <span>•</span>
                         <span>
-                          {isPkg
-                            ? `Пакет ${target} ур.`
-                            : `Оплата: ${student.billing_day || '10'} числа`}
+                          {isPkg ? `Пакет ${target} ур.` : 'По датам'} (с {billingPeriod.billingDay}-го числа)
                         </span>
                       </div>
                     </div>
@@ -385,12 +384,14 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                   </div>
                 </div>
 
-                {/* Footer: Clean Monthly Progress + Quick Billing Actions */}
+                {/* Footer: Billing Period Progress (anchored to student's payment date) + Quick Actions */}
                 <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium mb-1">
-                      <span>
-                        В этом месяце: <b className="text-slate-800">{conducted}</b> из {target} ур.
+                      <span className="truncate">
+                        С <b className="text-slate-700">{billingPeriod.startShort}</b> по{' '}
+                        <b className="text-slate-700">{billingPeriod.endShort}</b>:{' '}
+                        <b className="text-slate-900">{conducted}</b> из {target} ур.
                         {missed > 0 ? ` (отм: ${missed})` : ''}
                       </span>
                     </div>

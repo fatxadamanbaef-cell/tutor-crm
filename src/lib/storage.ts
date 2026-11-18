@@ -1,6 +1,6 @@
 import { Student, Lesson, Makeup, AttendanceSummary, LessonStatus, RecurringSlot, BillingType, BillingCalculation } from '@/types';
 import { supabase } from './supabase';
-import { getTashkentTodayStr, getTashkentNow, getTashkentDateString, dayOfWeekOf, addDaysStr } from './formatters';
+import { getTashkentTodayStr, getTashkentNow, getTashkentDateString, dayOfWeekOf, addDaysStr, getStudentBillingPeriod, extractBillingDayNumber } from './formatters';
 import { generateUUID } from './uuid';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subMonths, addDays } from 'date-fns';
 
@@ -60,21 +60,31 @@ export async function getStudents(): Promise<Student[]> {
     makeupsCountMap[m.student_id] = (makeupsCountMap[m.student_id] || 0) + 1;
   });
 
-  // Calculate current month attendance
+  // Calculate attendance per student's individual billing period (anchored on s.billing_day)
   const now = getTashkentNow();
-  const mStart = format(startOfMonth(now), 'yyyy-MM-dd');
-  const mEnd = format(endOfMonth(now), 'yyyy-MM-dd');
+  const windowStart = format(startOfMonth(subMonths(now, 1)), 'yyyy-MM-dd');
+  const windowEnd = format(addDays(now, 35), 'yyyy-MM-dd');
 
-  const { data: currentMonthLessons } = await supabase
+  const { data: periodLessons } = await supabase
     .from('tutor_lessons')
-    .select('student_id, status')
-    .gte('lesson_date', mStart)
-    .lte('lesson_date', mEnd);
+    .select('student_id, lesson_date, status')
+    .gte('lesson_date', windowStart)
+    .lte('lesson_date', windowEnd);
+
+  const studentPeriodMap: Record<string, { startDate: string; endDate: string }> = {};
+  (studentsData || []).forEach((s) => {
+    const p = getStudentBillingPeriod(s.billing_day || '10', now);
+    studentPeriodMap[s.id] = { startDate: p.startDate, endDate: p.endDate };
+  });
 
   const conductedCountMap: Record<string, number> = {};
   const missedCountMap: Record<string, number> = {};
 
-  (currentMonthLessons || []).forEach((l) => {
+  (periodLessons || []).forEach((l) => {
+    const p = studentPeriodMap[l.student_id];
+    const d = getTashkentDateString(l.lesson_date);
+    if (p && (d < p.startDate || d > p.endDate)) return;
+
     const isCompleted = l.status === 'completed';
     const isMissed = l.status === 'missed' || l.status === 'missed_excused' || l.status === 'missed_penalty';
     if (isCompleted) conductedCountMap[l.student_id] = (conductedCountMap[l.student_id] || 0) + 1;
@@ -541,13 +551,15 @@ export async function initializePackageFromPastDate(
   ).length;
   const finalBalance = packageLessonsCount - completedCount;
 
-  // Set student balance and ensure billing_type is 'package'
+  // Set student balance, billing_day from startClean, and ensure billing_type is 'package'
+  const newBillingDay = String(extractBillingDayNumber(startClean));
   const { error: updErr } = await supabase
     .from('tutor_students')
     .update({
       lessons_balance: finalBalance,
       billing_type: 'package',
       monthly_target_lessons: packageLessonsCount,
+      billing_day: newBillingDay,
     })
     .eq('id', studentId);
 

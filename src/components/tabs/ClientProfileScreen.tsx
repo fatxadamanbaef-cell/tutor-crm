@@ -33,7 +33,13 @@ import {
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
 import { format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { getTashkentNow, getTashkentTodayStr, getTashkentDateString } from '@/lib/formatters';
+import {
+  getTashkentNow,
+  getTashkentTodayStr,
+  getTashkentDateString,
+  getStudentBillingPeriod,
+  extractBillingDayNumber,
+} from '@/lib/formatters';
 import {
   getStudentHorizonLessons,
   getUnmarkedPastLessons,
@@ -185,6 +191,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
 
   const todayStr = getTashkentTodayStr();
   const tgUrl = getTelegramUrl(studentTelegram);
+  const billingPeriod = useMemo(() => getStudentBillingPeriod(billingDay || '10'), [billingDay]);
 
   // Keep lessonsBalance synced with parent student updates
   useEffect(() => {
@@ -397,6 +404,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
       setLessonsBalance(finalBalance);
       setBillingType('package');
       setMonthlyTarget(retroPackageCount);
+      setBillingDay(String(extractBillingDayNumber(retroStartDate)));
       setIsRetroWizardOpen(false);
       await Promise.all([refreshAllLessons(), Promise.resolve(onRefresh?.())]);
       calculateStudentBilling(student.id).then(setBillingCalc).catch(() => {});
@@ -936,8 +944,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                   {billingCalc.billingType === 'date_to_date' ? (
                     <>
                       <span className="text-slate-600 font-medium truncate">
-                        Период {billingCalc.startDate?.split('-').slice(1).join('.')}–
-                        {billingCalc.endDate?.split('-').slice(1).join('.')} (
+                        Цикл {billingPeriod.startShort} – {billingPeriod.endShort} (
                         {billingCalc.scheduledLessonsCount} ур.)
                       </span>
                       <span className="text-emerald-700 font-extrabold shrink-0">
@@ -946,10 +953,12 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                     </>
                   ) : (
                     <>
-                      <span className="text-slate-600 font-medium">
-                        Пакет на {billingCalc.packageSize} ур.
+                      <span className="text-slate-600 font-medium truncate">
+                        Пакет {billingCalc.packageSize} ур. (с {billingPeriod.startShort} по{' '}
+                        {billingPeriod.endShort}: {student.conducted_this_month || 0}/
+                        {billingCalc.packageSize})
                       </span>
-                      <span className="text-emerald-700 font-extrabold">
+                      <span className="text-emerald-700 font-extrabold shrink-0">
                         {billingCalc.packageAmount?.toLocaleString('ru-RU')} сум
                       </span>
                     </>

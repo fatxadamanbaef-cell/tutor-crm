@@ -243,7 +243,7 @@ export const LessonCard: React.FC<LessonCardProps> = React.memo(function LessonC
               </span>
 
               <span className="text-[11px] font-medium text-slate-400">
-                • {conducted}/{target} в мес.
+                • {conducted}/{target} с опл.
               </span>
 
               {onUpdateNote && !isEditingNote && (
