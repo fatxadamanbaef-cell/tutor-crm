@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { RecurringSlot, BillingType } from '@/types';
-import { X, UserPlus, Clock } from 'lucide-react';
+import { X, UserPlus, Clock, SlidersHorizontal } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
 
 interface AddStudentModalProps {
@@ -52,6 +52,8 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
   const [selectedDays, setSelectedDays] = useState<number[]>([1, 3, 5]); // Mon, Wed, Fri
   const [startTime, setStartTime] = useState('16:00');
   const [endTime, setEndTime] = useState('17:30');
+  const [customPerDayTime, setCustomPerDayTime] = useState(false);
+  const [perDayTimes, setPerDayTimes] = useState<Record<number, { start: string; end: string }>>({});
 
   useEffect(() => {
     if (isOpen) {
@@ -66,6 +68,12 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
       setSelectedDays([1, 3, 5]);
       setStartTime('16:00');
       setEndTime('17:30');
+      setCustomPerDayTime(false);
+      setPerDayTimes({
+        1: { start: '16:00', end: '17:30' },
+        3: { start: '16:00', end: '17:30' },
+        5: { start: '16:00', end: '17:30' },
+      });
     }
   }, [isOpen]);
 
@@ -73,16 +81,37 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
 
   const toggleDay = (dayId: number) => {
     hapticImpact('light');
-    setSelectedDays((prev) =>
-      prev.includes(dayId) ? prev.filter((d) => d !== dayId) : [...prev, dayId].sort()
-    );
+    setSelectedDays((prev) => {
+      const next = prev.includes(dayId)
+        ? prev.filter((d) => d !== dayId)
+        : [...prev, dayId].sort();
+      return next;
+    });
+    setPerDayTimes((prev) => {
+      if (prev[dayId]) return prev;
+      return { ...prev, [dayId]: { start: startTime, end: endTime } };
+    });
   };
 
   const handleStartTimeChange = (newStart: string) => {
     setStartTime(newStart);
-    if (newStart && endTime <= newStart) {
-      setEndTime(addMinutes(newStart, 90));
-    }
+    setEndTime(addMinutes(newStart, 90));
+  };
+
+  const handleDayTimeChange = (dayId: number, field: 'start' | 'end', value: string) => {
+    setPerDayTimes((prev) => {
+      const cur = prev[dayId] || { start: startTime, end: endTime };
+      if (field === 'start') {
+        return {
+          ...prev,
+          [dayId]: { start: value, end: addMinutes(value, 90) },
+        };
+      }
+      return {
+        ...prev,
+        [dayId]: { ...cur, end: value },
+      };
+    });
   };
 
   const handleSave = () => {
@@ -93,11 +122,20 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
 
     hapticNotification('success');
 
-    const recurring_schedule: RecurringSlot[] = selectedDays.map((dow) => ({
-      dayOfWeek: dow,
-      startTime,
-      endTime,
-    }));
+    const recurring_schedule: RecurringSlot[] = selectedDays.map((dow) => {
+      if (customPerDayTime && perDayTimes[dow]) {
+        return {
+          dayOfWeek: dow,
+          startTime: perDayTimes[dow].start,
+          endTime: perDayTimes[dow].end,
+        };
+      }
+      return {
+        dayOfWeek: dow,
+        startTime,
+        endTime,
+      };
+    });
 
     onSave({
       name: name.trim(),
@@ -117,28 +155,36 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
   return (
     <div
       className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-3"
-      onClick={(e) => { e.stopPropagation(); onClose(); }}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
       style={{ touchAction: 'none' }}
     >
       <div
-        className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl space-y-4 animate-in slide-in-from-bottom-6 max-h-[90vh] overflow-y-auto border border-slate-200"
+        className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl space-y-4 animate-in slide-in-from-bottom-6 max-h-[92vh] overflow-y-auto border border-slate-200"
         onClick={(e) => e.stopPropagation()}
         style={{ touchAction: 'pan-y', overscrollBehaviorY: 'contain' } as React.CSSProperties}
       >
         {/* Header */}
         <div className="flex justify-between items-center pb-2 border-b border-slate-100">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600">
               <UserPlus className="w-5 h-5" />
             </div>
             <div>
               <h3 className="text-base font-black text-slate-900 leading-tight">Новый ученик</h3>
-              <p className="text-[11px] font-medium text-slate-500">Заполните данные для CRM</p>
+              <p className="text-[11px] font-medium text-slate-500">
+                Расписание создастся автоматически
+              </p>
             </div>
           </div>
           <button
             type="button"
-            onClick={(e) => { e.stopPropagation(); onClose(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
             className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors"
           >
             <X className="w-4 h-4" />
@@ -160,37 +206,104 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide block mb-1">
-                Телефон
-              </label>
-              <input
-                type="text"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                placeholder="+998 90 ..."
-                className="w-full px-3.5 py-2.5 text-xs font-semibold border border-slate-300 rounded-xl bg-slate-50 text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
-              />
+          {/* Schedule Builder (Put right under Name because schedule is the #1 thing a tutor sets) */}
+          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/90 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
+                Дни и время уроков
+              </span>
+              {selectedDays.length > 1 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    hapticImpact('light');
+                    setCustomPerDayTime((prev) => !prev);
+                  }}
+                  className={`text-[11px] font-bold px-2 py-0.5 rounded-lg inline-flex items-center gap-1 transition-all ${
+                    customPerDayTime
+                      ? 'bg-blue-600 text-white'
+                      : 'text-blue-600 bg-blue-50 hover:bg-blue-100'
+                  }`}
+                >
+                  <SlidersHorizontal className="w-3 h-3" />
+                  <span>{customPerDayTime ? 'Разное время' : 'Разное время?'}</span>
+                </button>
+              )}
             </div>
-            <div>
-              <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide block mb-1">
-                Telegram
-              </label>
-              <input
-                type="text"
-                value={telegram}
-                onChange={(e) => setTelegram(e.target.value)}
-                placeholder="@username"
-                className="w-full px-3.5 py-2.5 text-xs font-semibold border border-slate-300 rounded-xl bg-slate-50 text-slate-900 placeholder:text-slate-400 placeholder:font-normal focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
-              />
+
+            {/* Days Chips */}
+            <div className="flex justify-between gap-1">
+              {WEEKDAYS.map((wd) => {
+                const isSelected = selectedDays.includes(wd.id);
+                return (
+                  <button
+                    key={wd.id}
+                    type="button"
+                    onClick={() => toggleDay(wd.id)}
+                    className={`w-9 h-9 rounded-xl font-bold text-xs flex items-center justify-center transition-all active:scale-95 ${
+                      isSelected
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    {wd.label}
+                  </button>
+                );
+              })}
             </div>
+
+            {/* Time Selection: Shared or Per-Day */}
+            {!customPerDayTime ? (
+              <div className="flex items-center gap-2 pt-1">
+                <Clock className="w-4 h-4 text-slate-400 shrink-0" />
+                <input
+                  type="time"
+                  value={startTime}
+                  onChange={(e) => handleStartTimeChange(e.target.value)}
+                  className="flex-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-black text-slate-900 focus:border-blue-600 focus:outline-hidden"
+                />
+                <span className="text-slate-400 text-xs font-bold">–</span>
+                <input
+                  type="time"
+                  value={endTime}
+                  onChange={(e) => setEndTime(e.target.value)}
+                  className="flex-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-black text-slate-900 focus:border-blue-600 focus:outline-hidden"
+                />
+              </div>
+            ) : (
+              <div className="space-y-1.5 pt-1">
+                {selectedDays.map((dayId) => {
+                  const wd = WEEKDAYS.find((w) => w.id === dayId);
+                  const slot = perDayTimes[dayId] || { start: startTime, end: endTime };
+                  return (
+                    <div key={dayId} className="flex items-center gap-2">
+                      <span className="w-7 text-xs font-extrabold text-slate-700">
+                        {wd?.label}:
+                      </span>
+                      <input
+                        type="time"
+                        value={slot.start}
+                        onChange={(e) => handleDayTimeChange(dayId, 'start', e.target.value)}
+                        className="flex-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1 text-xs font-black text-slate-900 focus:border-blue-600 focus:outline-hidden"
+                      />
+                      <span className="text-slate-400 text-xs">–</span>
+                      <input
+                        type="time"
+                        value={slot.end}
+                        onChange={(e) => handleDayTimeChange(dayId, 'end', e.target.value)}
+                        className="flex-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1 text-xs font-black text-slate-900 focus:border-blue-600 focus:outline-hidden"
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Billing Type Selector */}
           <div>
             <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide block mb-1">
-              Модель биллинга
+              Модель оплаты
             </label>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -219,7 +332,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
                     : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
                 }`}
               >
-                📦 Пакетная оплата
+                📦 Пакетами уроков
               </button>
             </div>
           </div>
@@ -234,18 +347,18 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
                 value={lessonRate}
                 onChange={(e) => setLessonRate(Number(e.target.value))}
                 step={10000}
-                className="w-full px-3.5 py-2 text-xs font-black border border-slate-300 rounded-xl bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
+                className="w-full px-3.5 py-2 text-xs font-black border border-slate-300 rounded-xl bg-slate-50 text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all"
               />
             </div>
             <div>
               <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide block mb-1">
-                Начальный баланс
+                Текущий баланс (ур.)
               </label>
               <input
                 type="number"
                 value={lessonsBalance}
                 onChange={(e) => setLessonsBalance(Number(e.target.value))}
-                className="w-full px-3.5 py-2 text-xs font-black border border-slate-300 rounded-xl bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
+                className="w-full px-3.5 py-2 text-xs font-black border border-slate-300 rounded-xl bg-slate-50 text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all"
               />
             </div>
           </div>
@@ -253,7 +366,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide block mb-1">
-                Норма уроков в мес.
+                Уроков в пакете / мес.
               </label>
               <input
                 type="number"
@@ -261,7 +374,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
                 onChange={(e) => setMonthlyTarget(Number(e.target.value))}
                 min={1}
                 max={60}
-                className="w-full px-3.5 py-2 text-xs font-black border border-slate-300 rounded-xl bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
+                className="w-full px-3.5 py-2 text-xs font-black border border-slate-300 rounded-xl bg-slate-50 text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all"
               />
             </div>
             <div>
@@ -273,53 +386,35 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
                 value={billingDay}
                 onChange={(e) => setBillingDay(e.target.value)}
                 placeholder="10 число"
-                className="w-full px-3.5 py-2 text-xs font-bold border border-slate-300 rounded-xl bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-blue-600 focus:ring-2 focus:ring-blue-100 focus:outline-hidden transition-all"
+                className="w-full px-3.5 py-2 text-xs font-bold border border-slate-300 rounded-xl bg-slate-50 text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all"
               />
             </div>
           </div>
 
-          {/* Schedule */}
-          <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/90 space-y-2.5">
-            <span className="text-[11px] font-black text-slate-700 uppercase tracking-wide block">
-              Периодическое расписание
-            </span>
-
-            {/* Days Chips */}
-            <div className="flex justify-between gap-1">
-              {WEEKDAYS.map((wd) => {
-                const isSelected = selectedDays.includes(wd.id);
-                return (
-                  <button
-                    key={wd.id}
-                    type="button"
-                    onClick={() => toggleDay(wd.id)}
-                    className={`w-8 h-8 rounded-xl font-bold text-xs flex items-center justify-center transition-all ${
-                      isSelected
-                        ? 'bg-blue-600 text-white shadow-xs scale-105'
-                        : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'
-                    }`}
-                  >
-                    {wd.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Time */}
-            <div className="flex items-center gap-2 pt-1">
-              <Clock className="w-4 h-4 text-slate-400 shrink-0" />
+          {/* Contacts */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide block mb-1">
+                Телефон
+              </label>
               <input
-                type="time"
-                value={startTime}
-                onChange={(e) => handleStartTimeChange(e.target.value)}
-                className="bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-black text-slate-900 focus:border-blue-600 focus:outline-hidden"
+                type="text"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                placeholder="+998 90 ..."
+                className="w-full px-3.5 py-2 text-xs font-semibold border border-slate-300 rounded-xl bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all"
               />
-              <span className="text-slate-400 text-xs font-bold">–</span>
+            </div>
+            <div>
+              <label className="text-[11px] font-bold text-slate-600 uppercase tracking-wide block mb-1">
+                Telegram
+              </label>
               <input
-                type="time"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-                className="bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-black text-slate-900 focus:border-blue-600 focus:outline-hidden"
+                type="text"
+                value={telegram}
+                onChange={(e) => setTelegram(e.target.value)}
+                placeholder="@username"
+                className="w-full px-3.5 py-2 text-xs font-semibold border border-slate-300 rounded-xl bg-slate-50 text-slate-900 placeholder:text-slate-400 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all"
               />
             </div>
           </div>

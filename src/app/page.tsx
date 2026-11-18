@@ -43,8 +43,15 @@ export default function Dashboard() {
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
   const [isAddLessonOpen, setIsAddLessonOpen] = useState(false);
-  const [selectedDateForNewLesson, setSelectedDateForNewLesson] = useState<Date | undefined>(undefined);
-  const [preselectedStudentIdForLesson, setPreselectedStudentIdForLesson] = useState<string | undefined>(undefined);
+  const [selectedDateForNewLesson, setSelectedDateForNewLesson] = useState<Date | undefined>(
+    undefined
+  );
+  const [selectedStartTimeForNewLesson, setSelectedStartTimeForNewLesson] = useState<
+    string | undefined
+  >(undefined);
+  const [preselectedStudentIdForLesson, setPreselectedStudentIdForLesson] = useState<
+    string | undefined
+  >(undefined);
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
 
   const refreshData = useCallback(async () => {
@@ -82,7 +89,9 @@ export default function Dashboard() {
     // Disable vertical swipe-to-close inside the app
     const tg = getTelegramWebApp();
     if (tg?.disableVerticalSwipes) {
-      try { tg.disableVerticalSwipes(); } catch {}
+      try {
+        tg.disableVerticalSwipes();
+      } catch {}
     }
     refreshData();
   }, [refreshData]);
@@ -116,8 +125,15 @@ export default function Dashboard() {
     }));
   }, [students, lessons]);
 
+  const lowBalanceCount = useMemo(
+    () =>
+      liveStudents.filter((s) => s.is_active !== false && (s.lessons_balance ?? 0) <= 0).length,
+    [liveStudents]
+  );
+
   const selectedStudent = useMemo(
-    () => (selectedStudentId ? liveStudents.find((s) => s.id === selectedStudentId) || null : null),
+    () =>
+      selectedStudentId ? liveStudents.find((s) => s.id === selectedStudentId) || null : null,
     [selectedStudentId, liveStudents]
   );
 
@@ -125,120 +141,142 @@ export default function Dashboard() {
     setSelectedStudentId(student.id);
   }, []);
 
-  const handleSetLessonStatus = useCallback(async (
-    lessonId: string,
-    status: LessonStatus,
-    missReason?: string
-  ) => {
-    try {
-      const prevLesson = lessons.find((l) => l.id === lessonId);
-      const prevDeducted = prevLesson ? isDeductedStatus(prevLesson.status) : false;
-      const targetDeducted = isDeductedStatus(status);
-      let delta = 0;
-      if (!prevDeducted && targetDeducted) delta = -1;
-      else if (prevDeducted && !targetDeducted) delta = 1;
+  const handleSetLessonStatus = useCallback(
+    async (lessonId: string, status: LessonStatus, missReason?: string) => {
+      try {
+        const prevLesson = lessons.find((l) => l.id === lessonId);
+        const prevDeducted = prevLesson ? isDeductedStatus(prevLesson.status) : false;
+        const targetDeducted = isDeductedStatus(status);
+        let delta = 0;
+        if (!prevDeducted && targetDeducted) delta = -1;
+        else if (prevDeducted && !targetDeducted) delta = 1;
 
-      const isClearingReason = status === 'planned' || status === 'scheduled' || status === 'completed';
+        const isClearingReason =
+          status === 'planned' || status === 'scheduled' || status === 'completed';
 
-      // Optimistic local state update for lessons
-      setLessons((prev) =>
-        prev.map((l) =>
-          l.id === lessonId
-            ? {
-                ...l,
-                status,
-                miss_reason: isClearingReason
-                  ? undefined
-                  : missReason !== undefined
-                  ? missReason
-                  : l.miss_reason,
-                needs_makeup: false,
-              }
-            : l
-        )
-      );
-
-      // Optimistic local state update for student balance
-      if (delta !== 0 && prevLesson) {
-        setStudents((prev) =>
-          prev.map((s) =>
-            s.id === prevLesson.student_id
-              ? { ...s, lessons_balance: (s.lessons_balance ?? 0) + delta }
-              : s
-          )
-        );
-      }
-
-      const res = await setLessonStatusDirect(lessonId, status, missReason);
-      if (typeof res.newBalance === 'number') {
-        setStudents((prev) =>
-          prev.map((s) =>
-            s.id === res.studentId ? { ...s, lessons_balance: res.newBalance } : s
-          )
-        );
-      }
-    } catch (e) {
-      console.error('Status change failed:', e);
-      refreshData();
-    }
-  }, [lessons, refreshData]);
-
-  const handleScheduleSundayMakeup = useCallback(async (makeupIdOrLessonId: string, sundayDate: string, timeStr: string) => {
-    try {
-      const makeup = makeups.find(m => m.id === makeupIdOrLessonId || m.missed_lesson_id === makeupIdOrLessonId);
-      if (makeup) {
-        const newL = await scheduleSundayMakeup(makeup.id, sundayDate, timeStr);
-        setLessons((prev) => [...prev, newL]);
-        setMakeups((prev) => prev.filter((m) => m.id !== makeup.id));
-      } else {
-        const lesson = lessons.find(l => l.id === makeupIdOrLessonId);
-        if (lesson) {
-          const newL = await saveLesson({
-            student_id: lesson.student_id,
-            date: sundayDate,
-            time_str: timeStr,
-            status: 'planned',
-            is_makeup: true,
-            notes: `Отработка за ${lesson.date.substring(0, 10)}: ${lesson.miss_reason || ''}`,
-          });
-          setLessons((prev) => [...prev, newL]);
-        }
-      }
-    } catch (e) {
-      console.error('Failed to schedule Sunday makeup:', e);
-      refreshData();
-    }
-  }, [makeups, lessons, refreshData]);
-
-  const handleArchiveMakeup = useCallback(async (makeupIdOrLessonId: string) => {
-    try {
-      const makeup = makeups.find(m => m.id === makeupIdOrLessonId || m.missed_lesson_id === makeupIdOrLessonId);
-      if (makeup) {
-        await archiveMakeup(makeup.id);
-        setMakeups((prev) => prev.filter((m) => m.id !== makeup.id));
-      } else {
-        await updateLessonDetails(makeupIdOrLessonId, { needs_makeup: false });
+        // Optimistic local state update for lessons
         setLessons((prev) =>
-          prev.map((l) => (l.id === makeupIdOrLessonId ? { ...l, needs_makeup: false } : l))
+          prev.map((l) =>
+            l.id === lessonId
+              ? {
+                  ...l,
+                  status,
+                  miss_reason: isClearingReason
+                    ? undefined
+                    : missReason !== undefined
+                    ? missReason
+                    : l.miss_reason,
+                  needs_makeup: false,
+                }
+              : l
+          )
         );
-      }
-    } catch (e) {
-      console.error('Failed to archive makeup:', e);
-      refreshData();
-    }
-  }, [makeups, refreshData]);
 
-  const handleDeleteStudent = useCallback(async (studentId: string) => {
+        // Optimistic local state update for student balance
+        if (delta !== 0 && prevLesson) {
+          setStudents((prev) =>
+            prev.map((s) =>
+              s.id === prevLesson.student_id
+                ? { ...s, lessons_balance: (s.lessons_balance ?? 0) + delta }
+                : s
+            )
+          );
+        }
+
+        const res = await setLessonStatusDirect(lessonId, status, missReason);
+        if (typeof res.newBalance === 'number') {
+          setStudents((prev) =>
+            prev.map((s) =>
+              s.id === res.studentId ? { ...s, lessons_balance: res.newBalance } : s
+            )
+          );
+        }
+      } catch (e) {
+        console.error('Status change failed:', e);
+        refreshData();
+      }
+    },
+    [lessons, refreshData]
+  );
+
+  const handleUpdateLessonNote = useCallback(async (lessonId: string, notes: string) => {
     try {
-      setStudents((prev) => prev.filter((s) => s.id !== studentId));
-      setLessons((prev) => prev.filter((l) => l.student_id !== studentId));
-      setSelectedStudentId(null);
-      await deleteStudent(studentId);
+      setLessons((prev) => prev.map((l) => (l.id === lessonId ? { ...l, notes } : l)));
+      await updateLessonDetails(lessonId, { notes });
     } catch (e) {
-      console.error('Delete error:', e);
-      refreshData();
+      console.error('Failed to update lesson note:', e);
     }
-  }, [refreshData]);
+  }, []);
+
+  const handleScheduleSundayMakeup = useCallback(
+    async (makeupIdOrLessonId: string, sundayDate: string, timeStr: string) => {
+      try {
+        const makeup = makeups.find(
+          (m) => m.id === makeupIdOrLessonId || m.missed_lesson_id === makeupIdOrLessonId
+        );
+        if (makeup) {
+          const newL = await scheduleSundayMakeup(makeup.id, sundayDate, timeStr);
+          setLessons((prev) => [...prev, newL]);
+          setMakeups((prev) => prev.filter((m) => m.id !== makeup.id));
+        } else {
+          const lesson = lessons.find((l) => l.id === makeupIdOrLessonId);
+          if (lesson) {
+            const newL = await saveLesson({
+              student_id: lesson.student_id,
+              date: sundayDate,
+              time_str: timeStr,
+              status: 'planned',
+              is_makeup: true,
+              notes: `Отработка за ${lesson.date.substring(0, 10)}: ${lesson.miss_reason || ''}`,
+            });
+            setLessons((prev) => [...prev, newL]);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to schedule Sunday makeup:', e);
+        refreshData();
+      }
+    },
+    [makeups, lessons, refreshData]
+  );
+
+  const handleArchiveMakeup = useCallback(
+    async (makeupIdOrLessonId: string) => {
+      try {
+        const makeup = makeups.find(
+          (m) => m.id === makeupIdOrLessonId || m.missed_lesson_id === makeupIdOrLessonId
+        );
+        if (makeup) {
+          await archiveMakeup(makeup.id);
+          setMakeups((prev) => prev.filter((m) => m.id !== makeup.id));
+        } else {
+          await updateLessonDetails(makeupIdOrLessonId, { needs_makeup: false });
+          setLessons((prev) =>
+            prev.map((l) => (l.id === makeupIdOrLessonId ? { ...l, needs_makeup: false } : l))
+          );
+        }
+      } catch (e) {
+        console.error('Failed to archive makeup:', e);
+        refreshData();
+      }
+    },
+    [makeups, refreshData]
+  );
+
+  const handleDeleteStudent = useCallback(
+    async (studentId: string) => {
+      try {
+        setStudents((prev) => prev.filter((s) => s.id !== studentId));
+        setLessons((prev) => prev.filter((l) => l.student_id !== studentId));
+        setSelectedStudentId(null);
+        await deleteStudent(studentId);
+      } catch (e) {
+        console.error('Delete error:', e);
+        refreshData();
+      }
+    },
+    [refreshData]
+  );
 
   const handleSaveStudent = useCallback(async (data: any) => {
     try {
@@ -246,7 +284,9 @@ export default function Dashboard() {
       setStudents((prev) => [...prev.filter((s) => s.id !== saved.id), saved]);
       setIsAddStudentOpen(false);
       // Refresh lessons for this student's new slots
-      getLessons().then(setLessons).catch(() => {});
+      getLessons()
+        .then(setLessons)
+        .catch(() => {});
     } catch (e: any) {
       console.error('Save error:', e);
       alert('Ошибка при сохранении: ' + (e.message || String(e)));
@@ -269,25 +309,28 @@ export default function Dashboard() {
     }
   }, []);
 
-  const handleUpdateLessonTime = useCallback(async (lessonId: string, timeStr: string, dateStr?: string) => {
-    try {
-      setLessons((prev) =>
-        prev.map((l) =>
-          l.id === lessonId
-            ? {
-                ...l,
-                time_str: timeStr,
-                date: dateStr ? `${dateStr}T${timeStr.split(' - ')[0]}:00+05:00` : l.date,
-              }
-            : l
-        )
-      );
-      await updateLessonTime(lessonId, timeStr, dateStr);
-    } catch (e) {
-      console.error('Failed to update lesson time:', e);
-      refreshData();
-    }
-  }, [refreshData]);
+  const handleUpdateLessonTime = useCallback(
+    async (lessonId: string, timeStr: string, dateStr?: string) => {
+      try {
+        setLessons((prev) =>
+          prev.map((l) =>
+            l.id === lessonId
+              ? {
+                  ...l,
+                  time_str: timeStr,
+                  date: dateStr ? `${dateStr}T${timeStr.split(' - ')[0]}:00+05:00` : l.date,
+                }
+              : l
+          )
+        );
+        await updateLessonTime(lessonId, timeStr, dateStr);
+      } catch (e) {
+        console.error('Failed to update lesson time:', e);
+        refreshData();
+      }
+    },
+    [refreshData]
+  );
 
   const handleUpdateLessonMissReason = useCallback(async (lessonId: string, missReason: string) => {
     try {
@@ -302,7 +345,7 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#f2f2f7] flex items-center justify-center">
+      <div className="min-h-screen bg-[#f4f5f8] flex items-center justify-center">
         <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
       </div>
     );
@@ -313,15 +356,24 @@ export default function Dashboard() {
   const hasProfile = Boolean(selectedStudent);
 
   return (
-    <div className="h-screen bg-[#f2f2f7] overflow-hidden relative selection:bg-blue-100">
+    <div className="h-screen bg-[#f4f5f8] overflow-hidden relative selection:bg-blue-100">
       {/* Telegram BackButton controller */}
       <TelegramBackButtonController
         hasProfile={hasProfile}
         hasOverlay={hasOverlay}
         onCloseOverlay={() => {
-          if (selectedLesson) { setSelectedLesson(null); return; }
-          if (isAddStudentOpen) { setIsAddStudentOpen(false); return; }
-          if (isAddLessonOpen) { setIsAddLessonOpen(false); return; }
+          if (selectedLesson) {
+            setSelectedLesson(null);
+            return;
+          }
+          if (isAddStudentOpen) {
+            setIsAddStudentOpen(false);
+            return;
+          }
+          if (isAddLessonOpen) {
+            setIsAddLessonOpen(false);
+            return;
+          }
         }}
         onCloseProfile={() => setSelectedStudentId(null)}
       />
@@ -333,8 +385,9 @@ export default function Dashboard() {
             students={liveStudents}
             lessons={lessons}
             makeups={makeups}
-            onAddLesson={(date) => {
+            onAddLesson={(date, startTime) => {
               setSelectedDateForNewLesson(date || getTashkentNow());
+              setSelectedStartTimeForNewLesson(startTime);
               setPreselectedStudentIdForLesson(undefined);
               setIsAddLessonOpen(true);
             }}
@@ -344,6 +397,7 @@ export default function Dashboard() {
             onOpenStudent={handleOpenStudent}
             onUpdateLessonTime={handleUpdateLessonTime}
             onSetLessonStatus={handleSetLessonStatus}
+            onUpdateLessonNote={handleUpdateLessonNote}
             onScheduleSundayMakeup={handleScheduleSundayMakeup}
             onArchiveMakeup={handleArchiveMakeup}
             onRefresh={refreshData}
@@ -354,6 +408,7 @@ export default function Dashboard() {
             students={liveStudents}
             onOpenStudent={handleOpenStudent}
             onAddStudent={() => setIsAddStudentOpen(true)}
+            onRefresh={refreshData}
           />
         )}
         {activeTab === 'stats' && (
@@ -367,7 +422,11 @@ export default function Dashboard() {
       </div>
 
       {/* Navigation */}
-      <BottomNav activeTab={activeTab} onChangeTab={setActiveTab} />
+      <BottomNav
+        activeTab={activeTab}
+        onChangeTab={setActiveTab}
+        lowBalanceCount={lowBalanceCount}
+      />
 
       {/* Full-Screen Profile Screen */}
       {selectedStudent && (
@@ -385,6 +444,7 @@ export default function Dashboard() {
           onRefresh={refreshData}
           onAddLessonForStudent={(studentId) => {
             setSelectedDateForNewLesson(getTashkentNow());
+            setSelectedStartTimeForNewLesson(undefined);
             setPreselectedStudentIdForLesson(studentId);
             setIsAddLessonOpen(true);
           }}
@@ -402,7 +462,9 @@ export default function Dashboard() {
         isOpen={isAddLessonOpen}
         onClose={() => setIsAddLessonOpen(false)}
         students={liveStudents}
+        lessons={lessons}
         initialDate={selectedDateForNewLesson}
+        initialStartTime={selectedStartTimeForNewLesson}
         initialStudentId={preselectedStudentIdForLesson}
         onSave={async (data) => {
           try {
@@ -429,7 +491,12 @@ export default function Dashboard() {
         isOpen={Boolean(selectedLesson)}
         onClose={() => setSelectedLesson(null)}
         lesson={selectedLesson}
-        student={selectedLesson ? liveStudents.find((s) => s.id === selectedLesson.student_id) || null : null}
+        student={
+          selectedLesson
+            ? liveStudents.find((s) => s.id === selectedLesson.student_id) || null
+            : null
+        }
+        lessons={lessons}
         onSave={async (lessonId, updates) => {
           try {
             const prevLesson = lessons.find((l) => l.id === lessonId);
@@ -485,7 +552,6 @@ export default function Dashboard() {
 }
 
 // ─── Telegram BackButton controller ──────────────────────────────────────────
-// Manages show/hide and click handler with proper cleanup to avoid ghost-clicks.
 interface BackBtnProps {
   hasProfile: boolean;
   hasOverlay: boolean;
@@ -493,7 +559,12 @@ interface BackBtnProps {
   onCloseProfile: () => void;
 }
 
-function TelegramBackButtonController({ hasProfile, hasOverlay, onCloseOverlay, onCloseProfile }: BackBtnProps) {
+function TelegramBackButtonController({
+  hasProfile,
+  hasOverlay,
+  onCloseOverlay,
+  onCloseProfile,
+}: BackBtnProps) {
   useEffect(() => {
     const tg = getTelegramWebApp();
     if (!tg?.BackButton) return;

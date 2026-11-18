@@ -2,14 +2,27 @@
 
 import React, { useState, useMemo } from 'react';
 import { Student, RecurringSlot } from '@/types';
-import { Search, Plus, ArrowUpDown, CalendarClock } from 'lucide-react';
-import { hapticImpact } from '@/lib/telegram';
+import {
+  Search,
+  Plus,
+  ArrowUpDown,
+  CalendarClock,
+  Copy,
+  Check,
+  Send,
+  Phone,
+  AlertCircle,
+} from 'lucide-react';
+import { hapticImpact, hapticNotification } from '@/lib/telegram';
 import { WD_SHORT } from '@/lib/formatters';
+import { calculateStudentBilling, topUpStudentBalance } from '@/lib/storage';
+import { getTutorSettings } from '@/lib/settings';
 
 interface ClientsTabProps {
   students: Student[];
   onOpenStudent: (student: Student) => void;
   onAddStudent: () => void;
+  onRefresh?: () => Promise<void> | void;
 }
 
 type FilterMode = 'all' | 'low_balance' | 'package' | 'date_to_date' | 'inactive';
@@ -32,10 +45,24 @@ function formatRecurringSummary(slots?: RecurringSlot[]): string {
     .join(', ');
 }
 
-export const ClientsTab: React.FC<ClientsTabProps> = ({ students, onOpenStudent, onAddStudent }) => {
+function getTelegramUrl(tgRaw?: string): string | null {
+  if (!tgRaw) return null;
+  const cleaned = tgRaw.trim().replace(/^https?:\/\/t\.me\//i, '').replace(/^@/, '');
+  if (!cleaned) return null;
+  return `https://t.me/${cleaned}`;
+}
+
+export const ClientsTab: React.FC<ClientsTabProps> = ({
+  students,
+  onOpenStudent,
+  onAddStudent,
+  onRefresh,
+}) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
   const [sortMode, setSortMode] = useState<SortMode>('name');
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [toppingUpId, setToppingUpId] = useState<string | null>(null);
 
   const activeStudents = useMemo(
     () => students.filter((s) => s.is_active !== false),
@@ -68,7 +95,7 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ students, onOpenStudent,
     }
 
     const sorted = [...base];
-    if (sortMode === 'balance') {
+    if (sortMode === 'balance' || filterMode === 'low_balance') {
       sorted.sort((a, b) => {
         const diff = (a.lessons_balance ?? 0) - (b.lessons_balance ?? 0);
         return diff !== 0 ? diff : a.name.localeCompare(b.name, 'ru');
@@ -79,16 +106,77 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ students, onOpenStudent,
     return sorted;
   }, [activeStudents, inactiveStudents, filterMode, searchQuery, sortMode]);
 
+  const handleQuickCopyInvoice = async (e: React.MouseEvent, student: Student) => {
+    e.stopPropagation();
+    hapticImpact('light');
+    try {
+      const calc = await calculateStudentBilling(student.id);
+      const settings = getTutorSettings();
+      const lessonRate = student.lesson_rate || 300000;
+      const lessonsBalance = student.lessons_balance ?? 0;
+      let msg = `Здравствуйте! 📚 Направляю информацию по оплате занятий (${student.name}):\n\n`;
+      if (calc.billingType === 'package') {
+        const size = calc.packageSize || student.monthly_target_lessons || 12;
+        const sum = calc.packageAmount || size * lessonRate;
+        msg += `📦 Абонемент: ${size} уроков\n`;
+        msg += `💳 Стоимость пакета: ${sum.toLocaleString('ru-RU')} сум (${lessonRate.toLocaleString('ru-RU')} сум/урок)\n`;
+        msg += `⚖️ Текущий баланс: ${lessonsBalance} ур.\n`;
+        if (lessonsBalance < 0) {
+          const debt = Math.abs(lessonsBalance) * lessonRate;
+          msg += `⚠️ Задолженность за ${Math.abs(lessonsBalance)} ур.: ${debt.toLocaleString('ru-RU')} сум\n`;
+        }
+      } else {
+        const sD = calc.startDate?.split('-').reverse().join('.') || '';
+        const eD = calc.endDate?.split('-').reverse().join('.') || '';
+        msg += `📅 Расчётный период: ${sD} – ${eD}\n`;
+        msg += `🗓 Занятий по графику: ${calc.scheduledLessonsCount || 0} ур.\n`;
+        msg += `⚖️ Текущий баланс: ${lessonsBalance} ур.\n`;
+        msg += `💳 К оплате: ${calc.lessonsToPay ?? 0} ур. = ${(calc.netAmount ?? 0).toLocaleString('ru-RU')} сум\n`;
+      }
+      if (settings.cardNumber) {
+        msg += `\n💳 Реквизиты для оплаты:\n${settings.bankName}: ${settings.cardNumber}\nПолучатель: ${settings.cardHolder || settings.tutorName}\n`;
+      }
+      msg += `\nБуду рад(а) подтверждению после перевода! 🙏`;
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(msg);
+        setCopiedId(student.id);
+        hapticNotification('success');
+        setTimeout(() => setCopiedId(null), 2000);
+      }
+    } catch (err) {
+      console.error('Quick copy invoice error:', err);
+    }
+  };
+
+  const handleQuickTopUp = async (e: React.MouseEvent, student: Student) => {
+    e.stopPropagation();
+    if (toppingUpId === student.id) return;
+    const packSize = student.monthly_target_lessons || 12;
+    hapticNotification('success');
+    setToppingUpId(student.id);
+    try {
+      await topUpStudentBalance(student.id, packSize);
+      await onRefresh?.();
+    } finally {
+      setToppingUpId(null);
+    }
+  };
+
   return (
-    <div className="flex flex-col h-full bg-[#f2f2f7] pb-28">
+    <div className="flex flex-col h-full bg-[#f4f5f8] pb-28">
       {/* Header */}
-      <div className="px-4 pt-5 pb-3 bg-white border-b border-gray-200/80 sticky top-0 z-10 space-y-2.5">
+      <div className="px-4 pt-4 pb-3 bg-white border-b border-slate-200/80 sticky top-0 z-10 space-y-2.5 shadow-2xs">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-black text-gray-900 tracking-tight">Ученики</h1>
-            <p className="text-xs text-gray-500 font-semibold mt-0.5">
-              Активных: {activeStudents.length}
-              {inactiveStudents.length > 0 ? ` · На паузе: ${inactiveStudents.length}` : ''}
+            <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">
+              Ученики
+            </h1>
+            <p className="text-xs text-slate-500 font-medium mt-1">
+              Активных: <b className="text-slate-900">{activeStudents.length}</b>
+              {lowBalanceCount > 0 && (
+                <span className="text-rose-600 font-bold"> • К оплате: {lowBalanceCount}</span>
+              )}
+              {inactiveStudents.length > 0 ? ` • Пауза: ${inactiveStudents.length}` : ''}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -98,22 +186,27 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ students, onOpenStudent,
                 hapticImpact('light');
                 setSortMode((prev) => (prev === 'name' ? 'balance' : 'name'));
               }}
-              className={`h-9 px-2.5 rounded-xl border text-[11px] font-bold flex items-center gap-1 active:scale-95 transition-all ${
+              className={`h-9 px-3 rounded-xl border text-xs font-bold flex items-center gap-1 active:scale-95 transition-all ${
                 sortMode === 'balance'
                   ? 'bg-amber-50 border-amber-300 text-amber-800'
-                  : 'bg-gray-100 border-gray-200 text-gray-700'
+                  : 'bg-slate-100 border-slate-200 text-slate-700'
               }`}
               title="Переключить сортировку"
             >
               <ArrowUpDown className="w-3.5 h-3.5" />
-              <span>{sortMode === 'balance' ? 'Долги' : 'А-Я'}</span>
+              <span>{sortMode === 'balance' ? 'По балансу' : 'А–Я'}</span>
             </button>
             <button
               type="button"
-              onClick={(e) => { e.stopPropagation(); hapticImpact('light'); onAddStudent(); }}
-              className="w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center shadow-md shadow-blue-500/20 active:scale-90 transition-transform"
+              onClick={(e) => {
+                e.stopPropagation();
+                hapticImpact('light');
+                onAddStudent();
+              }}
+              className="h-9 px-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1 shadow-sm shadow-blue-500/20 active:scale-95 transition-all"
             >
-              <Plus className="w-5 h-5" strokeWidth={2.5} />
+              <Plus className="w-4 h-4 stroke-[2.5]" />
+              <span>Ученик</span>
             </button>
           </div>
         </div>
@@ -121,12 +214,12 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ students, onOpenStudent,
         {/* Search Bar */}
         <div className="relative">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Search className="h-4 w-4 text-gray-400" />
+            <Search className="h-4 w-4 text-slate-400" />
           </div>
           <input
             type="text"
-            className="block w-full pl-9 pr-3 py-2 bg-gray-100 border-transparent rounded-xl text-xs font-semibold text-gray-900 placeholder-gray-400 focus:outline-hidden focus:bg-white focus:ring-2 focus:ring-blue-500"
-            placeholder="Поиск по имени ученика"
+            className="block w-full pl-9 pr-3 py-2 bg-slate-100 border border-transparent rounded-xl text-xs font-semibold text-slate-900 placeholder-slate-400 focus:outline-hidden focus:bg-white focus:border-blue-500 transition-all"
+            placeholder="Поиск по имени ученика..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -136,7 +229,10 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ students, onOpenStudent,
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
           {[
             { id: 'all', label: `Все (${activeStudents.length})` },
-            { id: 'low_balance', label: `К оплате${lowBalanceCount > 0 ? ` (${lowBalanceCount})` : ''}` },
+            {
+              id: 'low_balance',
+              label: `К оплате${lowBalanceCount > 0 ? ` (${lowBalanceCount})` : ''}`,
+            },
             { id: 'package', label: 'Пакет' },
             { id: 'date_to_date', label: 'По датам' },
             ...(inactiveStudents.length > 0
@@ -150,12 +246,12 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ students, onOpenStudent,
                 hapticImpact('light');
                 setFilterMode(chip.id as FilterMode);
               }}
-              className={`shrink-0 px-2.5 py-1 rounded-xl text-[11px] font-bold border transition-all active:scale-95 ${
+              className={`shrink-0 px-3 py-1 rounded-xl text-[11px] font-bold border transition-all active:scale-95 ${
                 filterMode === chip.id
                   ? chip.id === 'low_balance'
-                    ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
-                    : 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                  : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                    ? 'bg-rose-600 text-white border-rose-600 shadow-2xs'
+                    : 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
               }`}
             >
               {chip.label}
@@ -165,13 +261,15 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ students, onOpenStudent,
       </div>
 
       {/* Students List */}
-      <div className="flex-1 px-4 py-4 space-y-3 overflow-y-auto">
+      <div className="flex-1 px-3.5 py-3.5 space-y-2.5 overflow-y-auto">
         {filtered.length === 0 ? (
-          <div className="text-center py-16 text-gray-400 text-xs font-semibold">
-            {students.length === 0 ? 'У вас пока нет учеников. Добавьте первого!' : 'По выбранному фильтру учеников нет'}
+          <div className="text-center py-16 text-slate-400 text-xs font-semibold">
+            {students.length === 0
+              ? 'У вас пока нет учеников. Добавьте первого!'
+              : 'По выбранному фильтру учеников нет'}
           </div>
         ) : (
-          filtered.map(student => {
+          filtered.map((student) => {
             const target = student.monthly_target_lessons || 12;
             const conducted = student.conducted_this_month || 0;
             const missed = student.missed_this_month || 0;
@@ -180,79 +278,169 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({ students, onOpenStudent,
             const isPkg = student.billing_type === 'package';
             const scheduleSummary = formatRecurringSummary(student.recurring_schedule);
             const isPaused = student.is_active === false;
+            const tgUrl = getTelegramUrl(student.telegram);
+            const progressPct = Math.min(100, Math.round((conducted / target) * 100));
 
             return (
               <div
                 key={student.id}
-                onClick={() => { hapticImpact('light'); onOpenStudent(student); }}
-                className={`w-full bg-white rounded-2xl p-3.5 shadow-xs border overflow-hidden cursor-pointer active:scale-[0.98] transition-all hover:border-blue-300 ${
-                  isPaused ? 'border-gray-200 opacity-75' : 'border-gray-200/70'
+                onClick={() => {
+                  hapticImpact('light');
+                  onOpenStudent(student);
+                }}
+                className={`w-full bg-white rounded-2xl p-3.5 shadow-2xs border overflow-hidden cursor-pointer active:scale-[0.99] transition-all hover:border-slate-300 space-y-2.5 ${
+                  isPaused
+                    ? 'border-slate-200 opacity-70'
+                    : balance <= 0
+                    ? 'border-rose-200/90'
+                    : 'border-slate-200/80'
                 }`}
               >
-                <div className="flex items-center justify-between mb-2.5 gap-2">
-                  <div className="flex items-center gap-3 min-w-0">
+                <div className="flex items-start justify-between gap-2.5">
+                  <div className="flex items-start gap-3 min-w-0">
                     <div
-                      className="w-10 h-10 rounded-full flex items-center justify-center text-white font-black text-sm shadow-xs shrink-0"
+                      className="w-10 h-10 rounded-2xl flex items-center justify-center text-white font-black text-sm shadow-2xs shrink-0 mt-0.5"
                       style={{ backgroundColor: student.color || '#3B82F6' }}
                     >
                       {student.name.charAt(0).toUpperCase()}
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <h3 className="text-sm font-bold text-gray-900 leading-tight truncate">{student.name}</h3>
+                        <h3 className="text-[15px] font-extrabold text-slate-900 leading-snug truncate">
+                          {student.name}
+                        </h3>
                         {isPaused && (
-                          <span className="px-1.5 py-0.5 rounded bg-gray-200 text-gray-700 text-[9px] font-black uppercase">
+                          <span className="px-1.5 py-0.5 rounded-md bg-slate-200 text-slate-700 text-[9px] font-black uppercase">
                             Пауза
                           </span>
                         )}
                       </div>
-                      <div className="text-[11px] text-gray-500 flex items-center gap-1.5 mt-0.5 font-medium flex-wrap">
-                        <span className="px-1.5 py-0.2 rounded bg-gray-100 text-gray-700 text-[10px] font-bold">
-                          {isPkg ? 'Пакет' : 'По датам'}
-                        </span>
-                        <span>• Оплата: <b>{student.billing_day || '10 число'}</b></span>
-                      </div>
-                      {scheduleSummary && (
-                        <div className="text-[11px] text-blue-700 font-semibold flex items-center gap-1 mt-0.5 truncate">
-                          <CalendarClock className="w-3 h-3 shrink-0" />
+
+                      {scheduleSummary ? (
+                        <div className="text-xs text-slate-700 font-semibold flex items-center gap-1 mt-0.5 truncate">
+                          <CalendarClock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                           <span className="truncate">{scheduleSummary}</span>
                         </div>
+                      ) : (
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          Расписание не задано
+                        </div>
                       )}
+
+                      <div className="text-[11px] text-slate-400 font-medium mt-0.5 flex items-center gap-1.5 flex-wrap">
+                        <span>{Math.round(rate / 1000)} тыс/ур.</span>
+                        <span>•</span>
+                        <span>
+                          {isPkg
+                            ? `Пакет ${target} ур.`
+                            : `Оплата: ${student.billing_day || '10'} числа`}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="text-right shrink-0">
+                  {/* Right: Balance Badge + Contact Quick Links */}
+                  <div className="flex flex-col items-end gap-1.5 shrink-0">
                     <span
-                      className={`text-xs font-black px-2.5 py-1 rounded-lg border ${
+                      className={`text-xs font-extrabold px-2.5 py-1 rounded-xl border inline-flex items-center gap-1 ${
                         balance <= 0
                           ? 'bg-rose-50 text-rose-700 border-rose-200'
                           : balance <= 2
-                          ? 'bg-amber-50 text-amber-700 border-amber-200'
-                          : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          ? 'bg-amber-50 text-amber-800 border-amber-200'
+                          : 'bg-emerald-50/80 text-emerald-800 border-emerald-200/80'
                       }`}
                     >
-                      Баланс: {balance} ур.
+                      {balance <= 0 && <AlertCircle className="w-3.5 h-3.5 text-rose-600" />}
+                      <span>{balance} ур.</span>
                     </span>
+
+                    {/* 1-Tap Contact Icons */}
+                    {(tgUrl || student.phone) && (
+                      <div
+                        className="flex items-center gap-1"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {tgUrl && (
+                          <a
+                            href={tgUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center active:scale-90 transition-all"
+                            title="Написать в Telegram"
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                        {student.phone && (
+                          <a
+                            href={`tel:${student.phone}`}
+                            className="w-7 h-7 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 flex items-center justify-center active:scale-90 transition-all"
+                            title="Позвонить"
+                          >
+                            <Phone className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {/* Progress / Status Bar */}
-                <div className="grid grid-cols-4 gap-1.5 pt-2.5 border-t border-gray-100 text-center">
-                  <div className="bg-gray-50 py-1.5 px-1 rounded-xl">
-                    <span className="text-[9px] font-bold text-gray-400 block uppercase">Ставка</span>
-                    <span className="text-[11px] font-black text-gray-800">{Math.round(rate / 1000)}k</span>
+                {/* Footer: Clean Monthly Progress + Quick Billing Actions */}
+                <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium mb-1">
+                      <span>
+                        В этом месяце: <b className="text-slate-800">{conducted}</b> из {target} ур.
+                        {missed > 0 ? ` (отм: ${missed})` : ''}
+                      </span>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-blue-600 rounded-full transition-all"
+                        style={{ width: `${progressPct}%` }}
+                      />
+                    </div>
                   </div>
-                  <div className="bg-blue-50 py-1.5 px-1 rounded-xl">
-                    <span className="text-[9px] font-bold text-blue-700 block uppercase">Норма</span>
-                    <span className="text-[11px] font-black text-blue-700">{target} ур.</span>
-                  </div>
-                  <div className="bg-green-50 py-1.5 px-1 rounded-xl">
-                    <span className="text-[9px] font-bold text-green-700 block uppercase">Был</span>
-                    <span className="text-[11px] font-black text-green-700">{conducted} ✅</span>
-                  </div>
-                  <div className="bg-red-50 py-1.5 px-1 rounded-xl">
-                    <span className="text-[9px] font-bold text-red-700 block uppercase">Пропуск</span>
-                    <span className="text-[11px] font-black text-red-700">{missed} ❌</span>
+
+                  {/* Quick Billing Buttons right on the card */}
+                  <div
+                    className="flex items-center gap-1.5 shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      onClick={(e) => handleQuickCopyInvoice(e, student)}
+                      className={`h-7 px-2.5 rounded-lg text-[11px] font-bold border inline-flex items-center gap-1 active:scale-95 transition-all ${
+                        copiedId === student.id
+                          ? 'bg-emerald-600 text-white border-emerald-600'
+                          : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
+                      }`}
+                      title="Скопировать счёт на оплату для родителей"
+                    >
+                      {copiedId === student.id ? (
+                        <>
+                          <Check className="w-3 h-3" />
+                          <span>Счёт!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3 h-3 text-slate-400" />
+                          <span>Счёт</span>
+                        </>
+                      )}
+                    </button>
+
+                    {balance <= 2 && (
+                      <button
+                        type="button"
+                        disabled={toppingUpId === student.id}
+                        onClick={(e) => handleQuickTopUp(e, student)}
+                        className="h-7 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold inline-flex items-center gap-0.5 shadow-2xs active:scale-95 transition-all disabled:opacity-50"
+                        title={`Пополнить баланс на ${target} уроков`}
+                      >
+                        <span>+{target} ур.</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
