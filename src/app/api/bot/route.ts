@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { claimUpdate, clearHistory, setPendingReason, popPendingReason } from '@/lib/botState';
 import { normName } from '@/lib/nameMatch';
 import { verifyTelegramWebhookSecret, isAllowedTelegramUser } from '@/lib/telegramAuth';
+import { getTutorSettings } from '@/lib/settings';
 
 export const maxDuration = 60;
 
@@ -64,17 +65,24 @@ async function answerCallbackQuery(callbackQueryId: string, text?: string) {
   } catch (e) {}
 }
 
-export async function buildMorningDigest(firstName: string = 'Фархад') {
+export async function buildMorningDigest(firstName?: string) {
   const todayFormatted = formatTashkentHeaderDate();
   await ensureRecurringLessonsForAllActiveStudents(9).catch((e) => {
     console.error('Failed to ensure recurring lessons in buildMorningDigest:', e);
   });
-  const [lessons, students] = await Promise.all([getLessons(), getStudents()]);
+  const [lessons, students, tutorSettings] = await Promise.all([
+    getLessons(),
+    getStudents(),
+    getTutorSettings(),
+  ]);
+  const greetingName = (firstName || tutorSettings.tutorName || '').trim();
   const todayLessons = lessons
     .filter((l) => isTashkentToday(l.date))
     .sort((a, b) => (a.time_str || '').localeCompare(b.time_str || ''));
 
-  let message = `☀️ <b>Доброе утро! Расписание на сегодня (${todayFormatted}):</b>\n`;
+  let message = greetingName
+    ? `☀️ <b>Доброе утро, ${escapeHtml(greetingName)}! Расписание на сегодня (${todayFormatted}):</b>\n`
+    : `☀️ <b>Доброе утро! Расписание на сегодня (${todayFormatted}):</b>\n`;
   message += `Всего запланировано: <b>${todayLessons.length} уроков</b>\n\n`;
 
   const keyboard: any[] = [];
@@ -286,7 +294,7 @@ async function handleMessage(message: any) {
   }
 
   const text = rawText.toLowerCase();
-  const firstName = message.from?.first_name || 'Фархад';
+  const firstName = message.from?.first_name;
 
   const defaultMarkup = {
     inline_keyboard: [
@@ -512,7 +520,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true });
       } else if (data === 'daily_schedule') {
         await answerCallbackQuery(cq.id);
-        const { text, markup } = await buildMorningDigest('Фархад');
+        const { text, markup } = await buildMorningDigest(cq.from?.first_name);
         await sendTelegramMessage(chatId, text, markup);
         return NextResponse.json({ ok: true });
       }

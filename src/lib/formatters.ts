@@ -30,7 +30,11 @@ export function getTashkentDateString(input?: Date | string | null): string {
   }
   if (typeof input === 'string') {
     const trimmed = input.trim();
-    if (/^\d{4}-\d{2}-\d{2}/.test(trimmed) && !trimmed.endsWith('Z')) {
+    if (
+      /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ||
+      (/^\d{4}-\d{2}-\d{2}[T ]/.test(trimmed) &&
+        (trimmed.endsWith('+05:00') || !/(Z|[+-]\d{2}:?\d{2})$/i.test(trimmed)))
+    ) {
       return trimmed.substring(0, 10);
     }
     const d = new Date(trimmed);
@@ -279,6 +283,22 @@ export function addDaysStr(dateStr: string, n: number): string {
 // 1-indexed weekday names matching dayOfWeekOf (1=Mon .. 7=Sun)
 export const WD_SHORT = ['', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
 export const WD_FULL = ['', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'];
+
+/**
+ * Formats an ISO timestamptz or YYYY-MM-DD payment date strictly in Asia/Tashkent (UTC+5),
+ * e.g. "19 ноя" (current year) or "19 ноя 2025".
+ */
+export function formatTashkentPaymentDate(input: string): string {
+  try {
+    const dateStr = getTashkentDateString(input);
+    const d = parseISO(`${dateStr}T12:00:00+05:00`);
+    const currentYear = getTashkentNow().getFullYear();
+    const fmt = d.getFullYear() === currentYear ? 'd MMM' : 'd MMM yyyy';
+    return format(d, fmt, { locale: ru }).replace('.', '');
+  } catch {
+    return input;
+  }
+}
 
 /**
  * Returns true if lesson notes contain real user-entered text rather than auto-generated placeholders.

@@ -31,6 +31,8 @@ import { ClientProfileScreen } from '@/components/tabs/ClientProfileScreen';
 import { AddStudentModal } from '@/components/modals/AddStudentModal';
 import { AddLessonModal } from '@/components/modals/AddLessonModal';
 import { EditLessonModal } from '@/components/modals/EditLessonModal';
+import { AddPaymentModal } from '@/components/modals/AddPaymentModal';
+import { getTutorSettings } from '@/lib/settings';
 
 export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<TabType>('schedule');
@@ -52,6 +54,8 @@ export default function Dashboard() {
     string | undefined
   >(undefined);
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
+  const [paymentModalStudent, setPaymentModalStudent] = useState<Student | null>(null);
+  const [paymentsVersion, setPaymentsVersion] = useState<number>(0);
 
   const refreshData = useCallback(async () => {
     try {
@@ -93,6 +97,7 @@ export default function Dashboard() {
       } catch {}
     }
     refreshData();
+    getTutorSettings().catch(() => {});
   }, [refreshData]);
 
   // Live recalculated attendance stats per student's individual billing period (from billing_day)
@@ -356,7 +361,8 @@ export default function Dashboard() {
   }
 
   // Determine modal/overlay stack depth for BackButton
-  const hasOverlay = Boolean(selectedLesson) || isAddStudentOpen || isAddLessonOpen;
+  const hasOverlay =
+    Boolean(paymentModalStudent) || Boolean(selectedLesson) || isAddStudentOpen || isAddLessonOpen;
   const hasProfile = Boolean(selectedStudent);
 
   return (
@@ -366,6 +372,10 @@ export default function Dashboard() {
         hasProfile={hasProfile}
         hasOverlay={hasOverlay}
         onCloseOverlay={() => {
+          if (paymentModalStudent) {
+            setPaymentModalStudent(null);
+            return;
+          }
           if (selectedLesson) {
             setSelectedLesson(null);
             return;
@@ -412,6 +422,7 @@ export default function Dashboard() {
             students={liveStudents}
             onOpenStudent={handleOpenStudent}
             onAddStudent={() => setIsAddStudentOpen(true)}
+            onOpenPaymentModal={(student) => setPaymentModalStudent(student)}
             onRefresh={refreshData}
           />
         )}
@@ -419,6 +430,7 @@ export default function Dashboard() {
           <StatsTab
             lessons={lessons}
             students={liveStudents}
+            paymentsVersion={paymentsVersion}
             onOpenStudent={handleOpenStudent}
           />
         )}
@@ -438,6 +450,7 @@ export default function Dashboard() {
           key={selectedStudent.id}
           student={selectedStudent}
           lessons={lessons}
+          paymentsVersion={paymentsVersion}
           onBack={() => {
             setSelectedStudentId(null);
           }}
@@ -445,6 +458,8 @@ export default function Dashboard() {
           onSaveStudentInfo={handleSaveStudentInfo}
           onUpdateLessonMissReason={handleUpdateLessonMissReason}
           onOpenLesson={(lesson) => setSelectedLesson(lesson)}
+          onOpenPaymentModal={(student) => setPaymentModalStudent(student)}
+          onPaymentsChanged={() => setPaymentsVersion((v) => v + 1)}
           onRefresh={refreshData}
           onAddLessonForStudent={(studentId) => {
             setSelectedDateForNewLesson(getTashkentNow());
@@ -549,6 +564,21 @@ export default function Dashboard() {
             console.error('Delete failed:', e);
             refreshData();
           }
+        }}
+      />
+
+      <AddPaymentModal
+        isOpen={Boolean(paymentModalStudent)}
+        student={paymentModalStudent}
+        onClose={() => setPaymentModalStudent(null)}
+        onSaved={async ({ studentId, newBalance }) => {
+          setStudents((prev) =>
+            prev.map((s) =>
+              s.id === studentId ? { ...s, lessons_balance: newBalance } : s
+            )
+          );
+          setPaymentsVersion((v) => v + 1);
+          await refreshData();
         }}
       />
     </div>

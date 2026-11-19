@@ -15,13 +15,15 @@ import {
 } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
 import { WD_SHORT, getStudentBillingPeriod } from '@/lib/formatters';
-import { calculateStudentBilling, topUpStudentBalance } from '@/lib/storage';
-import { getTutorSettings } from '@/lib/settings';
+import { calculateStudentBilling } from '@/lib/storage';
+import { getTutorSettings, buildParentInvoiceMessage } from '@/lib/settings';
+import { AddPaymentModal } from '@/components/modals/AddPaymentModal';
 
 interface ClientsTabProps {
   students: Student[];
   onOpenStudent: (student: Student) => void;
   onAddStudent: () => void;
+  onOpenPaymentModal?: (student: Student) => void;
   onRefresh?: () => Promise<void> | void;
 }
 
@@ -56,13 +58,14 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
   students,
   onOpenStudent,
   onAddStudent,
+  onOpenPaymentModal,
   onRefresh,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<FilterMode>('all');
   const [sortMode, setSortMode] = useState<SortMode>('name');
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [toppingUpId, setToppingUpId] = useState<string | null>(null);
+  const [localPaymentStudent, setLocalPaymentStudent] = useState<Student | null>(null);
 
   const activeStudents = useMemo(
     () => students.filter((s) => s.is_active !== false),
@@ -110,33 +113,11 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
     e.stopPropagation();
     hapticImpact('light');
     try {
-      const calc = await calculateStudentBilling(student.id);
-      const settings = getTutorSettings();
-      const lessonRate = student.lesson_rate || 300000;
-      const lessonsBalance = student.lessons_balance ?? 0;
-      let msg = `Здравствуйте! 📚 Направляю информацию по оплате занятий (${student.name}):\n\n`;
-      if (calc.billingType === 'package') {
-        const size = calc.packageSize || student.monthly_target_lessons || 12;
-        const sum = calc.packageAmount || size * lessonRate;
-        msg += `📦 Абонемент: ${size} уроков\n`;
-        msg += `💳 Стоимость пакета: ${sum.toLocaleString('ru-RU')} сум (${lessonRate.toLocaleString('ru-RU')} сум/урок)\n`;
-        msg += `⚖️ Текущий баланс: ${lessonsBalance} ур.\n`;
-        if (lessonsBalance < 0) {
-          const debt = Math.abs(lessonsBalance) * lessonRate;
-          msg += `⚠️ Задолженность за ${Math.abs(lessonsBalance)} ур.: ${debt.toLocaleString('ru-RU')} сум\n`;
-        }
-      } else {
-        const sD = calc.startDate?.split('-').reverse().join('.') || '';
-        const eD = calc.endDate?.split('-').reverse().join('.') || '';
-        msg += `📅 Расчётный период: ${sD} – ${eD}\n`;
-        msg += `🗓 Занятий по графику: ${calc.scheduledLessonsCount || 0} ур.\n`;
-        msg += `⚖️ Текущий баланс: ${lessonsBalance} ур.\n`;
-        msg += `💳 К оплате: ${calc.lessonsToPay ?? 0} ур. = ${(calc.netAmount ?? 0).toLocaleString('ru-RU')} сум\n`;
-      }
-      if (settings.cardNumber) {
-        msg += `\n💳 Реквизиты для оплаты:\n${settings.bankName}: ${settings.cardNumber}\nПолучатель: ${settings.cardHolder || settings.tutorName}\n`;
-      }
-      msg += `\nБуду рад(а) подтверждению после перевода! 🙏`;
+      const [calc, settings] = await Promise.all([
+        calculateStudentBilling(student.id),
+        getTutorSettings(),
+      ]);
+      const msg = buildParentInvoiceMessage(student, calc, settings);
       if (navigator.clipboard) {
         await navigator.clipboard.writeText(msg);
         setCopiedId(student.id);
@@ -148,17 +129,13 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
     }
   };
 
-  const handleQuickTopUp = async (e: React.MouseEvent, student: Student) => {
+  const handleOpenQuickPayment = (e: React.MouseEvent, student: Student) => {
     e.stopPropagation();
-    if (toppingUpId === student.id) return;
-    const packSize = student.monthly_target_lessons || 12;
-    hapticNotification('success');
-    setToppingUpId(student.id);
-    try {
-      await topUpStudentBalance(student.id, packSize);
-      await onRefresh?.();
-    } finally {
-      setToppingUpId(null);
+    hapticImpact('light');
+    if (onOpenPaymentModal) {
+      onOpenPaymentModal(student);
+    } else {
+      setLocalPaymentStudent(student);
     }
   };
 
@@ -433,10 +410,9 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                     {balance <= 2 && (
                       <button
                         type="button"
-                        disabled={toppingUpId === student.id}
-                        onClick={(e) => handleQuickTopUp(e, student)}
-                        className="h-7 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold inline-flex items-center gap-0.5 shadow-2xs active:scale-95 transition-all disabled:opacity-50"
-                        title={`Пополнить баланс на ${target} уроков`}
+                        onClick={(e) => handleOpenQuickPayment(e, student)}
+                        className="h-7 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold inline-flex items-center gap-0.5 shadow-2xs active:scale-95 transition-all tabular-nums"
+                        title={`Зафиксировать оплату на ${target} уроков`}
                       >
                         <span>+{target} ур.</span>
                       </button>
@@ -448,6 +424,17 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
           })
         )}
       </div>
+
+      {!onOpenPaymentModal && (
+        <AddPaymentModal
+          isOpen={Boolean(localPaymentStudent)}
+          student={localPaymentStudent}
+          onClose={() => setLocalPaymentStudent(null)}
+          onSaved={async () => {
+            await onRefresh?.();
+          }}
+        />
+      )}
     </div>
   );
 };

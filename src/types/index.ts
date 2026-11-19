@@ -2,6 +2,20 @@ export type LessonStatus = 'planned' | 'completed' | 'missed' | 'missed_excused'
 
 export type BillingType = 'date_to_date' | 'package';
 
+export type PaymentMethod = 'payme' | 'click' | 'card' | 'cash';
+
+export interface Payment {
+  id: string;
+  student_id: string;
+  student_name?: string;
+  amount_uzs: number;
+  lessons_added: number;
+  payment_method: PaymentMethod;
+  paid_at: string; // ISO timestamptz
+  note?: string | null;
+  created_at: string;
+}
+
 export interface RecurringSlot {
   dayOfWeek: number; // 1 (Пн) .. 7 (Вс)
   startTime: string; // '16:00'

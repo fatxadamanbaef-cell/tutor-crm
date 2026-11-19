@@ -1,4 +1,4 @@
-import { Student, Lesson, Makeup, AttendanceSummary, LessonStatus, RecurringSlot, BillingType, BillingCalculation } from '@/types';
+import { Student, Lesson, Makeup, AttendanceSummary, LessonStatus, RecurringSlot, BillingType, BillingCalculation, Payment, PaymentMethod } from '@/types';
 import { supabase } from './supabase';
 import { getTashkentTodayStr, getTashkentNow, getTashkentDateString, dayOfWeekOf, addDaysStr, getStudentBillingPeriod, extractBillingDayNumber } from './formatters';
 import { generateUUID } from './uuid';
@@ -283,6 +283,32 @@ export async function getLessons(fromDate?: string, toDate?: string): Promise<Le
 
   if (error) {
     console.error('Supabase getLessons error:', error);
+    throw error;
+  }
+
+  return (data || []).map(mapLessonRow);
+}
+
+/**
+ * Loads lessons strictly within an arbitrary [fromDate, toDate] range (no default window clamping).
+ * Used for archive analytics across arbitrary past or future months.
+ */
+export async function getLessonsByRange(fromDate: string, toDate: string): Promise<Lesson[]> {
+  if (!supabase) throw new Error('Supabase is not initialized');
+
+  const from = getTashkentDateString(fromDate);
+  const to = getTashkentDateString(toDate);
+
+  const { data, error } = await supabase
+    .from('tutor_lessons')
+    .select('*, tutor_students(name, color)')
+    .gte('lesson_date', from)
+    .lte('lesson_date', to)
+    .order('lesson_date', { ascending: true })
+    .order('start_time', { ascending: true });
+
+  if (error) {
+    console.error('Supabase getLessonsByRange error:', error);
     throw error;
   }
 
@@ -1511,4 +1537,159 @@ export async function calculateStudentBilling(
     netAmount,
     summaryText,
   };
+}
+
+// -------------------------------------------------------------
+// PAYMENTS (CASH FLOW) & ATOMIC RPCs (Migration v5)
+// -------------------------------------------------------------
+export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
+  payme: 'Payme',
+  click: 'Click',
+  card: 'Карта',
+  cash: 'Наличные',
+};
+
+function normalizePaymentMethod(method?: string | null): PaymentMethod {
+  const m = String(method || '').trim().toLowerCase();
+  if (m === 'click' || m === 'card' || m === 'cash' || m === 'payme') return m;
+  return 'payme';
+}
+
+function mapPaymentRow(row: any): Payment {
+  return {
+    id: String(row.id),
+    student_id: String(row.student_id),
+    student_name: row.tutor_students?.name || row.student_name || undefined,
+    amount_uzs: Number(row.amount_uzs) || 0,
+    lessons_added: Number(row.lessons_added) || 0,
+    payment_method: normalizePaymentMethod(row.payment_method),
+    paid_at: String(row.paid_at || row.created_at || new Date().toISOString()),
+    note: row.note ?? null,
+    created_at: String(row.created_at || row.paid_at || new Date().toISOString()),
+  };
+}
+
+function buildPaidAtIso(paidAt?: string | null): string {
+  if (!paidAt || !paidAt.trim()) {
+    return new Date().toISOString();
+  }
+  const trimmed = paidAt.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const todayStr = getTashkentTodayStr();
+    if (trimmed === todayStr) {
+      const now = getTashkentNow();
+      const hh = String(now.getHours()).padStart(2, '0');
+      const mm = String(now.getMinutes()).padStart(2, '0');
+      const ss = String(now.getSeconds()).padStart(2, '0');
+      return `${trimmed}T${hh}:${mm}:${ss}+05:00`;
+    }
+    return `${trimmed}T12:00:00+05:00`;
+  }
+  return trimmed;
+}
+
+export async function recordStudentPayment(params: {
+  studentId: string;
+  amountUzs: number;
+  lessonsAdded: number;
+  paymentMethod?: PaymentMethod;
+  paidAt?: string;
+  note?: string | null;
+}): Promise<{ payment: Payment; newBalance: number }> {
+  if (!supabase) throw new Error('Supabase is not initialized');
+
+  const amountUzs = Math.max(0, Math.round(Number(params.amountUzs) || 0));
+  const lessonsAdded = Math.round(Number(params.lessonsAdded) || 0);
+  const paymentMethod = normalizePaymentMethod(params.paymentMethod);
+  const paidAtIso = buildPaidAtIso(params.paidAt);
+  const note = params.note?.trim() || null;
+
+  const { data, error } = await supabase.rpc('record_student_payment', {
+    p_student_id: params.studentId,
+    p_amount_uzs: amountUzs,
+    p_lessons_added: lessonsAdded,
+    p_payment_method: paymentMethod,
+    p_paid_at: paidAtIso,
+    p_note: note,
+  });
+
+  if (error) {
+    console.error('Supabase record_student_payment RPC error:', error);
+    throw new Error(error.message || 'Не удалось зафиксировать оплату');
+  }
+
+  const rawPayment = data?.payment ?? data;
+  const newBalance = typeof data?.new_balance === 'number' ? data.new_balance : Number(data?.new_balance ?? 0);
+
+  return {
+    payment: mapPaymentRow(rawPayment),
+    newBalance,
+  };
+}
+
+export async function deleteStudentPayment(
+  paymentId: string
+): Promise<{ deletedPayment: Payment; studentId: string; newBalance: number }> {
+  if (!supabase) throw new Error('Supabase is not initialized');
+
+  const { data, error } = await supabase.rpc('delete_student_payment', {
+    p_payment_id: paymentId,
+  });
+
+  if (error) {
+    console.error('Supabase delete_student_payment RPC error:', error);
+    throw new Error(error.message || 'Не удалось удалить платёж');
+  }
+
+  const rawDeleted = data?.deleted_payment ?? {};
+  const studentId = String(data?.student_id || rawDeleted.student_id || '');
+  const newBalance = typeof data?.new_balance === 'number' ? data.new_balance : Number(data?.new_balance ?? 0);
+
+  return {
+    deletedPayment: mapPaymentRow(rawDeleted),
+    studentId,
+    newBalance,
+  };
+}
+
+export async function getStudentPayments(studentId: string, limit: number = 25): Promise<Payment[]> {
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from('tutor_payments')
+    .select('*')
+    .eq('student_id', studentId)
+    .order('paid_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.warn('[getStudentPayments] Failed to fetch tutor_payments:', error.message);
+    return [];
+  }
+
+  return (data || []).map(mapPaymentRow);
+}
+
+/**
+ * Loads payments strictly within an arbitrary [fromDate, toDate] range in Asia/Tashkent (UTC+5).
+ */
+export async function getPaymentsByRange(fromDate: string, toDate: string): Promise<Payment[]> {
+  if (!supabase) return [];
+
+  const fromClean = getTashkentDateString(fromDate);
+  const toClean = getTashkentDateString(toDate);
+
+  const { data, error } = await supabase
+    .from('tutor_payments')
+    .select('*, tutor_students(name)')
+    .gte('paid_at', `${fromClean}T00:00:00+05:00`)
+    .lte('paid_at', `${toClean}T23:59:59.999+05:00`)
+    .order('paid_at', { ascending: false });
+
+  if (error) {
+    console.warn('[getPaymentsByRange] Failed to fetch tutor_payments:', error.message);
+    return [];
+  }
+
+  return (data || []).map(mapPaymentRow);
 }

@@ -1,5 +1,5 @@
 import OpenAI, { toFile } from 'openai';
-import type { Student, Lesson, LessonStatus, RecurringSlot, BillingType } from '@/types';
+import type { Student, Lesson, LessonStatus, RecurringSlot, BillingType, PaymentMethod } from '@/types';
 import {
   getStudents,
   getLessons,
@@ -14,8 +14,10 @@ import {
   saveLesson,
   planRecurringLessonsForStudent,
   calculateStudentBilling,
-  topUpStudentBalance,
+  recordStudentPayment,
+  PAYMENT_METHOD_LABELS,
 } from './storage';
+import { getTutorSettings, buildParentInvoiceMessage } from './settings';
 import { getTashkentTodayStr, getTashkentNow, dayOfWeekOf, addDaysStr, WD_SHORT, WD_FULL } from './formatters';
 import { resolveStudent, findExistingByName } from './nameMatch';
 import { getHistory, appendHistory } from './botState';
@@ -127,7 +129,7 @@ const TOOLS = [
   // 4. Расчет биллинга / счета за период
   fn(
     'calculateStudentBilling',
-    'Рассчитывает стоимость обучения ученика за период. Для date_to_date считает точное количество уроков по расписанию в текущем/следующем периоде с учетом баланса. Для package рассчитывает стоимость пакета уроков.',
+    'Рассчитывает стоимость обучения ученика за период и возвращает актуальные реквизиты карты преподавателя для готового счёта родителям. Для date_to_date считает точное количество уроков по расписанию с учетом баланса. Для package рассчитывает стоимость пакета уроков.',
     {
       studentName: studentNameProp,
       startDate: { type: 'string', description: 'Начальная дата периода YYYY-MM-DD (необязательно)' },
@@ -136,13 +138,16 @@ const TOOLS = [
     ['studentName']
   ),
 
-  // 5. Пополнение баланса при оплате
+  // 5. Пополнение баланса и запись оплаты в кассу
   fn(
     'addStudentPayment',
-    'Пополняет баланс уроков ученика при оплате (например: оплатил 8 уроков, внес абонемент).',
+    'Фиксирует фактическую оплату ученика в кассе (tutor_payments) и атомарно пополняет баланс уроков (например: «Аслан оплатил 8 уроков через Payme», «Сахиб перевел 2 400 000 на карту за 8 уроков»). Если сумма не указана — вычисляется автоматически как lessonsCount * lesson_rate.',
     {
       studentName: studentNameProp,
       lessonsCount: { type: 'integer', description: 'Количество оплаченных уроков (например 8, 10, 12)' },
+      amount_uzs: { type: 'integer', description: 'Фактическая сумма оплаты в сумах (необязательно; если не названа — вычисляется как lessonsCount * ставка ученика)' },
+      payment_method: { type: 'string', enum: ['payme', 'click', 'card', 'cash'], description: 'Способ оплаты: payme, click, card (карта) или cash (наличные). По умолчанию payme.' },
+      note: { type: 'string', description: 'Необязательная заметка к оплате (например: за ноябрь, перевод от мамы)' },
     },
     ['studentName', 'lessonsCount']
   ),
@@ -397,28 +402,74 @@ function createToolbox(): Toolbox {
     // 4. calculateStudentBilling
     async calculateStudentBilling(a) {
       const student = await pickStudent(a.studentName);
-      const calc = await calculateStudentBilling(student.id, a.startDate, a.endDate);
+      const [calc, settings] = await Promise.all([
+        calculateStudentBilling(student.id, a.startDate, a.endDate),
+        getTutorSettings(),
+      ]);
+
+      const paymentDetails = {
+        tutorName: settings.tutorName,
+        bankName: settings.bankName,
+        cardNumber: settings.cardNumber,
+        cardHolder: settings.cardHolder || settings.tutorName,
+      };
+      const parentInvoiceText = buildParentInvoiceMessage(student, calc, settings);
+
       return {
         success: true,
         calculation: calc,
         summary: calc.summaryText,
+        paymentDetails,
+        parentInvoiceText,
       };
     },
 
     // 5. addStudentPayment
     async addStudentPayment(a) {
       const student = await pickStudent(a.studentName);
-      const count = Number(a.lessonsCount) || 0;
+      const count = Math.round(Number(a.lessonsCount) || 0);
       if (count <= 0) throw new Error('Количество уроков должно быть больше 0.');
-      const newBalance = await topUpStudentBalance(student.id, count);
+
+      const rate = student.lesson_rate || 300000;
+      const hasCustomAmount =
+        a.amount_uzs !== undefined &&
+        a.amount_uzs !== null &&
+        Number.isFinite(Number(a.amount_uzs)) &&
+        Number(a.amount_uzs) >= 0;
+      const amountUzs = hasCustomAmount ? Math.round(Number(a.amount_uzs)) : count * rate;
+
+      const validMethods: PaymentMethod[] = ['payme', 'click', 'card', 'cash'];
+      const rawMethod = typeof a.payment_method === 'string' ? a.payment_method.toLowerCase().trim() : 'payme';
+      const paymentMethod: PaymentMethod = validMethods.includes(rawMethod as PaymentMethod)
+        ? (rawMethod as PaymentMethod)
+        : 'payme';
+
+      const note = typeof a.note === 'string' && a.note.trim() ? a.note.trim() : null;
+
+      const { payment, newBalance } = await recordStudentPayment({
+        studentId: student.id,
+        amountUzs,
+        lessonsAdded: count,
+        paymentMethod,
+        note,
+      });
+
       cache = null;
-      writes.push(`${student.name}: оплата +${count} ур. (баланс: ${newBalance} ур.)`);
+      const methodLabel = PAYMENT_METHOD_LABELS[paymentMethod];
+      writes.push(
+        `${student.name}: оплата ${amountUzs.toLocaleString('ru-RU')} сум (${methodLabel}, +${count} ур., баланс: ${newBalance} ур.)`
+      );
       return {
         success: true,
+        paymentId: payment.id,
         student: student.name,
         lessonsAdded: count,
+        amountUzs,
+        paymentMethod,
+        paymentMethodLabel: methodLabel,
+        note,
         newBalance,
-        message: `Ученику ${student.name} успешно добавлено ${count} уроков. Новый баланс: ${newBalance} ур.`,
+        message: `Оплата от ${student.name} записана в кассу: ${amountUzs.toLocaleString('ru-RU')} сум (${methodLabel}), +${count} ур. Новый баланс: ${newBalance} ур.`,
       };
     },
 
@@ -576,13 +627,18 @@ export async function processWithAI(text: string): Promise<string> {
     const timeNow = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
     const dayOfWeek = WD_FULL[dayOfWeekOf(today)];
 
-    const students = await getStudents();
+    const [students, tutorSettings] = await Promise.all([getStudents(), getTutorSettings()]);
     const studentsBrief = students
       .map((s) => `• ${s.name} [тип: ${s.billing_type || 'date_to_date'}, ставка: ${(s.lesson_rate || 300000).toLocaleString('ru-RU')} сум, баланс: ${s.lessons_balance ?? 0} ур., оплата: ${s.billing_day || '10'}]`)
       .join('\n');
 
-    const systemPrompt = `Ты — умный ИИ-ассистент преподавателя в CRM Tutor Tracker 2.0 (Модель Hybrid Billing & Balance Tracking).
+    const cardLine = tutorSettings.cardNumber
+      ? `Реквизиты преподавателя: ${tutorSettings.bankName || 'Карта'} — ${tutorSettings.cardNumber} (${tutorSettings.cardHolder || tutorSettings.tutorName}).`
+      : 'Реквизиты карты преподавателя пока не заполнены в настройках.';
+
+    const systemPrompt = `Ты — умный ИИ-ассистент преподавателя ${tutorSettings.tutorName} в CRM Tutor Tracker 2.0 (Модель Hybrid Billing & Balance Tracking).
 Текущее время (Ташкент, UTC+5): ${today} (${dayOfWeek}), ${timeNow}.
+${cardLine}
 
 Список учеников преподавателя:
 ${studentsBrief}
@@ -592,11 +648,11 @@ ${studentsBrief}
    - completed (✅ Проведен): списывает 1 урок с баланса ученика.
    - missed_penalty (🔥 Сгорел / Пропуск без предупреждения): списывает 1 урок с баланса ученика (платный пропуск).
    - missed_excused (🛑 Уважительная отмена): НЕ списывает урок (урок сохраняется на балансе).
-2. Биллинг и балансы:
+2. Биллинг, оплаты и балансы:
    - Каждый ученик имеет ставку за урок (lesson_rate, по умолчанию 300 000 сум) и баланс уроков (lessons_balance).
    - Две модели: date_to_date (оплата по числу месяца billing_day, уроки считаются по календарному расписанию за период с учетом остатка) и package (оплата фиксированными пакетами уроков).
-   - Если спрашивают стоимость обучения, расчет или счет за период — вызывай calculateStudentBilling.
-   - Если сообщают об оплате уроков (например: «Аслан оплатил 8 уроков», «пополни баланс Фазилат на 12») — вызывай addStudentPayment.
+   - Если спрашивают стоимость обучения, расчет или счет для родителя — вызывай calculateStudentBilling. Инструмент возвращает актуальные реквизиты (paymentDetails) и готовый текст счёта (parentInvoiceText) с номером карты — включай готовый счёт с реквизитами в ответ, чтобы преподаватель мог сразу переслать его родителю.
+   - Если сообщают об оплате уроков (например: «Аслан оплатил 8 уроков через Click», «Сахиб скинул 2 400 000 наличными за 8 уроков») — вызывай addStudentPayment с lessonsCount и опциональными amount_uzs, payment_method (payme | click | card | cash), note. Если сумма не названа, не придумывай — она автоматически посчитается по ставке ученика.
 3. Перенос и добавление уроков:
    - При переносе урока — ВСЕГДА вызывай rescheduleLesson. Можно переносить любой урок на новую дату/время. Если дата не указана, функция сама найдет подходящий урок.
    - Для добавления разового или дополнительного урока (не меняя старые уроки) — вызывай addLesson.
@@ -679,7 +735,7 @@ export async function transcribeVoice(fileId: string): Promise<string> {
       names = (await getStudents()).map((s) => s.name).join(', ');
     } catch {}
 
-    const prompt = `Преподаватель диктует команды для расписания. Ученики: ${names}. Слова: провел, был, пропустил, заболел, перенеси на воскресенье, отработка, расписание.`.slice(0, 600);
+    const prompt = `Преподаватель диктует команды для CRM. Ученики: ${names}. Слова: провел, был, пропустил, заболел, перенеси, оплатил, Payme, Click, карта, наличные, счёт, баланс, расписание.`.slice(0, 600);
 
     const transcription = await getClient().audio.transcriptions.create({
       file,

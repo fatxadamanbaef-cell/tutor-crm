@@ -1,8 +1,14 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { CreditCard, Check, CalendarClock, Send, Download, Info, ExternalLink, Loader2 } from 'lucide-react';
-import { getTutorSettings, saveTutorSettings, TutorSettings, DEFAULT_SETTINGS } from '@/lib/settings';
+import React, { useState, useEffect, useId } from 'react';
+import { CreditCard, Check, CalendarClock, Send, Download, Info, ExternalLink, Loader2, CloudUpload } from 'lucide-react';
+import {
+  getCachedTutorSettings,
+  loadTutorSettingsWithMeta,
+  saveTutorSettings,
+  TutorSettings,
+  DEFAULT_SETTINGS,
+} from '@/lib/settings';
 import { ensureRecurringLessonsForAllActiveStudents } from '@/lib/storage';
 import { generateMonthlyExportData } from '@/lib/reports';
 import { hapticImpact, hapticNotification, getTelegramWebApp } from '@/lib/telegram';
@@ -11,9 +17,16 @@ interface SettingsTabProps {
   onRefresh?: () => Promise<void> | void;
 }
 
+const REMINDER_PRESETS = [10, 15, 20, 30];
+
 export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
+  const baseId = useId();
   const [settings, setSettings] = useState<TutorSettings>(DEFAULT_SETTINGS);
+  const [isLoadingSettings, setIsLoadingSettings] = useState(true);
+  const [needsMigration, setNeedsMigration] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [savedNotice, setSavedNotice] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const [isExtending, setIsExtending] = useState(false);
   const [extendResult, setExtendResult] = useState<string | null>(null);
@@ -24,16 +37,48 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
   const [isExporting, setIsExporting] = useState(false);
 
   useEffect(() => {
-    setSettings(getTutorSettings());
+    let active = true;
+    // Fast client cache hydrate for instant render
+    setSettings(getCachedTutorSettings());
+
+    // Fetch authoritative settings from Supabase (or detect localStorage migration)
+    loadTutorSettingsWithMeta()
+      .then((res) => {
+        if (!active) return;
+        setSettings(res.settings);
+        setNeedsMigration(res.needsMigrationFromLocal);
+      })
+      .finally(() => {
+        if (active) setIsLoadingSettings(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const handleSaveSettings = (e: React.FormEvent) => {
+  const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    hapticNotification('success');
-    const updated = saveTutorSettings(settings);
-    setSettings(updated);
-    setSavedNotice(true);
-    setTimeout(() => setSavedNotice(false), 2000);
+    if (isSavingSettings) return;
+
+    setIsSavingSettings(true);
+    setSaveError(null);
+    hapticImpact('light');
+
+    try {
+      const updated = await saveTutorSettings(settings);
+      setSettings(updated);
+      setNeedsMigration(false);
+      setSavedNotice(true);
+      hapticNotification('success');
+      setTimeout(() => setSavedNotice(false), 2200);
+    } catch (err: any) {
+      console.error('Failed to save tutor settings:', err);
+      hapticNotification('error');
+      setSaveError(err?.message || 'Не удалось сохранить реквизиты в Supabase');
+    } finally {
+      setIsSavingSettings(false);
+    }
   };
 
   const handleExtendSchedule = async () => {
@@ -134,22 +179,37 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
       <div className="p-4 space-y-4">
         {/* Payment Details Form */}
         <form onSubmit={handleSaveSettings} className="bg-white rounded-3xl p-4 shadow-xs border border-gray-200/80 space-y-3">
-          <div className="flex items-center gap-2 pb-1">
-            <div className="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600">
-              <CreditCard className="w-4 h-4" />
+          <div className="flex items-center justify-between gap-2 pb-1">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600">
+                <CreditCard className="w-4 h-4" />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">Реквизиты для оплаты</h2>
+                <p className="text-[11px] text-gray-500">Хранятся в базе и подставляются в счета и бота</p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-sm font-semibold text-gray-900">Реквизиты для оплаты</h2>
-              <p className="text-[11px] text-gray-500">Подставляются в счёт для родителей</p>
-            </div>
+            {isLoadingSettings && <Loader2 className="w-4 h-4 text-gray-400 animate-spin shrink-0" />}
           </div>
+
+          {needsMigration && (
+            <div className="px-3 py-2 rounded-2xl bg-amber-50 border border-amber-200/80 text-amber-900 text-[11px] font-medium flex items-center gap-2">
+              <CloudUpload className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>Локальные реквизиты подставлены в форму — нажмите «Сохранить реквизиты» для переноса в базу.</span>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">
+              <label
+                htmlFor={`${baseId}-tutorName`}
+                className="text-[10px] font-bold text-gray-400 uppercase block mb-1"
+              >
                 Имя репетитора
               </label>
               <input
+                id={`${baseId}-tutorName`}
+                name="tutor_name"
                 type="text"
                 value={settings.tutorName}
                 onChange={(e) => setSettings((p) => ({ ...p, tutorName: e.target.value }))}
@@ -157,10 +217,15 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
               />
             </div>
             <div>
-              <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">
+              <label
+                htmlFor={`${baseId}-bankName`}
+                className="text-[10px] font-bold text-gray-400 uppercase block mb-1"
+              >
                 Банк / Сервис
               </label>
               <input
+                id={`${baseId}-bankName`}
+                name="bank_name"
                 type="text"
                 value={settings.bankName}
                 onChange={(e) => setSettings((p) => ({ ...p, bankName: e.target.value }))}
@@ -171,11 +236,17 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
           </div>
 
           <div>
-            <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">
+            <label
+              htmlFor={`${baseId}-cardNumber`}
+              className="text-[10px] font-bold text-gray-400 uppercase block mb-1"
+            >
               Номер карты
             </label>
             <input
+              id={`${baseId}-cardNumber`}
+              name="card_number"
               type="text"
+              inputMode="numeric"
               value={settings.cardNumber}
               onChange={(e) => setSettings((p) => ({ ...p, cardNumber: e.target.value }))}
               placeholder="8600 0000 0000 0000"
@@ -184,10 +255,15 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
           </div>
 
           <div>
-            <label className="text-[10px] font-bold text-gray-400 uppercase block mb-1">
+            <label
+              htmlFor={`${baseId}-cardHolder`}
+              className="text-[10px] font-bold text-gray-400 uppercase block mb-1"
+            >
               Получатель (ФИО на карте)
             </label>
             <input
+              id={`${baseId}-cardHolder`}
+              name="card_holder"
               type="text"
               value={settings.cardHolder}
               onChange={(e) => setSettings((p) => ({ ...p, cardHolder: e.target.value }))}
@@ -196,16 +272,61 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
             />
           </div>
 
+          <div>
+            <span className="text-[10px] font-bold text-gray-400 uppercase block mb-1.5">
+              Напоминание до урока (мин)
+            </span>
+            <div className="grid grid-cols-4 gap-1.5">
+              {REMINDER_PRESETS.map((min) => (
+                <button
+                  key={min}
+                  type="button"
+                  onClick={() => {
+                    hapticImpact('light');
+                    setSettings((p) => ({ ...p, reminderMinutesBefore: min }));
+                  }}
+                  className={`py-1.5 rounded-xl text-xs font-semibold tabular-nums border transition-all active:scale-95 ${
+                    settings.reminderMinutesBefore === min
+                      ? 'bg-slate-900 text-white border-slate-900'
+                      : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                  }`}
+                >
+                  {min} мин
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {saveError && (
+            <div
+              role="alert"
+              aria-live="polite"
+              className="px-3 py-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-semibold"
+            >
+              {saveError}
+            </div>
+          )}
+
           <button
             type="submit"
-            className={`w-full py-2.5 rounded-2xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-98 ${
+            disabled={isSavingSettings}
+            className={`w-full py-2.5 rounded-2xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-98 disabled:opacity-60 ${
               savedNotice
                 ? 'bg-emerald-600 text-white shadow-sm'
                 : 'bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/20'
             }`}
           >
-            <Check className="w-4 h-4" />
-            <span>{savedNotice ? 'Реквизиты сохранены!' : 'Сохранить реквизиты'}</span>
+            {isSavingSettings ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Сохранение...</span>
+              </>
+            ) : (
+              <>
+                <Check className="w-4 h-4" />
+                <span>{savedNotice ? 'Реквизиты сохранены!' : 'Сохранить реквизиты'}</span>
+              </>
+            )}
           </button>
         </form>
 
@@ -273,7 +394,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
                 <span className="text-[11px] text-gray-400">Tutor Tracker · Hybrid Billing</span>
               </div>
             </div>
-            <span className="text-xs text-gray-500 font-bold">2.0</span>
+            <span className="text-xs text-gray-500 font-bold tabular-nums">2.0</span>
           </div>
           <a href="https://t.me/farxad_dev" target="_blank" rel="noopener noreferrer" className="p-4 flex items-center justify-between">
             <div className="flex items-center gap-3">

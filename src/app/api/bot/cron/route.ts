@@ -5,6 +5,7 @@ import { sendTelegramMessage, buildMorningDigest } from '../route';
 import { supabase } from '@/lib/supabase';
 import { claimNotification } from '@/lib/botState';
 import { verifyCronSecret } from '@/lib/telegramAuth';
+import { getTutorSettings } from '@/lib/settings';
 import { format, parseISO, subDays, startOfWeek, endOfWeek } from 'date-fns';
 import { ru } from 'date-fns/locale';
 
@@ -60,10 +61,11 @@ export async function GET(req: NextRequest) {
       console.error('Failed to auto-ensure recurring lessons in cron:', e);
     });
 
-    const [lessons, students, pendingMakeups] = await Promise.all([
+    const [lessons, students, pendingMakeups, tutorSettings] = await Promise.all([
       getLessons(),
       getStudents(),
       getPendingMakeups(),
+      getTutorSettings(),
     ]);
 
     const notificationsSent: string[] = [];
@@ -78,7 +80,7 @@ export async function GET(req: NextRequest) {
 
       if (shouldSend) {
         notifiedLessonsMap.add(digestKey);
-        const { text: digestText, markup } = await buildMorningDigest('Фархад');
+        const { text: digestText, markup } = await buildMorningDigest(tutorSettings.tutorName);
 
         for (const chatId of recipientChatIds) {
           await sendTelegramMessage(chatId, digestText, markup);
@@ -88,8 +90,12 @@ export async function GET(req: NextRequest) {
     }
 
     // =========================================================================
-    // 2. 15-MINUTE LESSON REMINDERS (Checks lessons starting in 12-18 mins)
+    // 2. PRE-LESSON REMINDERS (Uses tutor_settings.reminder_minutes_before, ±3 min window)
     // =========================================================================
+    const reminderBefore = Math.max(5, Number(tutorSettings.reminderMinutesBefore) || 15);
+    const reminderWindowMin = Math.max(1, reminderBefore - 3);
+    const reminderWindowMax = reminderBefore + 3;
+
     if (mode === 'reminders' || mode === 'all') {
       const todayPlannedLessons = lessons.filter(
         (l) => l.date.startsWith(todayStr) && (l.status === 'planned' || l.status === 'scheduled') && !l.reminder_sent
@@ -106,10 +112,9 @@ export async function GET(req: NextRequest) {
         }
 
         const minutesUntilStart = lessonStartMinutes - currentTotalMinutes;
-        const reminderKey = `reminder_15m_${lesson.id}_${todayStr}`;
+        const reminderKey = `reminder_${lesson.id}_${todayStr}`;
 
-        // 12 to 18 minutes before start
-        if (minutesUntilStart >= 12 && minutesUntilStart <= 18) {
+        if (minutesUntilStart >= reminderWindowMin && minutesUntilStart <= reminderWindowMax) {
           const shouldSend = force || (!notifiedLessonsMap.has(reminderKey) && (await claimNotification(reminderKey)));
           if (!shouldSend) continue;
 
@@ -132,7 +137,7 @@ export async function GET(req: NextRequest) {
             .filter((l) => l.student_id === lesson.student_id && l.status === 'completed' && l.date < lesson.date && Boolean(l.notes))
             .sort((a, b) => b.date.localeCompare(a.date))[0];
 
-          let alertText = `🔔 <b>Через 15 минут урок: ${studentName} (${lesson.time_str || '16:00'})</b>\n\n`;
+          let alertText = `🔔 <b>Через ${reminderBefore} минут урок: ${studentName} (${lesson.time_str || '16:00'})</b>\n\n`;
           alertText += `⚖️ <b>Баланс уроков:</b> <b>${student?.lessons_balance ?? 0} ур.</b> | проведено в мес.: <b>${conducted}/${target}</b>\n`;
 
           if (studentPastMisses.length > 0) {

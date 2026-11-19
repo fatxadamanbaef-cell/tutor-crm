@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const { text: digestText, markup } = await buildMorningDigest('Фархад');
+    const { text: digestText, markup } = await buildMorningDigest();
     const sent = await sendTelegramMessage(chatId, digestText, markup);
 
     if (!sent) {
@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     let targetChatId: string | number = '';
-    let firstName = 'Фархад';
+    let firstName: string | undefined;
 
     const authHeader = req.headers.get('authorization') || '';
     if (authHeader.startsWith('Bearer ')) {
