@@ -12,7 +12,7 @@ import {
   addDaysStr,
   formatTashkentHeaderDate,
 } from '@/lib/formatters';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, LayoutGrid, List } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, LayoutGrid, List, Plus } from 'lucide-react';
 import { hapticImpact, hapticSelection } from '@/lib/telegram';
 import {
   isSameDay,
@@ -33,12 +33,14 @@ interface HorizontalDateStripProps {
   selectedDate: Date;
   onSelectDate: (date: Date) => void;
   lessons: Lesson[];
+  onQuickAdd?: () => void;
 }
 
 export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
   selectedDate,
   onSelectDate,
   lessons,
+  onQuickAdd,
 }) => {
   const [isMonthView, setIsMonthView] = useState(false);
   const [currentMonthDate, setCurrentMonthDate] = useState(selectedDate);
@@ -126,24 +128,24 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
   };
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1.5">
       {/* Date Strip Header */}
-      <div className="flex items-center justify-between px-0.5">
-        <div className="flex items-center gap-1.5">
-          <CalendarIcon className="w-3.5 h-3.5 text-blue-600" />
-          <span className="text-xs font-extrabold capitalize tracking-tight text-slate-800">
+      <div className="flex items-center justify-between gap-2 px-0.5">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <CalendarIcon className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+          <span className="text-xs font-semibold capitalize tracking-tight text-slate-800 truncate">
             {isSelectedToday
               ? `Сегодня • ${formatTashkentHeaderDate(selectedDate)}`
               : formatTashkentHeaderDate(selectedDate)}
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
           {!isSelectedToday && (
             <button
               type="button"
               onClick={handleTodayClick}
-              className="text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200/80 px-2.5 py-1 rounded-lg active:scale-95 transition-all"
+              className="h-7 text-[11px] font-semibold text-blue-700 bg-blue-50 border border-blue-200/80 px-2 rounded-lg active:scale-95 transition-all"
             >
               Сегодня
             </button>
@@ -156,10 +158,10 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
               setIsMonthView(!isMonthView);
               setCurrentMonthDate(selectedDate);
             }}
-            className={`flex items-center gap-1 text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all active:scale-95 ${
+            className={`h-7 flex items-center gap-1 text-[11px] font-semibold px-2 rounded-lg border transition-all active:scale-95 ${
               isMonthView
                 ? 'bg-slate-900 text-white border-slate-900'
-                : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                : 'bg-slate-50/90 text-slate-700 border-slate-200 hover:bg-slate-100'
             }`}
           >
             {isMonthView ? (
@@ -174,12 +176,27 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
               </>
             )}
           </button>
+
+          {onQuickAdd && (
+            <button
+              type="button"
+              onClick={() => {
+                hapticImpact('light');
+                onQuickAdd();
+              }}
+              className="w-7 h-7 rounded-lg bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center shadow-xs active:scale-95 transition-all shrink-0 animate-in fade-in zoom-in-95 duration-150 motion-reduce:animate-none"
+              title="Добавить урок"
+              aria-label="Добавить урок"
+            >
+              <Plus className="w-4 h-4 stroke-[2.5]" />
+            </button>
+          )}
         </div>
       </div>
 
       {/* VIEW 1: HORIZONTAL SCROLLABLE STRIP (DEFAULT) */}
       {!isMonthView && (
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 pt-0.5 no-scrollbar scroll-smooth">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar scroll-smooth">
           {daysStrip.map((day) => {
             const chip = formatCalendarChip(day);
             const dayStr = getTashkentDateString(day);
@@ -191,7 +208,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
                 key={dayStr}
                 ref={isSelected ? selectedChipRef : null}
                 onClick={() => handleDayClick(day)}
-                className={`flex flex-col items-center justify-between min-w-[48px] h-[62px] py-1.5 px-1 rounded-2xl border transition-all active:scale-95 shrink-0 relative ${
+                className={`flex flex-col items-center justify-between min-w-[44px] h-[56px] py-1 px-1 rounded-xl border transition-all active:scale-95 shrink-0 relative ${
                   isSelected
                     ? 'bg-blue-600 text-white border-blue-600 shadow-sm shadow-blue-500/25 font-bold'
                     : chip.isToday
@@ -200,20 +217,20 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
                 }`}
               >
                 <span
-                  className={`text-[10px] uppercase font-bold leading-none ${
+                  className={`text-[10px] uppercase font-semibold leading-none ${
                     isSelected ? 'text-blue-100' : chip.isToday ? 'text-blue-600' : 'text-slate-400'
                   }`}
                 >
                   {chip.dayOfWeek}
                 </span>
 
-                <span className="text-[15px] font-black leading-none">{chip.dayNumber}</span>
+                <span className="text-sm font-bold leading-none tabular-nums">{chip.dayNumber}</span>
 
                 {/* Lesson Count / Status Pill */}
                 <div className="h-3.5 flex items-center justify-center">
                   {statusSummary.total > 0 ? (
                     <span
-                      className={`text-[9px] font-extrabold px-1.5 rounded-full leading-tight inline-flex items-center gap-0.5 ${
+                      className={`text-[9px] font-semibold px-1.5 rounded-full leading-tight inline-flex items-center gap-0.5 tabular-nums ${
                         isSelected
                           ? 'bg-white/20 text-white'
                           : statusSummary.allDone
@@ -235,7 +252,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
 
       {/* VIEW 2: EXPANDED MONTH GRID (1-31) */}
       {isMonthView && (
-        <div className="p-3.5 bg-white border border-slate-200 rounded-2xl space-y-3 animate-in fade-in zoom-in-95 duration-150 shadow-lg">
+        <div className="p-3 bg-white border border-slate-200 rounded-2xl space-y-2.5 animate-in fade-in zoom-in-95 duration-150 shadow-lg">
           {/* Month Navigator */}
           <div className="flex items-center justify-between">
             <button
@@ -249,7 +266,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
               <ChevronLeft className="w-4 h-4" />
             </button>
 
-            <span className="text-xs font-black capitalize text-slate-900">
+            <span className="text-xs font-bold capitalize text-slate-900">
               {format(currentMonthDate, 'LLLL yyyy', { locale: ru })}
             </span>
 
@@ -268,7 +285,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
           {/* DOW Headers */}
           <div className="grid grid-cols-7 gap-1 text-center">
             {['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].map((d) => (
-              <span key={d} className="text-[10px] font-bold uppercase text-slate-400">
+              <span key={d} className="text-[10px] font-semibold uppercase text-slate-400">
                 {d}
               </span>
             ))}
@@ -293,15 +310,15 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
                       : isSelected
                       ? 'bg-blue-600 text-white border-blue-600 shadow-xs font-bold'
                       : isToday
-                      ? 'bg-blue-50 text-blue-700 border-blue-300 font-extrabold'
+                      ? 'bg-blue-50 text-blue-700 border-blue-300 font-semibold'
                       : 'bg-slate-50/70 border-slate-100 text-slate-700 hover:border-slate-300'
                   }`}
                 >
-                  <span className="text-xs leading-none font-bold">{format(day, 'd')}</span>
+                  <span className="text-xs leading-none font-semibold tabular-nums">{format(day, 'd')}</span>
 
                   {statusSummary.total > 0 && (
                     <span
-                      className={`text-[9px] font-extrabold mt-0.5 leading-none ${
+                      className={`text-[9px] font-semibold mt-0.5 leading-none tabular-nums ${
                         isSelected
                           ? 'text-blue-100'
                           : statusSummary.allDone

@@ -173,7 +173,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
               <UserPlus className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-base font-black text-slate-900 leading-tight">Новый ученик</h3>
+              <h3 className="text-base font-bold text-slate-900 leading-tight">Новый ученик</h3>
               <p className="text-[11px] font-medium text-slate-500">
                 Расписание создастся автоматически
               </p>
@@ -209,7 +209,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
           {/* Schedule Builder (Put right under Name because schedule is the #1 thing a tutor sets) */}
           <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/90 space-y-2.5">
             <div className="flex items-center justify-between">
-              <span className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wide">
+              <span className="text-[11px] font-semibold text-slate-700 uppercase tracking-wide">
                 Дни и время уроков
               </span>
               {selectedDays.length > 1 && (
@@ -260,14 +260,14 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
                   type="time"
                   value={startTime}
                   onChange={(e) => handleStartTimeChange(e.target.value)}
-                  className="flex-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-black text-slate-900 focus:border-blue-600 focus:outline-hidden"
+                  className="flex-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-semibold tabular-nums text-slate-900 focus:border-blue-600 focus:outline-hidden"
                 />
                 <span className="text-slate-400 text-xs font-bold">–</span>
                 <input
                   type="time"
                   value={endTime}
                   onChange={(e) => setEndTime(e.target.value)}
-                  className="flex-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-black text-slate-900 focus:border-blue-600 focus:outline-hidden"
+                  className="flex-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1.5 text-xs font-semibold tabular-nums text-slate-900 focus:border-blue-600 focus:outline-hidden"
                 />
               </div>
             ) : (
@@ -277,21 +277,21 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
                   const slot = perDayTimes[dayId] || { start: startTime, end: endTime };
                   return (
                     <div key={dayId} className="flex items-center gap-2">
-                      <span className="w-7 text-xs font-extrabold text-slate-700">
+                      <span className="w-7 text-xs font-semibold text-slate-700">
                         {wd?.label}:
                       </span>
                       <input
                         type="time"
                         value={slot.start}
                         onChange={(e) => handleDayTimeChange(dayId, 'start', e.target.value)}
-                        className="flex-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1 text-xs font-black text-slate-900 focus:border-blue-600 focus:outline-hidden"
+                        className="flex-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1 text-xs font-semibold tabular-nums text-slate-900 focus:border-blue-600 focus:outline-hidden"
                       />
                       <span className="text-slate-400 text-xs">–</span>
                       <input
                         type="time"
                         value={slot.end}
                         onChange={(e) => handleDayTimeChange(dayId, 'end', e.target.value)}
-                        className="flex-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1 text-xs font-black text-slate-900 focus:border-blue-600 focus:outline-hidden"
+                        className="flex-1 bg-white border border-slate-300 rounded-xl px-2.5 py-1 text-xs font-semibold tabular-nums text-slate-900 focus:border-blue-600 focus:outline-hidden"
                       />
                     </div>
                   );
@@ -347,7 +347,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
                 value={lessonRate}
                 onChange={(e) => setLessonRate(Number(e.target.value))}
                 step={10000}
-                className="w-full px-3.5 py-2 text-xs font-black border border-slate-300 rounded-xl bg-slate-50 text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all"
+                className="w-full px-3.5 py-2 text-xs font-semibold tabular-nums border border-slate-300 rounded-xl bg-slate-50 text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all"
               />
             </div>
             <div>
@@ -358,7 +358,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
                 type="number"
                 value={lessonsBalance}
                 onChange={(e) => setLessonsBalance(Number(e.target.value))}
-                className="w-full px-3.5 py-2 text-xs font-black border border-slate-300 rounded-xl bg-slate-50 text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all"
+                className="w-full px-3.5 py-2 text-xs font-semibold tabular-nums border border-slate-300 rounded-xl bg-slate-50 text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all"
               />
             </div>
           </div>
@@ -374,7 +374,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
                 onChange={(e) => setMonthlyTarget(Number(e.target.value))}
                 min={1}
                 max={60}
-                className="w-full px-3.5 py-2 text-xs font-black border border-slate-300 rounded-xl bg-slate-50 text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all"
+                className="w-full px-3.5 py-2 text-xs font-semibold tabular-nums border border-slate-300 rounded-xl bg-slate-50 text-slate-900 focus:bg-white focus:border-blue-600 focus:outline-hidden transition-all"
               />
             </div>
             <div>

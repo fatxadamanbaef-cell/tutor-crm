@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Student, Lesson, Makeup, LessonStatus } from '@/types';
 import {
   Plus,
@@ -12,8 +12,8 @@ import {
   AlertTriangle,
   CheckCheck,
 } from 'lucide-react';
-import { hapticImpact, hapticNotification } from '@/lib/telegram';
-import { getTashkentNow, getTashkentDateString, getTashkentTodayStr } from '@/lib/formatters';
+import { hapticImpact, hapticNotification, hapticSelection } from '@/lib/telegram';
+import { getTashkentNow, getTashkentDateString, getTashkentTodayStr, isRealNote } from '@/lib/formatters';
 import { format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { HorizontalDateStrip } from '../HorizontalDateStrip';
@@ -158,16 +158,12 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
     for (const l of lessons) {
       const d = l.date.substring(0, 10);
       if (d >= selectedDateStr) continue;
-      if (
-        !l.notes ||
-        l.notes.startsWith('Регулярный урок') ||
-        l.notes.startsWith('Авто-слот')
-      ) {
+      if (!isRealNote(l.notes)) {
         continue;
       }
       const prev = map[l.student_id];
       if (!prev || l.date > prev.date) {
-        map[l.student_id] = { date: l.date, note: l.notes };
+        map[l.student_id] = { date: l.date, note: l.notes! };
       }
     }
     const result: Record<string, string> = {};
@@ -176,6 +172,52 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
     }
     return result;
   }, [lessons, selectedDateStr]);
+
+  const defaultExpandedId = useMemo(() => {
+    if (!isTodaySelected) return null;
+    const nowId = Object.keys(activeTimeStateMap).find((id) => activeTimeStateMap[id] === 'now');
+    if (nowId) return nowId;
+    const nextId = Object.keys(activeTimeStateMap).find((id) => activeTimeStateMap[id] === 'next');
+    return nextId || null;
+  }, [isTodaySelected, activeTimeStateMap]);
+
+  const [expandedLessonId, setExpandedLessonId] = useState<string | null>(() => defaultExpandedId);
+  const prevDateRef = useRef(selectedDateStr);
+  const initializedRef = useRef(lessons.length > 0);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const topHeaderRef = useRef<HTMLDivElement | null>(null);
+  const [isHeaderScrolledOut, setIsHeaderScrolledOut] = useState(false);
+
+  useEffect(() => {
+    if (prevDateRef.current !== selectedDateStr) {
+      prevDateRef.current = selectedDateStr;
+      setExpandedLessonId(defaultExpandedId);
+    } else if (!initializedRef.current && lessons.length > 0) {
+      initializedRef.current = true;
+      setExpandedLessonId(defaultExpandedId);
+    }
+  }, [selectedDateStr, defaultExpandedId, lessons.length]);
+
+  useEffect(() => {
+    const root = scrollContainerRef.current;
+    const target = topHeaderRef.current;
+    if (!root || !target || typeof IntersectionObserver === 'undefined') return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setIsHeaderScrolledOut(!entry.isIntersecting);
+      },
+      { root, threshold: 0.2 }
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, []);
+
+  const handleToggleExpand = useCallback((lessonId: string) => {
+    hapticSelection();
+    setExpandedLessonId((prev) => (prev === lessonId ? null : lessonId));
+  }, []);
 
   const unmarkedPastLessons = useMemo(() => {
     return lessons
@@ -197,73 +239,80 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#f4f5f8] pb-safe overscroll-none">
-      {/* Top Fixed Header with Date Strip & Actions */}
-      <div className="bg-white border-b border-slate-200/80 px-3.5 pt-4 pb-3 sticky top-0 z-20 space-y-2.5 shadow-2xs">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">
-              Расписание
-            </h1>
-            <p className="text-xs font-medium text-slate-500 flex items-center gap-1.5 flex-wrap mt-1">
-              <span>
-                Уроков на день: <b className="text-slate-900 font-extrabold">{dayLessons.length}</b>
+    <div
+      ref={scrollContainerRef}
+      className="h-full overflow-y-auto overscroll-none bg-[#f4f5f8] pb-safe"
+    >
+      {/* Non-sticky Top Header */}
+      <div
+        ref={topHeaderRef}
+        className="bg-white px-3.5 pt-3 pb-2 flex items-center justify-between gap-2"
+      >
+        <div className="min-w-0">
+          <h1 className="text-lg font-bold text-slate-900 tracking-tight leading-tight">
+            Расписание
+          </h1>
+          <p className="text-xs font-medium text-slate-500 flex items-center gap-1.5 flex-wrap mt-0.5 tabular-nums">
+            <span>
+              Уроков на день: <b className="text-slate-900 font-semibold">{dayLessons.length}</b>
+            </span>
+            {dayLessons.length > 0 && (
+              <span className="text-slate-400">
+                •{' '}
+                {daySummary.completed > 0 ? `проведено ${daySummary.completed}` : ''}
+                {daySummary.completed > 0 && daySummary.planned > 0 ? ', ' : ''}
+                {daySummary.planned > 0 ? `осталось ${daySummary.planned}` : ''}
+                {(daySummary.completed > 0 || daySummary.planned > 0) && daySummary.missed > 0
+                  ? ', '
+                  : ''}
+                {daySummary.missed > 0 ? `отм. ${daySummary.missed}` : ''}
               </span>
-              {dayLessons.length > 0 && (
-                <span className="text-slate-400">
-                  •{' '}
-                  {daySummary.completed > 0 ? `проведено ${daySummary.completed}` : ''}
-                  {daySummary.completed > 0 && daySummary.planned > 0 ? ', ' : ''}
-                  {daySummary.planned > 0 ? `осталось ${daySummary.planned}` : ''}
-                  {(daySummary.completed > 0 || daySummary.planned > 0) && daySummary.missed > 0
-                    ? ', '
-                    : ''}
-                  {daySummary.missed > 0 ? `отм. ${daySummary.missed}` : ''}
-                </span>
-              )}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2">
-            {onRefresh && (
-              <button
-                onClick={handleRefreshClick}
-                disabled={isRefreshing}
-                className="w-9 h-9 flex items-center justify-center rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 active:scale-95 disabled:opacity-50 transition-all"
-                title="Обновить"
-              >
-                <RotateCcw
-                  className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-blue-600' : ''}`}
-                />
-              </button>
             )}
-
-            <button
-              onClick={() => {
-                hapticImpact('light');
-                onAddLesson(selectedDate);
-              }}
-              className="h-9 px-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-sm shadow-blue-500/20 active:scale-95 transition-all"
-            >
-              <Plus className="w-4 h-4 stroke-[2.5]" />
-              <span>Урок</span>
-            </button>
-          </div>
+          </p>
         </div>
 
-        {/* Horizontal Calendar Strip with Today & Month Grid */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {onRefresh && (
+            <button
+              onClick={handleRefreshClick}
+              disabled={isRefreshing}
+              className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 active:scale-95 disabled:opacity-50 transition-all"
+              title="Обновить"
+            >
+              <RotateCcw
+                className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-blue-600' : ''}`}
+              />
+            </button>
+          )}
+
+          <button
+            onClick={() => {
+              hapticImpact('light');
+              onAddLesson(selectedDate);
+            }}
+            className="h-8 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center gap-1 shadow-sm shadow-blue-500/20 active:scale-95 transition-all"
+          >
+            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+            <span>Урок</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Sticky Compact Date Navigation Bar */}
+      <div className="sticky top-0 z-20 bg-white/85 backdrop-blur-md border-b border-slate-200/80 px-3.5 py-2">
         <HorizontalDateStrip
           selectedDate={selectedDate}
           onSelectDate={setSelectedDate}
           lessons={lessons}
+          onQuickAdd={isHeaderScrolledOut ? () => onAddLesson(selectedDate) : undefined}
         />
       </div>
 
       {/* Main Content Area: Unmarked Past Banner + Daily Lessons Timeline */}
-      <div className="flex-1 overflow-y-auto px-3.5 py-3.5 space-y-3 pb-32">
+      <div className="px-3.5 py-2.5 space-y-2 pb-28">
         {/* Compact Collapsible Unmarked Past Lessons Banner */}
         {unmarkedPastLessons.length > 0 && (
-          <div className="bg-amber-50/90 border border-amber-200/90 rounded-2xl p-3 shadow-2xs space-y-2.5">
+          <div className="bg-amber-50/90 border border-amber-200/90 rounded-xl px-3 py-2 shadow-2xs space-y-2">
             <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
@@ -271,10 +320,10 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                   hapticImpact('light');
                   setShowUnmarked((prev) => !prev);
                 }}
-                className="flex-1 flex items-center gap-1.5 text-left min-w-0"
+                className="flex items-center gap-1.5 text-left min-w-0"
               >
-                <span className="text-xs font-extrabold text-amber-900 truncate">
-                  ⏳ Неотмеченные прошлые ({unmarkedPastLessons.length})
+                <span className="text-xs font-semibold text-amber-900 tabular-nums whitespace-nowrap">
+                  ⏳ Не отмечено: {unmarkedPastLessons.length}
                 </span>
                 {showUnmarked ? (
                   <ChevronUp className="w-4 h-4 text-amber-700 shrink-0" />
@@ -286,7 +335,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
               <button
                 type="button"
                 onClick={handleMarkAllUnmarkedCompleted}
-                className="px-2.5 py-1 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] inline-flex items-center gap-1 shrink-0 active:scale-95 transition-all shadow-2xs"
+                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-[11px] inline-flex items-center gap-1 shrink-0 active:scale-95 transition-all shadow-2xs"
                 title="Отметить все прошлые уроки как проведённые"
               >
                 <CheckCheck className="w-3.5 h-3.5" />
@@ -314,10 +363,10 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                         className="text-left w-full"
                         title="Перейти к этой дате"
                       >
-                        <div className="text-xs font-extrabold text-slate-900 truncate">
+                        <div className="text-xs font-semibold text-slate-900 truncate">
                           {st?.name || l.student_name || 'Ученик'}
                         </div>
-                        <div className="text-[11px] font-semibold text-amber-800">
+                        <div className="text-[11px] font-medium text-amber-800 tabular-nums">
                           {format(parsed, 'd MMM, EEE', { locale: ru })} ·{' '}
                           {(l.time_str || '').split(' - ')[0]}
                         </div>
@@ -330,7 +379,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                             hapticNotification('success');
                             onSetLessonStatus(l.id, 'completed');
                           }}
-                          className="flex-1 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-xs text-center active:scale-90"
+                          className="flex-1 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold text-xs text-center active:scale-90"
                           title="Был (-1 баланс)"
                         >
                           ✅
@@ -345,7 +394,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                               'Пропуск без предупреждения'
                             );
                           }}
-                          className="flex-1 py-1 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 font-bold text-xs text-center active:scale-90"
+                          className="flex-1 py-1 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 font-semibold text-xs text-center active:scale-90"
                           title="Сгорел (-1 баланс)"
                         >
                           🔥
@@ -356,7 +405,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                             hapticImpact('light');
                             onSetLessonStatus(l.id, 'missed_excused', 'Уважительная отмена');
                           }}
-                          className="flex-1 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold text-xs text-center active:scale-90"
+                          className="flex-1 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-xs text-center active:scale-90"
                           title="Отмена (баланс сохранен)"
                         >
                           🛑
@@ -377,7 +426,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
               <CalendarPlus className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-slate-900">На этот день уроков нет</h3>
+              <h3 className="text-sm font-semibold text-slate-900">На этот день уроков нет</h3>
               <p className="text-xs text-slate-400 mt-0.5">Свободный день или выходной</p>
             </div>
             <button
@@ -386,14 +435,14 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                 hapticImpact('light');
                 onAddLesson(selectedDate);
               }}
-              className="py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs active:scale-95 transition-all inline-flex items-center gap-1.5 shadow-xs"
+              className="py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs active:scale-95 transition-all inline-flex items-center gap-1.5 shadow-xs"
             >
               <Plus className="w-4 h-4" />
               <span>Запланировать урок</span>
             </button>
           </div>
         ) : (
-          <div className="space-y-2.5">
+          <div className="space-y-2">
             {dayLessons.map((lesson, idx) => {
               const student = students.find((s) => s.id === lesson.student_id);
               const prevLesson = idx > 0 ? dayLessons[idx - 1] : null;
@@ -410,7 +459,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
 
                   if (gapMinutes < 0 && bothActive) {
                     gapElement = (
-                      <div className="flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-bold">
+                      <div className="flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold tabular-nums">
                         <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-rose-600" />
                         <span>
                           Накладка по времени: {prevSlot.startStr}–{prevSlot.endStr} и{' '}
@@ -420,13 +469,16 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                     );
                   } else if (gapMinutes >= 30) {
                     gapElement = (
-                      <div className="flex items-center justify-between px-3 py-1.5 rounded-xl border border-dashed border-slate-300/90 bg-slate-100/60 text-slate-500 text-[11px]">
-                        <div className="flex items-center gap-1.5 font-medium">
+                      <div className="flex items-center justify-between px-3 py-1.5 min-h-[32px] rounded-xl border border-dashed border-slate-300/90 bg-slate-100/60 text-slate-500 text-xs">
+                        <div className="flex items-center gap-1.5 font-medium min-w-0">
                           <Coffee className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span>
-                            Окно <b className="text-slate-700 font-bold">{formatDurationRu(gapMinutes)}</b>{' '}
-                            <span className="text-slate-400 font-mono">
-                              ({prevSlot.endStr} – {currSlot.startStr})
+                          <span className="truncate">
+                            Окно{' '}
+                            <span className="text-slate-700 font-semibold">
+                              {formatDurationRu(gapMinutes)}
+                            </span>{' '}
+                            <span className="text-slate-400 tabular-nums">
+                              · {prevSlot.endStr}–{currSlot.startStr}
                             </span>
                           </span>
                         </div>
@@ -436,7 +488,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                             hapticImpact('light');
                             onAddLesson(selectedDate, prevSlot.endStr);
                           }}
-                          className="text-[11px] font-bold text-blue-600 hover:text-blue-700 px-2 py-0.5 rounded-lg bg-white border border-slate-200/80 shadow-2xs active:scale-95 transition-all"
+                          className="shrink-0 text-xs font-semibold text-blue-600 hover:text-blue-700 active:opacity-70 transition-opacity ml-2"
                         >
                           + Занять
                         </button>
@@ -454,6 +506,8 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                     student={student}
                     lastCompletedNote={lastNoteByStudent[lesson.student_id]}
                     timeState={activeTimeStateMap[lesson.id] || null}
+                    isExpanded={expandedLessonId === lesson.id}
+                    onToggleExpand={() => handleToggleExpand(lesson.id)}
                     onToggleStatus={(id) => {
                       const nextStatus = lesson.status === 'completed' ? 'planned' : 'completed';
                       onSetLessonStatus(id, nextStatus);

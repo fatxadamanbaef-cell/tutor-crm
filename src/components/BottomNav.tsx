@@ -50,14 +50,14 @@ export const BottomNav: React.FC<BottomNavProps> = ({
                   strokeWidth={isActive ? 2.5 : 2}
                 />
                 {'badge' in tab && tab.badge > 0 && (
-                  <span className="absolute -top-1 -right-2.5 min-w-[15px] h-[15px] px-1 rounded-full bg-rose-500 text-white text-[9px] font-extrabold flex items-center justify-center leading-none">
+                  <span className="absolute -top-1 -right-2.5 min-w-[15px] h-[15px] px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold tabular-nums flex items-center justify-center leading-none">
                     {tab.badge}
                   </span>
                 )}
               </div>
               <span
                 className={`text-[10px] tracking-tight ${
-                  isActive ? 'font-extrabold text-blue-600' : 'font-semibold'
+                  isActive ? 'font-semibold text-blue-600' : 'font-medium'
                 }`}
               >
                 {tab.label}

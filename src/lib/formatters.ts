@@ -279,3 +279,22 @@ export function addDaysStr(dateStr: string, n: number): string {
 // 1-indexed weekday names matching dayOfWeekOf (1=Mon .. 7=Sun)
 export const WD_SHORT = ['', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
 export const WD_FULL = ['', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота', 'воскресенье'];
+
+/**
+ * Returns true if lesson notes contain real user-entered text rather than auto-generated placeholders.
+ */
+export function isRealNote(notes?: string | null): boolean {
+  if (!notes) return false;
+  const trimmed = notes.trim();
+  if (!trimmed) return false;
+  const lower = trimmed.toLowerCase();
+  if (
+    lower === 'периодическое расписание' ||
+    lower === 'запланированный урок' ||
+    lower.startsWith('регулярный урок') ||
+    lower.startsWith('авто-слот')
+  ) {
+    return false;
+  }
+  return true;
+}

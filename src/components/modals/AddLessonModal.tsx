@@ -204,7 +204,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({
         style={{ touchAction: 'pan-y', overscrollBehaviorY: 'contain' } as React.CSSProperties}
       >
         <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-          <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+          <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
             <CalendarPlus className="w-4 h-4 text-blue-600" />
             <span>Новое занятие</span>
           </h3>
@@ -285,7 +285,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({
                     key={ol.id}
                     className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700"
                   >
-                    <b className="font-mono text-slate-900">{ol.time_str}</b> ·{' '}
+                    <b className="tabular-nums text-slate-900">{ol.time_str}</b> ·{' '}
                     {ol.student_name || 'Ученик'}
                   </span>
                 ))}
@@ -307,7 +307,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({
               <label className="block text-slate-500 font-semibold text-xs">
                 Длительность
               </label>
-              <span className="text-[11px] font-mono text-blue-600 font-bold">
+              <span className="text-[11px] tabular-nums text-blue-600 font-semibold">
                 {startTime} – {calculateEndTime(startTime, duration)} ({duration} мин)
               </span>
             </div>

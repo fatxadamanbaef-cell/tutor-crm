@@ -5,17 +5,18 @@ import { generateStudentReport, findStudentsByName } from '@/lib/reports';
 import { supabase } from '@/lib/supabase';
 import { claimUpdate, clearHistory, setPendingReason, popPendingReason } from '@/lib/botState';
 import { normName } from '@/lib/nameMatch';
+import { verifyTelegramWebhookSecret, isAllowedTelegramUser } from '@/lib/telegramAuth';
 
 export const maxDuration = 60;
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://tutor-crm-kappa.vercel.app';
 
 const escapeHtml = (s: string) => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-export async function sendTelegramMessage(chatId: number | string, text: string, replyMarkup?: any) {
-  if (!BOT_TOKEN) return;
-  const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
+export async function sendTelegramMessage(chatId: number | string, text: string, replyMarkup?: any): Promise<boolean> {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!botToken) return false;
+  const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -23,21 +24,25 @@ export async function sendTelegramMessage(chatId: number | string, text: string,
       body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', reply_markup: replyMarkup }),
     });
     const data = await res.json();
-    if (!data.ok) {
-      await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: text.replace(/<[^>]*>/g, ''), reply_markup: replyMarkup }),
-      });
-    }
+    if (data.ok) return true;
+
+    const fallbackRes = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: text.replace(/<[^>]*>/g, ''), reply_markup: replyMarkup }),
+    });
+    const fallbackData = await fallbackRes.json();
+    return Boolean(fallbackData.ok);
   } catch (error) {
     console.error('Failed to send telegram message', error);
+    return false;
   }
 }
 
 async function editTelegramMessage(chatId: number | string, messageId: number, text: string, replyMarkup?: any) {
-  if (!BOT_TOKEN) return;
-  const url = `https://api.telegram.org/bot${BOT_TOKEN}/editMessageText`;
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!botToken) return;
+  const url = `https://api.telegram.org/bot${botToken}/editMessageText`;
   try {
     await fetch(url, {
       method: 'POST',
@@ -48,9 +53,10 @@ async function editTelegramMessage(chatId: number | string, messageId: number, t
 }
 
 async function answerCallbackQuery(callbackQueryId: string, text?: string) {
-  if (!BOT_TOKEN) return;
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!botToken) return;
   try {
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`, {
+    await fetch(`https://api.telegram.org/bot${botToken}/answerCallbackQuery`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ callback_query_id: callbackQueryId, text: text || '' }),
@@ -231,9 +237,10 @@ async function registerChatId(chatId: number | string, username?: string) {
 }
 
 async function sendChatAction(chatId: number | string, action: string = 'typing') {
-  if (!BOT_TOKEN) return;
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!botToken) return;
   try {
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendChatAction`, {
+    await fetch(`https://api.telegram.org/bot${botToken}/sendChatAction`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, action }),
@@ -347,8 +354,36 @@ async function handleMessage(message: any) {
 
 export async function POST(req: NextRequest) {
   try {
+    // 1. Verify Telegram webhook secret token before parsing or touching DB/AI
+    if (!verifyTelegramWebhookSecret(req)) {
+      return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
     const update = await req.json();
 
+    // 2. Enforce Telegram ID whitelist BEFORE claimUpdate / DB / OpenAI / _BOT_CONFIG
+    const hasCallback = Boolean(update.callback_query);
+    const hasMessage = Boolean(update.message);
+
+    if (!hasCallback && !hasMessage) {
+      return NextResponse.json({ ok: true });
+    }
+
+    const actorFromId = hasCallback ? update.callback_query.from?.id : update.message.from?.id;
+    const actorChatId = hasCallback ? update.callback_query.message?.chat?.id : update.message.chat?.id;
+    const replyChatId = actorChatId ?? actorFromId;
+
+    if (!isAllowedTelegramUser(actorFromId, actorChatId)) {
+      if (hasCallback && update.callback_query.id) {
+        await answerCallbackQuery(update.callback_query.id, '⛔ Доступ закрыт');
+      } else if (replyChatId) {
+        await sendTelegramMessage(replyChatId, '⛔ Доступ закрыт.');
+      }
+      // Return 200 OK so Telegram does not retry webhook deliveries
+      return NextResponse.json({ ok: true });
+    }
+
+    // 3. Deduplicate updates only for authorized users
     if (typeof update.update_id === 'number' && !(await claimUpdate(update.update_id))) {
       return NextResponse.json({ ok: true, duplicate: true });
     }
@@ -358,7 +393,7 @@ export async function POST(req: NextRequest) {
       const data = cq.data || '';
       const chatId = cq.message?.chat?.id || cq.from?.id;
       const messageId = cq.message?.message_id;
-      if (chatId) registerChatId(chatId, cq.from?.username);
+      if (chatId) await registerChatId(chatId, cq.from?.username);
 
       if (data.startsWith('report:')) {
         const studentId = data.replace('report:', '');

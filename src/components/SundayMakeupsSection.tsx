@@ -75,7 +75,7 @@ export const SundayMakeupsSection: React.FC<SundayMakeupsSectionProps> = ({
         <div className="flex items-center gap-1.5 text-xs font-bold text-amber-700">
           <span className="text-sm">🎯</span>
           <span>Отработки на воскресенье</span>
-          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-mono text-[11px] font-semibold border border-amber-300">
+          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 tabular-nums text-[11px] font-semibold border border-amber-300">
             {items.length}
           </span>
         </div>

@@ -5,7 +5,7 @@ import { CreditCard, Check, CalendarClock, Send, Download, Info, ExternalLink, L
 import { getTutorSettings, saveTutorSettings, TutorSettings, DEFAULT_SETTINGS } from '@/lib/settings';
 import { ensureRecurringLessonsForAllActiveStudents } from '@/lib/storage';
 import { generateMonthlyExportData } from '@/lib/reports';
-import { hapticImpact, hapticNotification } from '@/lib/telegram';
+import { hapticImpact, hapticNotification, getTelegramWebApp } from '@/lib/telegram';
 
 interface SettingsTabProps {
   onRefresh?: () => Promise<void> | void;
@@ -60,17 +60,33 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
 
   const handleSendDigest = async () => {
     if (isSendingDigest) return;
+    const initData = getTelegramWebApp()?.initData || '';
+    if (!initData) {
+      hapticNotification('warning');
+      setDigestResult('⚠️ Откройте приложение внутри Telegram Mini App для отправки сводки');
+      return;
+    }
+
     hapticImpact('medium');
     setIsSendingDigest(true);
     setDigestResult(null);
     try {
-      const res = await fetch('/api/bot/cron?mode=digest&force=true');
+      const res = await fetch('/api/bot/digest', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-telegram-init-data': initData,
+        },
+      });
       const data = await res.json();
-      if (data.ok && Array.isArray(data.notifications_sent) && data.notifications_sent.length > 0) {
+      if (res.ok && data.ok) {
         hapticNotification('success');
         setDigestResult('✅ Утренняя сводка отправлена в Telegram');
-      } else if (data.message) {
-        setDigestResult(`ℹ️ ${data.message}`);
+      } else if (res.status === 401 || res.status === 403) {
+        hapticNotification('error');
+        setDigestResult('⛔ Доступ запрещён или сессия Telegram устарела. Переоткройте Mini App');
+      } else if (data.message || data.error) {
+        setDigestResult(`ℹ️ ${data.message || data.error}`);
       } else {
         setDigestResult('⚠️ Не удалось отправить сводку (проверьте /start в боте)');
       }
@@ -111,7 +127,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
   return (
     <div className="flex flex-col h-full bg-[#f2f2f7] pb-28 overflow-y-auto">
       <div className="px-4 pt-6 pb-4 bg-white border-b border-gray-200 sticky top-0 z-10">
-        <h1 className="text-2xl font-black text-gray-900 tracking-tight">Настройки</h1>
+        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Настройки</h1>
         <p className="text-xs text-gray-500 font-semibold mt-0.5">Реквизиты для счетов и управление ботом</p>
       </div>
 
@@ -123,7 +139,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
               <CreditCard className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-black text-gray-900">Реквизиты для оплаты</h2>
+              <h2 className="text-sm font-semibold text-gray-900">Реквизиты для оплаты</h2>
               <p className="text-[11px] text-gray-500">Подставляются в счёт для родителей</p>
             </div>
           </div>
@@ -163,7 +179,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
               value={settings.cardNumber}
               onChange={(e) => setSettings((p) => ({ ...p, cardNumber: e.target.value }))}
               placeholder="8600 0000 0000 0000"
-              className="w-full text-xs font-mono font-bold text-gray-900 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 focus:outline-hidden focus:border-blue-500"
+              className="w-full text-xs font-semibold tabular-nums text-gray-900 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 focus:outline-hidden focus:border-blue-500"
             />
           </div>
 
@@ -195,7 +211,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
 
         {/* Automation & Bot Controls */}
         <div className="bg-white rounded-3xl p-4 shadow-xs border border-gray-200/80 space-y-2.5">
-          <h2 className="text-xs font-black text-gray-400 uppercase tracking-wide">
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
             Управление расписанием и ботом
           </h2>
 

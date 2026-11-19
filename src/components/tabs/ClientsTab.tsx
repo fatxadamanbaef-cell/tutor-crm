@@ -168,13 +168,13 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
       <div className="px-4 pt-4 pb-3 bg-white border-b border-slate-200/80 sticky top-0 z-10 space-y-2.5 shadow-2xs">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-black text-slate-900 tracking-tight leading-none">
+            <h1 className="text-xl font-bold text-slate-900 tracking-tight leading-none">
               Ученики
             </h1>
-            <p className="text-xs text-slate-500 font-medium mt-1">
-              Активных: <b className="text-slate-900">{activeStudents.length}</b>
+            <p className="text-xs text-slate-500 font-medium mt-1 tabular-nums">
+              Активных: <b className="text-slate-900 font-semibold">{activeStudents.length}</b>
               {lowBalanceCount > 0 && (
-                <span className="text-rose-600 font-bold"> • К оплате: {lowBalanceCount}</span>
+                <span className="text-rose-600 font-semibold"> • К оплате: {lowBalanceCount}</span>
               )}
               {inactiveStudents.length > 0 ? ` • Пауза: ${inactiveStudents.length}` : ''}
             </p>
@@ -300,25 +300,25 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                 <div className="flex items-start justify-between gap-2.5">
                   <div className="flex items-start gap-3 min-w-0">
                     <div
-                      className="w-10 h-10 rounded-2xl flex items-center justify-center text-white font-black text-sm shadow-2xs shrink-0 mt-0.5"
+                      className="w-10 h-10 rounded-2xl flex items-center justify-center text-white font-bold text-sm shadow-2xs shrink-0 mt-0.5"
                       style={{ backgroundColor: student.color || '#3B82F6' }}
                     >
                       {student.name.charAt(0).toUpperCase()}
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <h3 className="text-[15px] font-extrabold text-slate-900 leading-snug truncate">
+                        <h3 className="text-[15px] font-semibold text-slate-900 leading-snug truncate">
                           {student.name}
                         </h3>
                         {isPaused && (
-                          <span className="px-1.5 py-0.5 rounded-md bg-slate-200 text-slate-700 text-[9px] font-black uppercase">
+                          <span className="px-1.5 py-0.5 rounded-md bg-slate-200 text-slate-700 text-[9px] font-semibold uppercase">
                             Пауза
                           </span>
                         )}
                       </div>
 
                       {scheduleSummary ? (
-                        <div className="text-xs text-slate-700 font-semibold flex items-center gap-1 mt-0.5 truncate">
+                        <div className="text-xs text-slate-700 font-medium flex items-center gap-1 mt-0.5 truncate tabular-nums">
                           <CalendarClock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                           <span className="truncate">{scheduleSummary}</span>
                         </div>
@@ -328,10 +328,9 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                         </div>
                       )}
 
-                      <div className="text-[11px] text-slate-400 font-medium mt-0.5 flex items-center gap-1.5 flex-wrap">
+                      <div className="text-[11px] text-slate-500 font-medium mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 tabular-nums">
                         <span>{Math.round(rate / 1000)} тыс/ур.</span>
-                        <span>•</span>
-                        <span>
+                        <span className="text-slate-400">
                           {isPkg ? `Пакет ${target} ур.` : 'По датам'} (с {billingPeriod.billingDay}-го числа)
                         </span>
                       </div>
@@ -341,7 +340,7 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                   {/* Right: Balance Badge + Contact Quick Links */}
                   <div className="flex flex-col items-end gap-1.5 shrink-0">
                     <span
-                      className={`text-xs font-extrabold px-2.5 py-1 rounded-xl border inline-flex items-center gap-1 ${
+                      className={`text-xs font-semibold px-2.5 py-1 rounded-xl border inline-flex items-center gap-1 tabular-nums ${
                         balance <= 0
                           ? 'bg-rose-50 text-rose-700 border-rose-200'
                           : balance <= 2

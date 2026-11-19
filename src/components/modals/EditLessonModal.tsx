@@ -171,7 +171,7 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
           <X className="w-5 h-5" />
         </button>
         <div className="text-center">
-          <h2 className="text-sm font-black text-slate-900">Урок и перенос</h2>
+          <h2 className="text-sm font-bold text-slate-900">Урок и перенос</h2>
           <p className="text-[11px] font-semibold text-slate-500">
             {lesson.student_name || student?.name}
           </p>
@@ -189,16 +189,16 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
         {/* Student Summary Header */}
         <div className="bg-white rounded-2xl p-3.5 shadow-2xs border border-slate-200/80 flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <h3 className="text-base font-extrabold text-slate-900 truncate">
+            <h3 className="text-base font-semibold text-slate-900 truncate">
               {lesson.student_name || student?.name}
             </h3>
-            <p className="text-xs text-slate-500 font-medium mt-0.5">
+            <p className="text-xs text-slate-500 font-medium mt-0.5 tabular-nums">
               Ставка: {(student?.lesson_rate || 300000).toLocaleString('ru-RU')} сум • Норма:{' '}
               {student?.monthly_target_lessons || 12} ур.
             </p>
           </div>
           <span
-            className={`text-xs font-extrabold px-2.5 py-1 rounded-xl shrink-0 border ${
+            className={`text-xs font-semibold px-2.5 py-1 rounded-xl shrink-0 border tabular-nums ${
               (student?.lessons_balance ?? 0) <= 0
                 ? 'bg-rose-50 text-rose-700 border-rose-200'
                 : (student?.lessons_balance ?? 0) <= 2
@@ -389,7 +389,7 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
                     key={ol.id}
                     className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-700"
                   >
-                    <b className="font-mono text-slate-900">{ol.time_str}</b> ·{' '}
+                    <b className="tabular-nums text-slate-900">{ol.time_str}</b> ·{' '}
                     {ol.student_name || 'Ученик'}
                   </span>
                 ))}
@@ -408,7 +408,7 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
                   type="time"
                   value={startTime}
                   onChange={(e) => handleStartTimeChange(e.target.value)}
-                  className="w-full text-xs font-black text-slate-900 bg-slate-50 px-3 py-2.5 rounded-xl border border-slate-200 focus:bg-white focus:border-blue-500 focus:outline-hidden"
+                  className="w-full text-xs font-semibold tabular-nums text-slate-900 bg-slate-50 px-3 py-2.5 rounded-xl border border-slate-200 focus:bg-white focus:border-blue-500 focus:outline-hidden"
                 />
               </div>
               <div>
@@ -419,7 +419,7 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
                   type="time"
                   value={endTime}
                   onChange={(e) => handleEndTimeChange(e.target.value)}
-                  className="w-full text-xs font-black text-slate-900 bg-slate-50 px-3 py-2.5 rounded-xl border border-slate-200 focus:bg-white focus:border-blue-500 focus:outline-hidden"
+                  className="w-full text-xs font-semibold tabular-nums text-slate-900 bg-slate-50 px-3 py-2.5 rounded-xl border border-slate-200 focus:bg-white focus:border-blue-500 focus:outline-hidden"
                 />
               </div>
             </div>
@@ -460,7 +460,7 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
           <button
             type="button"
             onClick={handleSave}
-            className="w-full py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black shadow-md shadow-blue-500/20 flex items-center justify-center gap-1.5 active:scale-98 transition-all"
+            className="w-full py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 flex items-center justify-center gap-1.5 active:scale-98 transition-all"
           >
             <Check className="w-4 h-4 stroke-[3]" />
             <span>Сохранить изменения</span>

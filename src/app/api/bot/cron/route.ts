@@ -4,6 +4,7 @@ import { getTashkentNow, getTashkentTodayStr } from '@/lib/formatters';
 import { sendTelegramMessage, buildMorningDigest } from '../route';
 import { supabase } from '@/lib/supabase';
 import { claimNotification } from '@/lib/botState';
+import { verifyCronSecret } from '@/lib/telegramAuth';
 import { format, parseISO, subDays, startOfWeek, endOfWeek } from 'date-fns';
 import { ru } from 'date-fns/locale';
 
@@ -15,6 +16,10 @@ const notifiedLessonsMap = new Set<string>();
 
 export async function GET(req: NextRequest) {
   try {
+    if (!verifyCronSecret(req)) {
+      return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
     const url = new URL(req.url);
     const mode = url.searchParams.get('mode') || 'reminders'; // 'digest', 'reminders', 'weekly', 'all' (default 'reminders' to prevent accidental bursts)
     const force = url.searchParams.get('force') === 'true';
