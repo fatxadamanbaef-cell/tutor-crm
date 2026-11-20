@@ -1,7 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { buildMorningDigest, sendTelegramMessage } from '../route';
 import { supabase } from '@/lib/supabase';
-import { verifyCronSecret, verifyTelegramInitData } from '@/lib/telegramAuth';
+import {
+  verifyCronSecret,
+  verifyTelegramInitData,
+  hasCronSecretCredentials,
+  getAllowedTelegramIds,
+} from '@/lib/telegramAuth';
+
+export const dynamic = 'force-dynamic';
+export const maxDuration = 60;
 
 async function resolveFallbackChatId(): Promise<string> {
   const envChatId = process.env.TEACHER_TELEGRAM_CHAT_ID?.trim();
@@ -11,9 +19,12 @@ async function resolveFallbackChatId(): Promise<string> {
     .from('tutor_students')
     .select('phone')
     .eq('name', '_BOT_CONFIG')
-    .single();
+    .maybeSingle();
 
-  return botConfig?.phone ? String(botConfig.phone).trim() : '';
+  if (botConfig?.phone) return String(botConfig.phone).trim();
+
+  const allowed = getAllowedTelegramIds();
+  return allowed.values().next().value || '';
 }
 
 export async function GET(req: NextRequest) {
@@ -57,8 +68,7 @@ export async function POST(req: NextRequest) {
     let targetChatId: string | number = '';
     let firstName: string | undefined;
 
-    const authHeader = req.headers.get('authorization') || '';
-    if (authHeader.startsWith('Bearer ')) {
+    if (hasCronSecretCredentials(req)) {
       if (!verifyCronSecret(req)) {
         return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
       }

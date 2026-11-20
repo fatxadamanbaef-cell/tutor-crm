@@ -6,7 +6,8 @@ import { supabase } from '@/lib/supabase';
 import { claimUpdate, clearHistory, setPendingReason, popPendingReason } from '@/lib/botState';
 import { normName } from '@/lib/nameMatch';
 import { verifyTelegramWebhookSecret, isAllowedTelegramUser } from '@/lib/telegramAuth';
-import { getTutorSettings } from '@/lib/settings';
+import { getTutorSettings, type TutorSettings } from '@/lib/settings';
+import type { Lesson, Student } from '@/types';
 
 export const maxDuration = 60;
 
@@ -15,8 +16,11 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://tutor-crm-kappa.verc
 const escapeHtml = (s: string) => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 export async function sendTelegramMessage(chatId: number | string, text: string, replyMarkup?: any): Promise<boolean> {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  if (!botToken) return false;
+  const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  if (!botToken) {
+    console.error('[telegram] TELEGRAM_BOT_TOKEN is not configured — cannot send message.');
+    return false;
+  }
   const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
   try {
     const res = await fetch(url, {
@@ -27,15 +31,29 @@ export async function sendTelegramMessage(chatId: number | string, text: string,
     const data = await res.json();
     if (data.ok) return true;
 
+    console.warn('[telegram] HTML sendMessage failed, retrying as plain text:', {
+      chatId,
+      error_code: data.error_code,
+      description: data.description,
+    });
+
     const fallbackRes = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, text: text.replace(/<[^>]*>/g, ''), reply_markup: replyMarkup }),
     });
     const fallbackData = await fallbackRes.json();
-    return Boolean(fallbackData.ok);
+    if (!fallbackData.ok) {
+      console.error('[telegram] Plain-text fallback sendMessage failed:', {
+        chatId,
+        error_code: fallbackData.error_code,
+        description: fallbackData.description,
+      });
+      return false;
+    }
+    return true;
   } catch (error) {
-    console.error('Failed to send telegram message', error);
+    console.error('[telegram] Failed to send telegram message:', error);
     return false;
   }
 }
@@ -65,15 +83,25 @@ async function answerCallbackQuery(callbackQueryId: string, text?: string) {
   } catch (e) {}
 }
 
-export async function buildMorningDigest(firstName?: string) {
+export async function buildMorningDigest(
+  firstName?: string,
+  prefetched?: {
+    lessons?: Lesson[];
+    students?: Student[];
+    tutorSettings?: TutorSettings;
+    skipEnsureRecurring?: boolean;
+  }
+) {
   const todayFormatted = formatTashkentHeaderDate();
-  await ensureRecurringLessonsForAllActiveStudents(9).catch((e) => {
-    console.error('Failed to ensure recurring lessons in buildMorningDigest:', e);
-  });
+  if (!prefetched?.skipEnsureRecurring) {
+    await ensureRecurringLessonsForAllActiveStudents(9).catch((e) => {
+      console.error('Failed to ensure recurring lessons in buildMorningDigest:', e);
+    });
+  }
   const [lessons, students, tutorSettings] = await Promise.all([
-    getLessons(),
-    getStudents(),
-    getTutorSettings(),
+    prefetched?.lessons ? Promise.resolve(prefetched.lessons) : getLessons(),
+    prefetched?.students ? Promise.resolve(prefetched.students) : getStudents(),
+    prefetched?.tutorSettings ? Promise.resolve(prefetched.tutorSettings) : getTutorSettings(),
   ]);
   const greetingName = (firstName || tutorSettings.tutorName || '').trim();
   const todayLessons = lessons
@@ -100,7 +128,7 @@ export async function buildMorningDigest(firstName?: string) {
       const statusIcon = isCompleted ? '✅' : isMissed ? '❌' : '⏳';
 
       const timeSlot = l.time_str || '16:00 – 17:30';
-      message += `${i + 1}️⃣ <b>${timeSlot}</b> — <b>${studentName}</b> (В этом месяце: ${conducted}/${target}) ${statusIcon}\n`;
+      message += `${i + 1}️⃣ <b>${escapeHtml(timeSlot)}</b> — <b>${escapeHtml(studentName)}</b> (В этом месяце: ${conducted}/${target}) ${statusIcon}\n`;
 
       keyboard.push([
         {

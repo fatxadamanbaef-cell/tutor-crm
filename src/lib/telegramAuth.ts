@@ -67,7 +67,42 @@ export function verifyTelegramWebhookSecret(req: NextRequest): boolean {
 }
 
 /**
- * Checks `Authorization: Bearer <CRON_SECRET>` header for Vercel Cron & internal jobs.
+ * Extracts cron secret token from any supported transport:
+ *  1. `Authorization: Bearer <CRON_SECRET>` (Vercel Cron & standard HTTP clients)
+ *  2. `x-cron-secret: <CRON_SECRET>` header
+ *  3. `?secret=<CRON_SECRET>` query parameter (external schedulers such as cron-job.org)
+ */
+export function extractCronSecret(req: NextRequest): string {
+  const authHeader = req.headers.get('authorization') || '';
+  if (authHeader.startsWith('Bearer ')) {
+    const bearer = authHeader.slice('Bearer '.length).trim();
+    if (bearer) return bearer;
+  }
+
+  const headerSecret = req.headers.get('x-cron-secret')?.trim();
+  if (headerSecret) return headerSecret;
+
+  try {
+    const url = new URL(req.url);
+    const querySecret = url.searchParams.get('secret')?.trim();
+    if (querySecret) return querySecret;
+  } catch {
+    // Ignore malformed URL
+  }
+
+  return '';
+}
+
+/**
+ * Returns true if the request carries any cron-secret credential (Bearer header, x-cron-secret, or ?secret=).
+ */
+export function hasCronSecretCredentials(req: NextRequest): boolean {
+  return Boolean(extractCronSecret(req));
+}
+
+/**
+ * Checks cron credentials against `process.env.CRON_SECRET` using constant-time comparison.
+ * Supports Vercel Cron (`Authorization: Bearer`), `x-cron-secret` header, and `?secret=` query param.
  * Fails closed (returns false) if CRON_SECRET is not configured.
  */
 export function verifyCronSecret(req: NextRequest): boolean {
@@ -76,15 +111,16 @@ export function verifyCronSecret(req: NextRequest): boolean {
     console.warn('[security] CRON_SECRET is not configured — denying cron/digest request.');
     return false;
   }
-  const authHeader = req.headers.get('authorization') || '';
-  if (!authHeader.startsWith('Bearer ')) {
-    return false;
-  }
-  const token = authHeader.slice('Bearer '.length).trim();
+  const token = extractCronSecret(req);
   if (!token) {
+    console.warn('[security] Cron/digest request missing credentials (Bearer / x-cron-secret / ?secret=).');
     return false;
   }
-  return safeCompareStrings(token, expectedSecret);
+  const valid = safeCompareStrings(token, expectedSecret);
+  if (!valid) {
+    console.warn('[security] Cron/digest request provided invalid CRON_SECRET.');
+  }
+  return valid;
 }
 
 export interface VerifiedTelegramWebAppUser {

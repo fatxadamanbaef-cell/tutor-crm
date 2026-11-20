@@ -3,6 +3,10 @@
     {
       "path": "/api/bot/cron?mode=digest",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/bot/cron?mode=weekly",
+      "schedule": "0 16 * * 0"
     }
   ]
 }

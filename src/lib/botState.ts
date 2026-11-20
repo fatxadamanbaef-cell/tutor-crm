@@ -139,6 +139,21 @@ export async function claimNotification(key: string): Promise<boolean> {
   }
 }
 
+export async function releaseNotification(key: string): Promise<void> {
+  try {
+    await mutateState((s) => {
+      const keys = Array.isArray(s.notifiedKeys) ? s.notifiedKeys : [];
+      if (!keys.includes(key)) return null;
+      return {
+        ...s,
+        notifiedKeys: keys.filter((k) => k !== key),
+      };
+    });
+  } catch (e) {
+    console.error('releaseNotification failed:', e);
+  }
+}
+
 export async function hasNotification(key: string): Promise<boolean> {
   try {
     const row = await loadRow();

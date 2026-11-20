@@ -749,6 +749,12 @@ export async function updateLessonDetails(lessonId: string, updates: Partial<Les
     payload.start_time = time.start;
     payload.end_time = time.end;
   }
+  if (updates.reminder_sent !== undefined) {
+    payload.reminder_sent = updates.reminder_sent;
+  } else if (updates.date || updates.time_str) {
+    // Reset reminder flag when lesson is rescheduled so the tutor gets reminded at the new time
+    payload.reminder_sent = false;
+  }
   if (updates.notes !== undefined) payload.notes = updates.notes;
   if ('miss_reason' in updates) payload.miss_reason = updates.miss_reason ?? null;
   if (updates.needs_makeup !== undefined) payload.needs_makeup = updates.needs_makeup;
