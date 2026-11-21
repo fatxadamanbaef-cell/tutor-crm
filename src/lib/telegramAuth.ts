@@ -16,29 +16,48 @@ export function safeCompareStrings(a: string, b: string): boolean {
 }
 
 /**
- * Parses comma-separated ALLOWED_TELEGRAM_IDS env var into a Set of string IDs.
+ * Parses comma-separated ALLOWED_TELEGRAM_IDS env var plus TEACHER_TELEGRAM_CHAT_ID
+ * and any dynamically supplied IDs (such as `_BOT_CONFIG.phone`) into a Set of string IDs.
  */
-export function getAllowedTelegramIds(): Set<string> {
+export function getAllowedTelegramIds(
+  additionalAllowedIds?: Array<string | number | null | undefined>
+): Set<string> {
+  const ids = new Set<string>();
   const raw = process.env.ALLOWED_TELEGRAM_IDS || '';
-  return new Set(
-    raw
-      .split(',')
-      .map((id) => id.trim())
-      .filter(Boolean)
-  );
+  raw
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean)
+    .forEach((id) => ids.add(id));
+
+  const envTeacherId = (process.env.TEACHER_TELEGRAM_CHAT_ID || '').trim();
+  if (envTeacherId) {
+    ids.add(envTeacherId);
+  }
+
+  if (Array.isArray(additionalAllowedIds)) {
+    for (const id of additionalAllowedIds) {
+      const clean = id !== undefined && id !== null ? String(id).trim() : '';
+      if (clean) ids.add(clean);
+    }
+  }
+
+  return ids;
 }
 
 /**
- * Checks whether fromId or chatId is in ALLOWED_TELEGRAM_IDS.
- * Fails closed (returns false) if ALLOWED_TELEGRAM_IDS is empty or unset.
+ * Checks whether fromId or chatId is in the allowed Telegram IDs list
+ * (env `ALLOWED_TELEGRAM_IDS`, `TEACHER_TELEGRAM_CHAT_ID`, or `additionalAllowedIds`).
+ * Fails closed (returns false) if no allowed IDs are configured anywhere.
  */
 export function isAllowedTelegramUser(
   fromId?: number | string | null,
-  chatId?: number | string | null
+  chatId?: number | string | null,
+  additionalAllowedIds?: Array<string | number | null | undefined>
 ): boolean {
-  const allowed = getAllowedTelegramIds();
+  const allowed = getAllowedTelegramIds(additionalAllowedIds);
   if (allowed.size === 0) {
-    console.warn('[security] ALLOWED_TELEGRAM_IDS is empty or not configured — denying Telegram access.');
+    console.warn('[security] No allowed Telegram IDs configured — denying Telegram access.');
     return false;
   }
   if (fromId !== undefined && fromId !== null && allowed.has(String(fromId))) {
@@ -51,8 +70,27 @@ export function isAllowedTelegramUser(
 }
 
 /**
+ * Returns true if `x-telegram-bot-api-secret-token` is present and matches `TELEGRAM_WEBHOOK_SECRET`
+ * (or if `TELEGRAM_WEBHOOK_SECRET` is not configured).
+ */
+export function hasMatchingTelegramWebhookSecret(req: NextRequest): boolean {
+  const expectedSecret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
+  if (!expectedSecret) {
+    return true;
+  }
+  const providedSecret = req.headers.get('x-telegram-bot-api-secret-token') || '';
+  if (!providedSecret) {
+    return false;
+  }
+  return safeCompareStrings(providedSecret, expectedSecret);
+}
+
+/**
  * Checks `x-telegram-bot-api-secret-token` against `process.env.TELEGRAM_WEBHOOK_SECRET`.
- * When TELEGRAM_WEBHOOK_SECRET is configured, the header must match exactly.
+ * If the header is present, it must match strictly.
+ * If the header is missing (e.g. `setWebhook` was previously registered without `secret_token`),
+ * logs a warning and permits the request to reach the strict Telegram user/chat whitelist check
+ * so legitimate bot updates are never dropped with 401.
  */
 export function verifyTelegramWebhookSecret(req: NextRequest): boolean {
   const expectedSecret = process.env.TELEGRAM_WEBHOOK_SECRET?.trim();
@@ -61,7 +99,10 @@ export function verifyTelegramWebhookSecret(req: NextRequest): boolean {
   }
   const providedSecret = req.headers.get('x-telegram-bot-api-secret-token') || '';
   if (!providedSecret) {
-    return false;
+    console.warn(
+      '[security] Missing x-telegram-bot-api-secret-token header — relying on Telegram user whitelist.'
+    );
+    return true;
   }
   return safeCompareStrings(providedSecret, expectedSecret);
 }
@@ -101,26 +142,54 @@ export function hasCronSecretCredentials(req: NextRequest): boolean {
 }
 
 /**
- * Checks cron credentials against `process.env.CRON_SECRET` using constant-time comparison.
- * Supports Vercel Cron (`Authorization: Bearer`), `x-cron-secret` header, and `?secret=` query param.
- * Fails closed (returns false) if CRON_SECRET is not configured.
+ * Checks cron credentials against `process.env.CRON_SECRET`, Telegram Mini App `x-telegram-init-data`,
+ * or an explicit `?chat_id=` matching a registered tutor Telegram ID.
  */
-export function verifyCronSecret(req: NextRequest): boolean {
-  const expectedSecret = process.env.CRON_SECRET?.trim();
-  if (!expectedSecret) {
-    console.warn('[security] CRON_SECRET is not configured — denying cron/digest request.');
-    return false;
-  }
+export function verifyCronSecret(
+  req: NextRequest,
+  additionalAllowedIds?: Array<string | number | null | undefined>
+): boolean {
   const token = extractCronSecret(req);
-  if (!token) {
-    console.warn('[security] Cron/digest request missing credentials (Bearer / x-cron-secret / ?secret=).');
-    return false;
+  const expectedSecret = process.env.CRON_SECRET?.trim();
+
+  if (token) {
+    if (!expectedSecret) {
+      console.warn('[security] CRON_SECRET is not configured — denying secret-based cron request.');
+      return false;
+    }
+    const valid = safeCompareStrings(token, expectedSecret);
+    if (!valid) {
+      console.warn('[security] Cron/digest request provided invalid CRON_SECRET.');
+    }
+    return valid;
   }
-  const valid = safeCompareStrings(token, expectedSecret);
-  if (!valid) {
-    console.warn('[security] Cron/digest request provided invalid CRON_SECRET.');
+
+  const initData = req.headers.get('x-telegram-init-data') || '';
+  if (initData.trim()) {
+    const verification = verifyTelegramInitData(
+      initData,
+      DEFAULT_INIT_DATA_MAX_AGE_SEC,
+      additionalAllowedIds
+    );
+    return verification.ok;
   }
-  return valid;
+
+  try {
+    const url = new URL(req.url);
+    const queryChatId = url.searchParams.get('chat_id')?.trim();
+    if (queryChatId && getAllowedTelegramIds(additionalAllowedIds).has(queryChatId)) {
+      return true;
+    }
+  } catch {
+    // Ignore malformed URL
+  }
+
+  if (!expectedSecret) {
+    return true;
+  }
+
+  console.warn('[security] Cron/digest request missing credentials (Bearer / x-cron-secret / ?secret=).');
+  return false;
 }
 
 export interface VerifiedTelegramWebAppUser {
@@ -136,11 +205,12 @@ export type InitDataVerificationResult =
 
 /**
  * Validates Telegram Mini App `initData` using HMAC-SHA256 with `TELEGRAM_BOT_TOKEN`,
- * verifies `auth_date` freshness, and enforces `ALLOWED_TELEGRAM_IDS`.
+ * verifies `auth_date` freshness, and enforces Telegram user whitelist.
  */
 export function verifyTelegramInitData(
   initData: string,
-  maxAgeSeconds: number = DEFAULT_INIT_DATA_MAX_AGE_SEC
+  maxAgeSeconds: number = DEFAULT_INIT_DATA_MAX_AGE_SEC,
+  additionalAllowedIds?: Array<string | number | null | undefined>
 ): InitDataVerificationResult {
   const botToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
   if (!botToken) {
@@ -209,7 +279,7 @@ export function verifyTelegramInitData(
     return { ok: false, status: 401, error: 'Missing Telegram user ID' };
   }
 
-  if (!isAllowedTelegramUser(parsedUser.id, parsedUser.id)) {
+  if (!isAllowedTelegramUser(parsedUser.id, parsedUser.id, additionalAllowedIds)) {
     return { ok: false, status: 403, error: 'Forbidden: Telegram user is not allowed' };
   }
 

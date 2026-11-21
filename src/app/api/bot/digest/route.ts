@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { buildMorningDigest, sendTelegramMessage } from '../route';
-import { supabase } from '@/lib/supabase';
+import { buildMorningDigest, sendTelegramMessage } from '@/lib/botMessaging';
+import { getRegisteredChatId } from '@/lib/botState';
 import {
   verifyCronSecret,
   verifyTelegramInitData,
@@ -15,13 +15,8 @@ async function resolveFallbackChatId(): Promise<string> {
   const envChatId = process.env.TEACHER_TELEGRAM_CHAT_ID?.trim();
   if (envChatId) return envChatId;
 
-  const { data: botConfig } = await supabase
-    .from('tutor_students')
-    .select('phone')
-    .eq('name', '_BOT_CONFIG')
-    .maybeSingle();
-
-  if (botConfig?.phone) return String(botConfig.phone).trim();
+  const registered = await getRegisteredChatId();
+  if (registered) return registered;
 
   const allowed = getAllowedTelegramIds();
   return allowed.values().next().value || '';
@@ -29,7 +24,8 @@ async function resolveFallbackChatId(): Promise<string> {
 
 export async function GET(req: NextRequest) {
   try {
-    if (!verifyCronSecret(req)) {
+    const registeredChatId = await getRegisteredChatId();
+    if (!verifyCronSecret(req, [registeredChatId])) {
       return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
     }
 
@@ -65,17 +61,18 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const registeredChatId = await getRegisteredChatId();
     let targetChatId: string | number = '';
     let firstName: string | undefined;
 
     if (hasCronSecretCredentials(req)) {
-      if (!verifyCronSecret(req)) {
+      if (!verifyCronSecret(req, [registeredChatId])) {
         return NextResponse.json({ ok: false, error: 'Unauthorized' }, { status: 401 });
       }
       targetChatId = await resolveFallbackChatId();
     } else {
       const initData = req.headers.get('x-telegram-init-data') || '';
-      const verification = verifyTelegramInitData(initData);
+      const verification = verifyTelegramInitData(initData, undefined, [registeredChatId]);
       if (!verification.ok) {
         return NextResponse.json(
           { ok: false, error: verification.error },

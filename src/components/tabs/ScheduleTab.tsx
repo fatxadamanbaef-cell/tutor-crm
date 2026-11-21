@@ -102,6 +102,12 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
   const selectedDateStr = getTashkentDateString(selectedDate);
   const isTodaySelected = selectedDateStr === todayStr;
 
+  const studentsMap = useMemo(() => {
+    const m = new Map<string, Student>();
+    for (const s of students) m.set(s.id, s);
+    return m;
+  }, [students]);
+
   const dayLessons = useMemo(() => {
     return lessons
       .filter((l) => l.date.startsWith(selectedDateStr))
@@ -298,8 +304,8 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
         </div>
       </div>
 
-      {/* Sticky Compact Date Navigation Bar */}
-      <div className="sticky top-0 z-20 bg-white/85 backdrop-blur-md border-b border-slate-200/80 px-3.5 py-2">
+      {/* Sticky Compact Date Navigation Bar (solid white for 60 FPS mobile WebView scroll) */}
+      <div className="sticky top-0 z-20 bg-white border-b border-slate-200/80 px-3.5 py-2">
         <HorizontalDateStrip
           selectedDate={selectedDate}
           onSelectDate={setSelectedDate}
@@ -346,7 +352,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
             {showUnmarked && (
               <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar pt-0.5">
                 {unmarkedPastLessons.map((l) => {
-                  const st = students.find((s) => s.id === l.student_id);
+                  const st = studentsMap.get(l.student_id);
                   const datePart = l.date.substring(0, 10);
                   const parsed = parseISO(`${datePart}T12:00:00+05:00`);
                   return (
@@ -444,7 +450,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
         ) : (
           <div className="space-y-2">
             {dayLessons.map((lesson, idx) => {
-              const student = students.find((s) => s.id === lesson.student_id);
+              const student = studentsMap.get(lesson.student_id);
               const prevLesson = idx > 0 ? dayLessons[idx - 1] : null;
 
               let gapElement: React.ReactNode = null;

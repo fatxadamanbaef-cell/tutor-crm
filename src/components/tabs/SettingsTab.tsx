@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useId } from 'react';
-import { CreditCard, Check, CalendarClock, Send, Download, Info, ExternalLink, Loader2, CloudUpload } from 'lucide-react';
+import { CreditCard, Check, CalendarClock, Send, Download, Info, ExternalLink, Loader2, CloudUpload, BellRing } from 'lucide-react';
 import {
   getCachedTutorSettings,
   loadTutorSettingsWithMeta,
@@ -33,6 +33,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
 
   const [isSendingDigest, setIsSendingDigest] = useState(false);
   const [digestResult, setDigestResult] = useState<string | null>(null);
+
+  const [isCheckingBot, setIsCheckingBot] = useState(false);
+  const [botStatusResult, setBotStatusResult] = useState<string | null>(null);
 
   const [isExporting, setIsExporting] = useState(false);
 
@@ -140,6 +143,43 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
       setDigestResult(`❌ Ошибка сети: ${e?.message || 'не удалось отправить'}`);
     } finally {
       setIsSendingDigest(false);
+    }
+  };
+
+  const handleCheckAndFixBot = async () => {
+    if (isCheckingBot) return;
+    hapticImpact('medium');
+    setIsCheckingBot(true);
+    setBotStatusResult(null);
+    try {
+      const initData = getTelegramWebApp()?.initData || '';
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (initData) headers['x-telegram-init-data'] = initData;
+
+      const res = await fetch('/api/bot/status', { method: 'POST', headers });
+      const data = await res.json();
+      if (res.ok && data.setWebhookOk) {
+        hapticNotification('success');
+        const parts: string[] = [
+          data.webhookOk ? '✅ Вебхук активен' : '⚠️ Вебхук обновлён',
+          data.registeredChatId ? `чат: ${data.registeredChatId}` : 'чат не привязан (нажмите /start в боте)',
+        ];
+        if (Array.isArray(data.notificationsSent) && data.notificationsSent.length > 0) {
+          parts.push(`отправлено: ${data.notificationsSent.length}`);
+        } else if (typeof data.remindersChecked === 'number') {
+          parts.push(`проверено уроков сегодня: ${data.remindersChecked}`);
+        }
+        setBotStatusResult(parts.join(' · '));
+      } else {
+        hapticNotification('error');
+        setBotStatusResult(`❌ ${data.lastErrorMessage || data.error || data.setWebhookDescription || 'Не удалось проверить бота'}`);
+      }
+    } catch (e: unknown) {
+      hapticNotification('error');
+      const message = e instanceof Error ? e.message : 'не удалось подключиться';
+      setBotStatusResult(`❌ Ошибка сети: ${message}`);
+    } finally {
+      setIsCheckingBot(false);
     }
   };
 
@@ -366,6 +406,22 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
           </button>
           {digestResult && (
             <p className="text-[11px] font-semibold text-gray-700 px-1">{digestResult}</p>
+          )}
+
+          <button
+            type="button"
+            disabled={isCheckingBot}
+            onClick={handleCheckAndFixBot}
+            className="w-full p-3 rounded-2xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 text-indigo-900 text-xs font-bold flex items-center justify-between active:scale-98 transition-all disabled:opacity-60"
+          >
+            <span className="flex items-center gap-2">
+              <BellRing className="w-4 h-4 text-indigo-600" />
+              <span>Проверить и починить уведомления бота</span>
+            </span>
+            {isCheckingBot && <Loader2 className="w-4 h-4 animate-spin" />}
+          </button>
+          {botStatusResult && (
+            <p className="text-[11px] font-semibold text-gray-700 px-1">{botStatusResult}</p>
           )}
 
           <button

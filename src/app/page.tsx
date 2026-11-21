@@ -56,11 +56,12 @@ export default function Dashboard() {
   const [selectedLesson, setSelectedLesson] = useState<Lesson | null>(null);
   const [paymentModalStudent, setPaymentModalStudent] = useState<Student | null>(null);
   const [paymentsVersion, setPaymentsVersion] = useState<number>(0);
+  const [lessonsRevision, setLessonsRevision] = useState<number>(0);
 
   const refreshData = useCallback(async () => {
     try {
       const [sData, lData, mData] = await Promise.all([
-        getStudents(),
+        getStudents(false),
         getLessons(),
         getPendingMakeups(),
       ]);
@@ -98,6 +99,17 @@ export default function Dashboard() {
     }
     refreshData();
     getTutorSettings().catch(() => {});
+
+    // Lightweight background heartbeat to ensure Telegram reminders/digests stay reliable while app is open
+    const triggerCronCheck = () => {
+      const initData = getTelegramWebApp()?.initData || '';
+      const headers: Record<string, string> = {};
+      if (initData) headers['x-telegram-init-data'] = initData;
+      fetch('/api/bot/cron?mode=all', { headers }).catch(() => {});
+    };
+    triggerCronCheck();
+    const cronTimer = setInterval(triggerCronCheck, 3 * 60 * 1000);
+    return () => clearInterval(cronTimer);
   }, [refreshData]);
 
   // Live recalculated attendance stats per student's individual billing period (from billing_day)
@@ -298,7 +310,7 @@ export default function Dashboard() {
         .catch(() => {});
     } catch (e: any) {
       console.error('Save error:', e);
-      alert('Ошибка при сохранении: ' + (e.message || String(e)));
+      throw e;
     }
   }, []);
 
@@ -306,7 +318,7 @@ export default function Dashboard() {
     try {
       await updateStudentSettings(studentId, updates);
       const [updatedStudents, updatedLessons] = await Promise.all([
-        getStudents(),
+        getStudents(false),
         getLessons(),
       ]);
       setStudents(updatedStudents);
@@ -450,6 +462,7 @@ export default function Dashboard() {
           key={selectedStudent.id}
           student={selectedStudent}
           lessons={lessons}
+          lessonsRevision={lessonsRevision}
           paymentsVersion={paymentsVersion}
           onBack={() => {
             setSelectedStudentId(null);
@@ -539,6 +552,7 @@ export default function Dashboard() {
               prev.map((l) => (l.id === lessonId ? { ...l, ...updates } : l))
             );
             await updateLessonDetails(lessonId, updates);
+            setLessonsRevision((v) => v + 1);
             setSelectedLesson(null);
           } catch (e) {
             console.error('Update failed:', e);

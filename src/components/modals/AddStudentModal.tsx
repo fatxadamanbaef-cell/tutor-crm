@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { RecurringSlot, BillingType } from '@/types';
-import { X, UserPlus, Clock, SlidersHorizontal } from 'lucide-react';
+import { X, UserPlus, Clock, SlidersHorizontal, Loader2 } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
 
 interface AddStudentModalProps {
@@ -18,7 +18,7 @@ interface AddStudentModalProps {
     phone?: string;
     telegram?: string;
     recurring_schedule?: RecurringSlot[];
-  }) => void;
+  }) => Promise<void> | void;
 }
 
 const WEEKDAYS = [
@@ -54,6 +54,8 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
   const [endTime, setEndTime] = useState('17:30');
   const [customPerDayTime, setCustomPerDayTime] = useState(false);
   const [perDayTimes, setPerDayTimes] = useState<Record<number, { start: string; end: string }>>({});
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -74,6 +76,8 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
         3: { start: '16:00', end: '17:30' },
         5: { start: '16:00', end: '17:30' },
       });
+      setIsSubmitting(false);
+      setErrorMsg(null);
     }
   }, [isOpen]);
 
@@ -114,13 +118,16 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
     });
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (isSubmitting) return;
     if (!name.trim()) {
-      alert('Пожалуйста, введите имя ученика');
+      setErrorMsg('Пожалуйста, введите имя ученика');
+      hapticNotification('warning');
       return;
     }
 
-    hapticNotification('success');
+    setIsSubmitting(true);
+    setErrorMsg(null);
 
     const recurring_schedule: RecurringSlot[] = selectedDays.map((dow) => {
       if (customPerDayTime && perDayTimes[dow]) {
@@ -137,19 +144,27 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
       };
     });
 
-    onSave({
-      name: name.trim(),
-      monthly_target_lessons: Number(monthlyTarget) || 12,
-      billing_day: billingDay.trim() || '10',
-      billing_type: billingType,
-      lesson_rate: Number(lessonRate) || 300000,
-      lessons_balance: Number(lessonsBalance) || 0,
-      phone: phone.trim(),
-      telegram: telegram.trim(),
-      recurring_schedule,
-    });
-
-    onClose();
+    try {
+      await onSave({
+        name: name.trim(),
+        monthly_target_lessons: Number(monthlyTarget) || 12,
+        billing_day: billingDay.trim() || '10',
+        billing_type: billingType,
+        lesson_rate: Number(lessonRate) || 300000,
+        lessons_balance: Number(lessonsBalance) || 0,
+        phone: phone.trim(),
+        telegram: telegram.trim(),
+        recurring_schedule,
+      });
+      hapticNotification('success');
+      onClose();
+    } catch (e: unknown) {
+      hapticNotification('error');
+      const message = e instanceof Error ? e.message : 'Ошибка при сохранении ученика';
+      setErrorMsg(message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -157,7 +172,7 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
       className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-3"
       onClick={(e) => {
         e.stopPropagation();
-        onClose();
+        if (!isSubmitting) onClose();
       }}
       style={{ touchAction: 'none' }}
     >
@@ -420,21 +435,40 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
           </div>
         </div>
 
+        {errorMsg && (
+          <div
+            role="alert"
+            aria-live="polite"
+            className="px-3 py-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold"
+          >
+            {errorMsg}
+          </div>
+        )}
+
         {/* Buttons */}
         <div className="flex gap-2 pt-2 border-t border-slate-100">
           <button
             type="button"
+            disabled={isSubmitting}
             onClick={onClose}
-            className="flex-1 py-3 rounded-2xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-100 active:scale-95 transition-all"
+            className="flex-1 py-3 rounded-2xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-100 disabled:opacity-50 active:scale-95 transition-all"
           >
             Отмена
           </button>
           <button
             type="button"
+            disabled={isSubmitting}
             onClick={handleSave}
-            className="flex-1 py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-md shadow-blue-500/20 active:scale-95 transition-all"
+            className="flex-1 py-3 rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:opacity-70 text-white font-bold text-xs shadow-md shadow-blue-500/20 flex items-center justify-center gap-1.5 active:scale-95 transition-all"
           >
-            Создать ученика
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                <span>Создание...</span>
+              </>
+            ) : (
+              <span>Создать ученика</span>
+            )}
           </button>
         </div>
       </div>

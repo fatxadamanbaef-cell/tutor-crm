@@ -8,9 +8,45 @@ import { generateUUID } from './uuid';
  *  - pendingReason: waiting for miss reason for a specific lesson
  */
 const STATE_NAME = '_BOT_STATE';
+const CONFIG_NAME = '_BOT_CONFIG';
 const MAX_PROCESSED = 60;
 const MAX_HISTORY = 8;
 const HISTORY_TTL_MS = 30 * 60 * 1000;
+const CHAT_ID_CACHE_TTL_MS = 5 * 60 * 1000;
+
+let cachedRegisteredChatId: string | null = null;
+let cachedRegisteredChatIdAt = 0;
+
+/**
+ * Returns the registered tutor Telegram chat_id stored in `_BOT_CONFIG.phone`,
+ * cached in memory for 5 minutes to avoid redundant Supabase queries per webhook/cron tick.
+ */
+export async function getRegisteredChatId(): Promise<string> {
+  const now = Date.now();
+  if (cachedRegisteredChatId !== null && now - cachedRegisteredChatIdAt < CHAT_ID_CACHE_TTL_MS) {
+    return cachedRegisteredChatId;
+  }
+  if (!supabase) return '';
+  try {
+    const { data } = await supabase
+      .from('tutor_students')
+      .select('phone')
+      .eq('name', CONFIG_NAME)
+      .maybeSingle();
+    const chatId = data?.phone ? String(data.phone).trim() : '';
+    cachedRegisteredChatId = chatId;
+    cachedRegisteredChatIdAt = now;
+    return chatId;
+  } catch (e) {
+    console.warn('[botState] Failed to read _BOT_CONFIG:', e);
+    return cachedRegisteredChatId || '';
+  }
+}
+
+export function setCachedRegisteredChatId(chatId: string): void {
+  cachedRegisteredChatId = String(chatId || '').trim();
+  cachedRegisteredChatIdAt = Date.now();
+}
 
 export interface HistoryMessage {
   role: 'user' | 'assistant';

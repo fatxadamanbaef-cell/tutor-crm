@@ -63,6 +63,7 @@ import { AddPaymentModal } from '@/components/modals/AddPaymentModal';
 interface ClientProfileScreenProps {
   student: Student;
   lessons: Lesson[];
+  lessonsRevision?: number;
   onBack: () => void;
   onDeleteStudent: (studentId: string) => void;
   onUpdateBillingDay?: (studentId: string, day: number) => void;
@@ -113,6 +114,7 @@ function getTelegramUrl(tgRaw?: string): string | null {
 export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
   student,
   lessons,
+  lessonsRevision = 0,
   onBack,
   onDeleteStudent,
   onSaveStudentInfo,
@@ -228,20 +230,13 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     setLessonsBalance(student.lessons_balance ?? 0);
   }, [student.id, student.lessons_balance]);
 
-  // Track changes to this student's lessons in parent state
-  const studentLessonsSignature = useMemo(
-    () =>
-      lessons
-        .filter((l) => l.student_id === student.id)
-        .map(
-          (l) =>
-            `${l.id}:${l.date}:${l.time_str}:${l.status}:${l.miss_reason || ''}:${l.notes || ''}`
-        )
-        .join('|'),
+  // Count parent lessons for this student (only changes when lessons are added/deleted, not on status tap)
+  const studentLessonsCount = useMemo(
+    () => lessons.filter((l) => l.student_id === student.id).length,
     [lessons, student.id]
   );
 
-  // Load horizon lessons and unmarked past lessons
+  // Load horizon lessons and unmarked past lessons (only on student/horizon change or add/delete)
   useEffect(() => {
     let isMounted = true;
     const key = `${student.id}_${daysHorizon}`;
@@ -269,7 +264,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [student.id, daysHorizon, studentLessonsSignature]);
+  }, [student.id, daysHorizon, studentLessonsCount, lessonsRevision]);
 
   // Load billing calculation
   useEffect(() => {
@@ -1929,7 +1924,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
 
       {/* Modal for editing Miss Reason */}
       {editingReasonLesson && (
-        <div className="fixed inset-0 z-60 bg-black/40 backdrop-blur-xs flex items-end sm:items-center justify-center p-3">
+        <div className="fixed inset-0 z-60 bg-black/45 flex items-end sm:items-center justify-center p-3">
           <div className="w-full max-w-sm bg-white rounded-3xl p-5 shadow-2xl space-y-4 animate-in slide-in-from-bottom-6">
             <div className="flex justify-between items-start">
               <div>

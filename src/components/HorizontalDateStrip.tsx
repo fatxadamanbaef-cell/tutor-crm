@@ -5,7 +5,6 @@ import { Lesson } from '@/types';
 import {
   getTashkentDateStrip,
   formatCalendarChip,
-  isSameTashkentDate,
   getTashkentNow,
   getTashkentTodayStr,
   getTashkentDateString,
@@ -36,6 +35,8 @@ interface HorizontalDateStripProps {
   onQuickAdd?: () => void;
 }
 
+const EMPTY_DAY_SUMMARY = { total: 0, allDone: false };
+
 export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
   selectedDate,
   onSelectDate,
@@ -45,6 +46,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
   const [isMonthView, setIsMonthView] = useState(false);
   const [currentMonthDate, setCurrentMonthDate] = useState(selectedDate);
   const selectedChipRef = useRef<HTMLButtonElement | null>(null);
+  const hasScrolledInitialRef = useRef(false);
 
   const todayStr = getTashkentTodayStr();
   const selectedStr = getTashkentDateString(selectedDate);
@@ -66,8 +68,10 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
 
   useEffect(() => {
     if (!isMonthView && selectedChipRef.current) {
+      const behavior = hasScrolledInitialRef.current ? 'smooth' : 'auto';
+      hasScrolledInitialRef.current = true;
       selectedChipRef.current.scrollIntoView({
-        behavior: 'smooth',
+        behavior,
         block: 'nearest',
         inline: 'center',
       });
@@ -97,35 +101,36 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
     return eachDayOfInterval({ start: startDate, end: endDate });
   }, [currentMonthDate]);
 
-  const getDayStatusSummary = (day: Date) => {
-    const dayLessons = lessons.filter(
-      (l) => isSameTashkentDate(l.date, day) && l.status !== 'missed_excused'
-    );
-    const allDayLessons = lessons.filter((l) => isSameTashkentDate(l.date, day));
-    const hasCompleted = allDayLessons.some((l) => l.status === 'completed');
-    const hasBurned = allDayLessons.some(
-      (l) => l.status === 'missed_penalty' || (l.status === 'missed' && !l.needs_makeup)
-    );
-    const hasPlanned = allDayLessons.some(
-      (l) => l.status === 'planned' || (l.status as string) === 'scheduled'
-    );
-    const allDone =
-      dayLessons.length > 0 &&
-      dayLessons.every(
-        (l) =>
-          l.status === 'completed' ||
-          l.status === 'missed_penalty' ||
-          l.status === 'missed'
-      );
+  // Pre-index all lesson counts and completion flags by YYYY-MM-DD in O(L) once per lessons change
+  const daySummaryMap = useMemo(() => {
+    const buckets = new Map<string, { total: number; done: number }>();
+    for (const l of lessons) {
+      if (l.status === 'missed_excused') continue;
+      const dateKey = l.date.substring(0, 10);
+      let b = buckets.get(dateKey);
+      if (!b) {
+        b = { total: 0, done: 0 };
+        buckets.set(dateKey, b);
+      }
+      b.total += 1;
+      if (
+        l.status === 'completed' ||
+        l.status === 'missed_penalty' ||
+        l.status === 'missed'
+      ) {
+        b.done += 1;
+      }
+    }
 
-    return {
-      total: dayLessons.length,
-      hasCompleted,
-      hasBurned,
-      hasPlanned,
-      allDone,
-    };
-  };
+    const result = new Map<string, { total: number; allDone: boolean }>();
+    for (const [key, b] of buckets.entries()) {
+      result.set(key, {
+        total: b.total,
+        allDone: b.total > 0 && b.done === b.total,
+      });
+    }
+    return result;
+  }, [lessons]);
 
   return (
     <div className="space-y-1.5">
@@ -196,12 +201,12 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
 
       {/* VIEW 1: HORIZONTAL SCROLLABLE STRIP (DEFAULT) */}
       {!isMonthView && (
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar scroll-smooth">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
           {daysStrip.map((day) => {
             const chip = formatCalendarChip(day);
             const dayStr = getTashkentDateString(day);
             const isSelected = dayStr === selectedStr;
-            const statusSummary = getDayStatusSummary(day);
+            const statusSummary = daySummaryMap.get(dayStr) || EMPTY_DAY_SUMMARY;
 
             return (
               <button
@@ -297,7 +302,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
               const isSelected = isSameDay(day, selectedDate);
               const isCurrentMonth = day.getMonth() === currentMonthDate.getMonth();
               const isToday = isSameDay(day, getTashkentNow());
-              const statusSummary = getDayStatusSummary(day);
+              const statusSummary = daySummaryMap.get(getTashkentDateString(day)) || EMPTY_DAY_SUMMARY;
 
               return (
                 <button
