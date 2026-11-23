@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Student, Lesson, LessonStatus } from '@/types';
 import { X, Check, Trash2, AlertTriangle, Sparkles } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
 import { format, addDays, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { getTashkentNow } from '@/lib/formatters';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 interface EditLessonModalProps {
   isOpen: boolean;
@@ -58,37 +59,58 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
   onSave,
   onDelete,
 }) => {
-  const [lessonDate, setLessonDate] = useState('');
-  const [startTime, setStartTime] = useState('');
-  const [endTime, setEndTime] = useState('');
-  const [durationMin, setDurationMin] = useState(90);
-  const [notes, setNotes] = useState('');
-  const [currentStatus, setCurrentStatus] = useState<LessonStatus>('planned');
-  const [missReason, setMissReason] = useState('');
+  if (!isOpen || !lesson) return null;
+  return (
+    <EditLessonModalContent
+      key={lesson.id}
+      lesson={lesson}
+      student={student}
+      lessons={lessons}
+      onClose={onClose}
+      onSave={onSave}
+      onDelete={onDelete}
+    />
+  );
+};
 
-  useEffect(() => {
-    if (isOpen && lesson) {
-      setLessonDate(lesson.date.substring(0, 10));
-      const parts = (lesson.time_str || '16:00 - 17:30').split(' - ');
-      const s = parts[0] || '16:00';
-      const e = parts[1] || '17:30';
-      setStartTime(s);
-      setEndTime(e);
-      setDurationMin(getDurationMinutes(s, e));
-      const rawNotes = lesson.notes || '';
-      setNotes(
-        rawNotes.startsWith('Регулярный урок') || rawNotes.startsWith('Авто-слот')
-          ? ''
-          : rawNotes
-      );
-      setCurrentStatus(lesson.status || 'planned');
-      setMissReason(lesson.miss_reason || '');
-    }
-  }, [isOpen, lesson]);
+interface EditLessonModalContentProps {
+  lesson: Lesson;
+  student: Student | null;
+  lessons: Lesson[];
+  onClose: () => void;
+  onSave: (lessonId: string, updates: Partial<Lesson>) => Promise<void>;
+  onDelete: (lessonId: string) => Promise<void>;
+}
+
+const EditLessonModalContent: React.FC<EditLessonModalContentProps> = ({
+  lesson,
+  student,
+  lessons,
+  onClose,
+  onSave,
+  onDelete,
+}) => {
+  const initialParts = (lesson.time_str || '16:00 - 17:30').split(' - ');
+  const initialStart = initialParts[0] || '16:00';
+  const initialEnd = initialParts[1] || '17:30';
+  const rawInitialNotes = lesson.notes || '';
+  const initialNotes =
+    rawInitialNotes.startsWith('Регулярный урок') || rawInitialNotes.startsWith('Авто-слот')
+      ? ''
+      : rawInitialNotes;
+
+  const [lessonDate, setLessonDate] = useState(lesson.date.substring(0, 10));
+  const [startTime, setStartTime] = useState(initialStart);
+  const [endTime, setEndTime] = useState(initialEnd);
+  const [durationMin, setDurationMin] = useState(() => getDurationMinutes(initialStart, initialEnd));
+  const [notes, setNotes] = useState(initialNotes);
+  const [currentStatus, setCurrentStatus] = useState<LessonStatus>(lesson.status || 'planned');
+  const [missReason, setMissReason] = useState(lesson.miss_reason || '');
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
   // Other active lessons on the selected date (to prevent blind rescheduling conflicts)
   const otherDayLessons = useMemo(() => {
-    if (!lessonDate || !lesson) return [];
+    if (!lessonDate) return [];
     return lessons
       .filter(
         (l) =>
@@ -112,8 +134,6 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
     }
     return null;
   }, [otherDayLessons, startTime, endTime]);
-
-  if (!isOpen || !lesson) return null;
 
   const handleStartTimeChange = (newStart: string) => {
     setStartTime(newStart);
@@ -160,15 +180,17 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
   return (
     <div className="fixed inset-0 z-[60] bg-[#f4f5f8] flex flex-col animate-in slide-in-from-bottom duration-200">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3.5 bg-white border-b border-slate-200">
+      <div className="flex items-center justify-between px-4 pt-safe pb-3 bg-white border-b border-slate-200">
         <button
+          type="button"
+          aria-label="Закрыть"
           onClick={() => {
             hapticImpact('light');
             onClose();
           }}
-          className="w-9 h-9 flex items-center justify-center rounded-full bg-slate-100 text-slate-700 active:scale-90"
+          className="touch-hit w-9 h-9 flex items-center justify-center rounded-full bg-slate-100 text-slate-700 active:scale-90"
         >
-          <X className="w-5 h-5" />
+          <X className="w-5 h-5" aria-hidden="true" />
         </button>
         <div className="text-center">
           <h2 className="text-sm font-bold text-slate-900">Урок и перенос</h2>
@@ -468,19 +490,28 @@ export const EditLessonModal: React.FC<EditLessonModalProps> = ({
 
           <button
             type="button"
-            onClick={() => {
-              if (confirm('Вы уверены, что хотите удалить этот урок?')) {
-                onDelete(lesson.id);
-                onClose();
-              }
-            }}
+            onClick={() => setIsDeleteConfirmOpen(true)}
             className="w-full py-3 rounded-2xl bg-rose-50 text-rose-600 text-xs font-bold border border-rose-200/80 flex items-center justify-center gap-1.5 active:scale-98"
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 className="w-4 h-4" aria-hidden="true" />
             <span>Удалить урок из расписания</span>
           </button>
         </div>
       </div>
+
+      <ConfirmDialog
+        isOpen={isDeleteConfirmOpen}
+        danger
+        title="Удалить урок?"
+        description="Если урок был списан с баланса, +1 урок автоматически вернётся ученику."
+        confirmLabel="Удалить"
+        onClose={() => setIsDeleteConfirmOpen(false)}
+        onConfirm={async () => {
+          setIsDeleteConfirmOpen(false);
+          await onDelete(lesson.id);
+          onClose();
+        }}
+      />
     </div>
   );
 };

@@ -18,6 +18,7 @@ import { format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { HorizontalDateStrip } from '../HorizontalDateStrip';
 import { LessonCard } from '../LessonCard';
+import { useToast } from '@/components/ui/ToastProvider';
 
 interface ScheduleTabProps {
   students: Student[];
@@ -29,7 +30,7 @@ interface ScheduleTabProps {
   onUpdateLessonTime: (lessonId: string, timeStr: string, dateStr?: string) => Promise<void>;
   onSetLessonStatus: (lessonId: string, status: LessonStatus, missReason?: string) => Promise<void>;
   onUpdateLessonNote?: (lessonId: string, notes: string) => Promise<void> | void;
-  onScheduleSundayMakeup?: (makeupIdOrLesson: any, sundayDate: string, timeStr: string) => Promise<void>;
+  onScheduleSundayMakeup?: (makeupIdOrLesson: string, sundayDate: string, timeStr: string) => Promise<void>;
   onArchiveMakeup?: (makeupId: string) => Promise<void>;
   onRefresh?: () => Promise<void> | void;
 }
@@ -82,6 +83,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
   onUpdateLessonNote,
   onRefresh,
 }) => {
+  const { showToast } = useToast();
   const [selectedDate, setSelectedDate] = useState<Date>(getTashkentNow());
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showUnmarked, setShowUnmarked] = useState(false);
@@ -238,10 +240,12 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
   const handleMarkAllUnmarkedCompleted = async (e: React.MouseEvent) => {
     e.stopPropagation();
     if (unmarkedPastLessons.length === 0) return;
+    const count = unmarkedPastLessons.length;
     hapticNotification('success');
     for (const l of unmarkedPastLessons) {
       await onSetLessonStatus(l.id, 'completed');
     }
+    showToast({ message: `Отмечено ${count} уроков как проведённые`, tone: 'success' });
   };
 
   return (
@@ -252,7 +256,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
       {/* Non-sticky Top Header */}
       <div
         ref={topHeaderRef}
-        className="bg-white px-3.5 pt-3 pb-2 flex items-center justify-between gap-2"
+        className="bg-white px-3.5 pt-safe pb-2 flex items-center justify-between gap-2"
       >
         <div className="min-w-0">
           <h1 className="text-lg font-bold text-slate-900 tracking-tight leading-tight">
@@ -280,25 +284,29 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
         <div className="flex items-center gap-1.5 shrink-0">
           {onRefresh && (
             <button
+              type="button"
               onClick={handleRefreshClick}
               disabled={isRefreshing}
-              className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 active:scale-95 disabled:opacity-50 transition-all"
+              aria-label="Обновить расписание"
+              className="touch-hit w-9 h-9 flex items-center justify-center rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 active:scale-95 disabled:opacity-50 transition-all"
               title="Обновить"
             >
               <RotateCcw
                 className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-blue-600' : ''}`}
+                aria-hidden="true"
               />
             </button>
           )}
 
           <button
+            type="button"
             onClick={() => {
               hapticImpact('light');
               onAddLesson(selectedDate);
             }}
-            className="h-8 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center gap-1 shadow-sm shadow-blue-500/20 active:scale-95 transition-all"
+            className="touch-hit h-9 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center gap-1 shadow-sm shadow-blue-500/20 active:scale-95 transition-all"
           >
-            <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+            <Plus className="w-3.5 h-3.5 stroke-[2.5]" aria-hidden="true" />
             <span>Урок</span>
           </button>
         </div>
@@ -341,7 +349,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
               <button
                 type="button"
                 onClick={handleMarkAllUnmarkedCompleted}
-                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-[11px] inline-flex items-center gap-1 shrink-0 active:scale-95 transition-all shadow-2xs"
+                className="touch-hit px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-[11px] inline-flex items-center gap-1 shrink-0 active:scale-95 transition-all shadow-2xs"
                 title="Отметить все прошлые уроки как проведённые"
               >
                 <CheckCheck className="w-3.5 h-3.5" />
@@ -381,17 +389,19 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
+                          aria-label="Отметить проведённым"
                           onClick={() => {
                             hapticNotification('success');
                             onSetLessonStatus(l.id, 'completed');
                           }}
-                          className="flex-1 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold text-xs text-center active:scale-90"
+                          className="touch-hit flex-1 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold text-xs text-center active:scale-90"
                           title="Был (-1 баланс)"
                         >
                           ✅
                         </button>
                         <button
                           type="button"
+                          aria-label="Отметить сгоревшим"
                           onClick={() => {
                             hapticNotification('warning');
                             onSetLessonStatus(
@@ -400,18 +410,19 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                               'Пропуск без предупреждения'
                             );
                           }}
-                          className="flex-1 py-1 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 font-semibold text-xs text-center active:scale-90"
+                          className="touch-hit flex-1 py-1.5 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 font-semibold text-xs text-center active:scale-90"
                           title="Сгорел (-1 баланс)"
                         >
                           🔥
                         </button>
                         <button
                           type="button"
+                          aria-label="Отменить с сохранением баланса"
                           onClick={() => {
                             hapticImpact('light');
                             onSetLessonStatus(l.id, 'missed_excused', 'Уважительная отмена');
                           }}
-                          className="flex-1 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-xs text-center active:scale-90"
+                          className="touch-hit flex-1 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-xs text-center active:scale-90"
                           title="Отмена (баланс сохранен)"
                         >
                           🛑
@@ -494,7 +505,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                             hapticImpact('light');
                             onAddLesson(selectedDate, prevSlot.endStr);
                           }}
-                          className="shrink-0 text-xs font-semibold text-blue-600 hover:text-blue-700 active:opacity-70 transition-opacity ml-2"
+                          className="touch-hit shrink-0 text-xs font-semibold text-blue-600 hover:text-blue-700 active:opacity-70 transition-opacity ml-2 px-1.5 py-0.5"
                         >
                           + Занять
                         </button>

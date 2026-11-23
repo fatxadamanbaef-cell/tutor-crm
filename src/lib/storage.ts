@@ -5,6 +5,103 @@ import { generateUUID } from './uuid';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subMonths, addDays } from 'date-fns';
 
 // -------------------------------------------------------------
+// INTERNAL DB ROW / PAYLOAD INTERFACES
+// -------------------------------------------------------------
+interface StudentUpsertPayload {
+  id: string;
+  name: string;
+  monthly_target_lessons: number;
+  recurring_schedule: RecurringSlot[];
+  billing_day: string;
+  billing_type?: BillingType;
+  lesson_rate?: number;
+  lessons_balance?: number;
+  phone: string;
+  telegram: string;
+  color: string;
+  notes: string;
+  is_active: boolean;
+}
+
+interface LessonDbRow {
+  id: string;
+  student_id: string;
+  lesson_date: string;
+  start_time?: string | null;
+  end_time?: string | null;
+  status: string;
+  miss_reason?: string | null;
+  needs_makeup?: boolean | null;
+  is_makeup?: boolean | null;
+  reminder_sent?: boolean | null;
+  notes?: string | null;
+  created_at: string;
+  tutor_students?: { name?: string; color?: string } | null;
+}
+
+interface LessonUpsertRow {
+  id: string;
+  student_id: string;
+  lesson_date: string;
+  start_time: string;
+  end_time: string;
+  status: string;
+  miss_reason?: string | null;
+  needs_makeup: boolean;
+  is_makeup: boolean;
+  reminder_sent: boolean;
+  notes: string;
+}
+
+interface LessonUpdatePayload {
+  lesson_date?: string;
+  start_time?: string;
+  end_time?: string;
+  reminder_sent?: boolean;
+  notes?: string;
+  miss_reason?: string | null;
+  needs_makeup?: boolean;
+  is_makeup?: boolean;
+  status?: string;
+}
+
+interface MakeupDbRow {
+  tutor_students?: { name?: string } | null;
+  student_name?: string | null;
+  missed_date?: string | null;
+  created_at: string;
+  status: string;
+}
+
+interface StudentUpdatePayload {
+  name?: string;
+  phone?: string;
+  telegram?: string;
+  color?: string;
+  is_active?: boolean;
+  monthly_target_lessons?: number;
+  billing_day?: string;
+  billing_type?: BillingType;
+  lesson_rate?: number;
+  lessons_balance?: number;
+  notes?: string;
+  recurring_schedule?: RecurringSlot[];
+}
+
+interface PaymentDbRow {
+  id: string;
+  student_id: string;
+  tutor_students?: { name?: string } | null;
+  student_name?: string | null;
+  amount_uzs?: number | null;
+  lessons_added?: number | null;
+  payment_method?: string | null;
+  paid_at?: string | null;
+  note?: string | null;
+  created_at?: string | null;
+}
+
+// -------------------------------------------------------------
 // DATE / TIME HELPERS (Strict UTC+5 Tashkent strings)
 // -------------------------------------------------------------
 function toMinutes(t: string): number {
@@ -159,7 +256,7 @@ export async function saveStudent(student: {
   const studentId = student.id || generateUUID();
   const target = Number(student.monthly_target_lessons) || 12;
 
-  const dbPayload: any = {
+  const dbPayload: StudentUpsertPayload = {
     id: studentId,
     name: student.name.trim(),
     monthly_target_lessons: target,
@@ -240,7 +337,7 @@ export async function deleteStudent(studentId: string): Promise<void> {
 // -------------------------------------------------------------
 // LESSONS MAPPER & API
 // -------------------------------------------------------------
-function mapLessonRow(l: any): Lesson {
+function mapLessonRow(l: LessonDbRow): Lesson {
   let status: LessonStatus = 'planned';
   if (l.status === 'completed') {
     status = 'completed';
@@ -473,8 +570,8 @@ export async function initializePackageFromPastDate(
 
   // FIX 2: use only `d_t` composite key — date-only key caused overwrite for students
   // with 2 slots on the same day, and incorrect fuzzy-matching for mismatched times.
-  const existingMap = new Map<string, any>();
-  (existingRows || []).forEach((r) => {
+  const existingMap = new Map<string, LessonDbRow>();
+  ((existingRows || []) as LessonDbRow[]).forEach((r) => {
     const d = getTashkentDateString(r.lesson_date);
     const t = String(r.start_time || '').substring(0, 5);
     existingMap.set(`${d}_${t}`, r);
@@ -487,7 +584,7 @@ export async function initializePackageFromPastDate(
 
   // FIX 1: separate tracking — only lessons matched by the recurring template are "package lessons"
   // and count toward completedCount. Manually-added extra lessons must NOT reduce the balance.
-  const lessonsToUpsert: any[] = [];
+  const lessonsToUpsert: LessonUpsertRow[] = [];
   const templateMatchedIds = new Set<string>(); // IDs of lessons upserted from the template loop
   let cursor = startClean;
 
@@ -652,7 +749,7 @@ export async function saveLesson(lessonData: {
   else if (lessonData.status === 'missed') dbStatus = 'missed';
   else if (lessonData.status === 'planned') dbStatus = 'scheduled';
 
-  const payload: any = {
+  const payload: LessonUpsertRow = {
     id: lessonId,
     student_id: lessonData.student_id,
     lesson_date: lessonDate,
@@ -732,7 +829,7 @@ export async function saveBatchLessons(lessons: Array<{
 export async function updateLessonTime(lessonId: string, timeStr: string, newDateStr?: string): Promise<void> {
   if (!supabase) throw new Error('Supabase is not initialized');
   const time = parseTimeRange(timeStr);
-  const updatePayload: any = {
+  const updatePayload: LessonUpdatePayload = {
     start_time: time.start,
     end_time: time.end,
   };
@@ -744,7 +841,7 @@ export async function updateLessonTime(lessonId: string, timeStr: string, newDat
 
 export async function updateLessonDetails(lessonId: string, updates: Partial<Lesson>): Promise<void> {
   if (!supabase) throw new Error('Supabase is not initialized');
-  const payload: any = {};
+  const payload: LessonUpdatePayload = {};
 
   let prevStatus: string | undefined;
   let studentId: string | undefined;
@@ -880,8 +977,7 @@ export async function adjustStudentBalance(studentId: string, delta: number): Pr
 export async function setLessonStatusDirect(
   lessonId: string,
   targetStatus: LessonStatus,
-  missReason?: string,
-  _needsMakeupLegacy?: boolean
+  missReason?: string
 ): Promise<{ previousStatus: string; newStatus: LessonStatus; studentId: string; newBalance: number }> {
   if (!supabase) throw new Error('Supabase is not initialized');
 
@@ -908,7 +1004,7 @@ export async function setLessonStatusDirect(
     delta = 1;  // deducted -> non-deducted (e.g. missed_excused or planned): refund 1 lesson
   }
 
-  const updatePayload: any = {
+  const updatePayload: LessonUpdatePayload = {
     status: targetStatus,
     needs_makeup: false,
   };
@@ -1110,7 +1206,7 @@ export async function planRecurringLessonsForStudent(
     existingDates.add(d);
   });
 
-  const newLessons: any[] = [];
+  const newLessons: LessonUpsertRow[] = [];
   let cursor = todayStr;
 
   while (cursor <= endDateStr) {
@@ -1259,14 +1355,14 @@ export async function getAttendanceSummary(period: 'today' | 'week' | 'month' = 
       .gte('created_at', `${startStr}T00:00:00Z`),
   ]);
 
-  const lessons = lessonsRes.data || [];
-  const makeups = makeupsRes.data || [];
+  const lessons = (lessonsRes.data || []) as LessonDbRow[];
+  const makeups = (makeupsRes.data || []) as MakeupDbRow[];
 
   let completedCount = 0;
   let missedCount = 0;
   const missedDetails: Array<{ studentName: string; date: string; reason: string }> = [];
 
-  lessons.forEach((l: any) => {
+  lessons.forEach((l) => {
     const sName = l.tutor_students?.name || 'Ученик';
     if (l.status === 'completed') {
       completedCount++;
@@ -1282,7 +1378,7 @@ export async function getAttendanceSummary(period: 'today' | 'week' | 'month' = 
 
   const targetCount = studentsRes.reduce((acc, s) => acc + (s.monthly_target_lessons || 12), 0);
 
-  const makeupDetails = makeups.map((m: any) => ({
+  const makeupDetails = makeups.map((m) => ({
     studentName: m.tutor_students?.name || m.student_name || 'Ученик',
     date: m.missed_date || getTashkentDateString(m.created_at),
     status: m.status === 'completed' ? 'Отработано' : m.status === 'scheduled' ? 'Назначено в ВС' : 'Ожидает отработки',
@@ -1351,7 +1447,7 @@ export async function updateStudentSettings(
   }
 ): Promise<void> {
   if (!supabase) throw new Error('Supabase is not initialized');
-  const payload: any = {};
+  const payload: StudentUpdatePayload = {};
   if (updates.name !== undefined) payload.name = updates.name.trim();
   if (updates.phone !== undefined) payload.phone = updates.phone.trim();
   if (updates.telegram !== undefined) {
@@ -1428,7 +1524,7 @@ function lastDayOfMonth(year: number, month: number /* 0-based */): number {
  *
  * Returns "YYYY-MM-DD" strings.
  */
-function buildBillingPeriod(bDay: number, now: Date): { startDate: string; endDate: string } {
+export function buildBillingPeriod(bDay: number, now: Date): { startDate: string; endDate: string } {
   const curYear  = now.getFullYear();
   const curMonth = now.getMonth();   // 0-based
   const curDay   = now.getDate();
@@ -1519,8 +1615,7 @@ export async function calculateStudentBilling(
   }
 
   // date_to_date: derive period from billing_day using buildBillingPeriod()
-  const match = String(s.billing_day || '10').match(/\d+/);
-  const bDay = match ? Math.min(31, Math.max(1, parseInt(match[0], 10))) : 10;
+  const bDay = extractBillingDayNumber(s.billing_day);
 
   const now = getTashkentNow();
 
@@ -1590,7 +1685,7 @@ function normalizePaymentMethod(method?: string | null): PaymentMethod {
   return 'payme';
 }
 
-function mapPaymentRow(row: any): Payment {
+function mapPaymentRow(row: PaymentDbRow): Payment {
   return {
     id: String(row.id),
     student_id: String(row.student_id),

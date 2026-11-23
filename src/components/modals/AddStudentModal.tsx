@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { RecurringSlot, BillingType } from '@/types';
 import { X, UserPlus, Clock, SlidersHorizontal, Loader2 } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
@@ -39,6 +39,14 @@ function addMinutes(timeStr: string, minutes: number): string {
 }
 
 export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClose, onSave }) => {
+  if (!isOpen) return null;
+  return <AddStudentModalContent onClose={onClose} onSave={onSave} />;
+};
+
+const AddStudentModalContent: React.FC<Omit<AddStudentModalProps, 'isOpen'>> = ({
+  onClose,
+  onSave,
+}) => {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [telegram, setTelegram] = useState('');
@@ -53,35 +61,13 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
   const [startTime, setStartTime] = useState('16:00');
   const [endTime, setEndTime] = useState('17:30');
   const [customPerDayTime, setCustomPerDayTime] = useState(false);
-  const [perDayTimes, setPerDayTimes] = useState<Record<number, { start: string; end: string }>>({});
+  const [perDayTimes, setPerDayTimes] = useState<Record<number, { start: string; end: string }>>({
+    1: { start: '16:00', end: '17:30' },
+    3: { start: '16:00', end: '17:30' },
+    5: { start: '16:00', end: '17:30' },
+  });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (isOpen) {
-      setName('');
-      setPhone('');
-      setTelegram('');
-      setMonthlyTarget(12);
-      setBillingDay('10');
-      setBillingType('date_to_date');
-      setLessonRate(300000);
-      setLessonsBalance(0);
-      setSelectedDays([1, 3, 5]);
-      setStartTime('16:00');
-      setEndTime('17:30');
-      setCustomPerDayTime(false);
-      setPerDayTimes({
-        1: { start: '16:00', end: '17:30' },
-        3: { start: '16:00', end: '17:30' },
-        5: { start: '16:00', end: '17:30' },
-      });
-      setIsSubmitting(false);
-      setErrorMsg(null);
-    }
-  }, [isOpen]);
-
-  if (!isOpen) return null;
 
   const toggleDay = (dayId: number) => {
     hapticImpact('light');
@@ -234,11 +220,10 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
                     hapticImpact('light');
                     setCustomPerDayTime((prev) => !prev);
                   }}
-                  className={`text-[11px] font-bold px-2 py-0.5 rounded-lg inline-flex items-center gap-1 transition-all ${
-                    customPerDayTime
-                      ? 'bg-blue-600 text-white'
-                      : 'text-blue-600 bg-blue-50 hover:bg-blue-100'
-                  }`}
+                  className={`text-[11px] font-bold px-2 py-0.5 rounded-lg inline-flex items-center gap-1 transition-all ${customPerDayTime
+                    ? 'bg-blue-600 text-white'
+                    : 'text-blue-600 bg-blue-50 hover:bg-blue-100'
+                    }`}
                 >
                   <SlidersHorizontal className="w-3 h-3" />
                   <span>{customPerDayTime ? 'Разное время' : 'Разное время?'}</span>
@@ -255,11 +240,10 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
                     key={wd.id}
                     type="button"
                     onClick={() => toggleDay(wd.id)}
-                    className={`w-9 h-9 rounded-xl font-bold text-xs flex items-center justify-center transition-all active:scale-95 ${
-                      isSelected
-                        ? 'bg-blue-600 text-white shadow-xs'
-                        : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'
-                    }`}
+                    className={`w-9 h-9 rounded-xl font-bold text-xs flex items-center justify-center transition-all active:scale-95 ${isSelected
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-100'
+                      }`}
                   >
                     {wd.label}
                   </button>
@@ -327,11 +311,10 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
                   hapticImpact('light');
                   setBillingType('date_to_date');
                 }}
-                className={`py-2 px-2 rounded-xl text-xs font-bold border transition-all ${
-                  billingType === 'date_to_date'
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                    : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
-                }`}
+                className={`py-2 px-2 rounded-xl text-xs font-bold border transition-all ${billingType === 'date_to_date'
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                  : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                  }`}
               >
                 📅 По датам месяца
               </button>
@@ -341,11 +324,10 @@ export const AddStudentModal: React.FC<AddStudentModalProps> = ({ isOpen, onClos
                   hapticImpact('light');
                   setBillingType('package');
                 }}
-                className={`py-2 px-2 rounded-xl text-xs font-bold border transition-all ${
-                  billingType === 'package'
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
-                    : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
-                }`}
+                className={`py-2 px-2 rounded-xl text-xs font-bold border transition-all ${billingType === 'package'
+                  ? 'bg-blue-600 text-white border-blue-600 shadow-xs'
+                  : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                  }`}
               >
                 📦 Пакетами уроков
               </button>

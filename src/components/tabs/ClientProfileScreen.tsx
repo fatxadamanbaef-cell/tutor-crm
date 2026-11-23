@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Student,
   Lesson,
@@ -16,7 +16,6 @@ import {
   X,
   Check,
   Calendar,
-  Clock,
   Edit2,
   Trash2,
   Plus,
@@ -32,8 +31,13 @@ import {
   Phone,
   Settings,
   Receipt,
+  Flame,
+  Ban,
+  RotateCcw,
 } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
+import { useToast } from '@/components/ui/ToastProvider';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { format, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import {
@@ -55,6 +59,7 @@ import {
   getStudentPayments,
   deleteStudentPayment,
   PAYMENT_METHOD_LABELS,
+  type updateStudentSettings,
 } from '@/lib/storage';
 import { generateStudentReport } from '@/lib/reports';
 import { getTutorSettings, buildParentInvoiceMessage } from '@/lib/settings';
@@ -68,7 +73,10 @@ interface ClientProfileScreenProps {
   onDeleteStudent: (studentId: string) => void;
   onUpdateBillingDay?: (studentId: string, day: number) => void;
   onUpdateColor?: (studentId: string, color: string) => void;
-  onSaveStudentInfo?: (studentId: string, updates: any) => void;
+  onSaveStudentInfo?: (
+    studentId: string,
+    updates: Parameters<typeof updateStudentSettings>[1]
+  ) => Promise<void> | void;
   onUpdateLessonMissReason?: (lessonId: string, missReason: string) => Promise<void>;
   onOpenLesson?: (lesson: Lesson) => void;
   onRefresh?: () => Promise<void> | void;
@@ -76,8 +84,8 @@ interface ClientProfileScreenProps {
   onOpenPaymentModal?: (student: Student) => void;
   paymentsVersion?: number;
   onPaymentsChanged?: () => void;
-  onAddPayment?: any;
-  onToggleCalendarDate?: any;
+  onAddPayment?: (...args: unknown[]) => void;
+  onToggleCalendarDate?: (...args: unknown[]) => void;
 }
 
 const PAYMENT_METHOD_BADGE_STYLES: Record<PaymentMethod, string> = {
@@ -126,12 +134,14 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
   paymentsVersion = 0,
   onPaymentsChanged,
 }) => {
+  const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<'archive' | 'settings'>('archive');
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
 
   // Payment history & local modal fallback state
   const [studentPayments, setStudentPayments] = useState<Payment[]>([]);
-  const [isLoadingPayments, setIsLoadingPayments] = useState(false);
+  const [loadedPaymentsKey, setLoadedPaymentsKey] = useState<string>('');
   const [showAllPayments, setShowAllPayments] = useState(false);
   const [confirmDeletePaymentId, setConfirmDeletePaymentId] = useState<string | null>(null);
   const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null);
@@ -165,8 +175,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
   const [directionFilter, setDirectionFilter] = useState<'all' | 'past' | 'upcoming'>('all');
   const [showPastInAllView, setShowPastInAllView] = useState<boolean>(false);
   const [horizonLessons, setHorizonLessons] = useState<Lesson[]>([]);
-  const [isLoadingHorizon, setIsLoadingHorizon] = useState<boolean>(false);
-  const prevHorizonKeyRef = useRef<string>('');
+  const [loadedHorizonKey, setLoadedHorizonKey] = useState<string>('');
 
   // Unmarked past lessons state
   const [unmarkedLessons, setUnmarkedLessons] = useState<Lesson[]>([]);
@@ -225,10 +234,13 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
   const tgUrl = getTelegramUrl(studentTelegram);
   const billingPeriod = useMemo(() => getStudentBillingPeriod(billingDay || '10'), [billingDay]);
 
-  // Keep lessonsBalance synced with parent student updates
-  useEffect(() => {
-    setLessonsBalance(student.lessons_balance ?? 0);
-  }, [student.id, student.lessons_balance]);
+  // Keep lessonsBalance synced with parent student updates without an effect
+  const propBalance = student.lessons_balance ?? 0;
+  const [prevPropBalance, setPrevPropBalance] = useState<number>(propBalance);
+  if (propBalance !== prevPropBalance) {
+    setPrevPropBalance(propBalance);
+    setLessonsBalance(propBalance);
+  }
 
   // Count parent lessons for this student (only changes when lessons are added/deleted, not on status tap)
   const studentLessonsCount = useMemo(
@@ -236,14 +248,12 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     [lessons, student.id]
   );
 
+  const horizonKey = `${student.id}_${daysHorizon}`;
+  const isLoadingHorizon = loadedHorizonKey !== horizonKey;
+
   // Load horizon lessons and unmarked past lessons (only on student/horizon change or add/delete)
   useEffect(() => {
     let isMounted = true;
-    const key = `${student.id}_${daysHorizon}`;
-    if (prevHorizonKeyRef.current !== key) {
-      prevHorizonKeyRef.current = key;
-      setIsLoadingHorizon(true);
-    }
 
     Promise.all([
       getUnmarkedPastLessons(student.id),
@@ -253,18 +263,18 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
         if (isMounted) {
           setUnmarkedLessons(unmarked);
           setHorizonLessons(horizon);
-          setIsLoadingHorizon(false);
+          setLoadedHorizonKey(horizonKey);
         }
       })
       .catch((err) => {
         console.error('Failed to load student horizon lessons:', err);
-        if (isMounted) setIsLoadingHorizon(false);
+        if (isMounted) setLoadedHorizonKey(horizonKey);
       });
 
     return () => {
       isMounted = false;
     };
-  }, [student.id, daysHorizon, studentLessonsCount, lessonsRevision]);
+  }, [student.id, daysHorizon, horizonKey, studentLessonsCount, lessonsRevision]);
 
   // Load billing calculation
   useEffect(() => {
@@ -279,24 +289,26 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     };
   }, [student.id, billingType, lessonRate, lessonsBalance, recurringSlots]);
 
+  const paymentsKey = `${student.id}_${paymentsVersion}`;
+  const isLoadingPayments = loadedPaymentsKey !== paymentsKey;
+
   // Load student payment history
   useEffect(() => {
     let isMounted = true;
-    setIsLoadingPayments(true);
     getStudentPayments(student.id, 30)
       .then((list) => {
         if (isMounted) {
           setStudentPayments(list);
-          setIsLoadingPayments(false);
+          setLoadedPaymentsKey(paymentsKey);
         }
       })
       .catch(() => {
-        if (isMounted) setIsLoadingPayments(false);
+        if (isMounted) setLoadedPaymentsKey(paymentsKey);
       });
     return () => {
       isMounted = false;
     };
-  }, [student.id, paymentsVersion]);
+  }, [student.id, paymentsKey]);
 
   const handleTriggerPaymentModal = () => {
     hapticImpact('light');
@@ -326,13 +338,17 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
       setConfirmDeletePaymentId(null);
       setLessonsBalance(newBalance);
       hapticNotification('success');
+      showToast({ message: `Платёж удалён · баланс ${newBalance} ур.`, tone: 'default' });
       calculateStudentBilling(student.id).then(setBillingCalc).catch(() => {});
       onPaymentsChanged?.();
       await onRefresh?.();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to delete payment:', err);
       hapticNotification('error');
-      alert(err?.message || 'Не удалось удалить платёж');
+      showToast({
+        message: err instanceof Error && err.message ? err.message : 'Не удалось удалить платёж',
+        tone: 'error',
+      });
     } finally {
       setDeletingPaymentId(null);
     }
@@ -352,6 +368,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     try {
       const newBal = await topUpStudentBalance(student.id, delta);
       setLessonsBalance(newBal);
+      showToast({ message: `Баланс: ${newBal} ур.`, tone: 'success' });
       calculateStudentBilling(student.id).then(setBillingCalc).catch(() => {});
       await onRefresh?.();
     } catch {
@@ -490,10 +507,15 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
       setMonthlyTarget(retroPackageCount);
       setBillingDay(String(extractBillingDayNumber(retroStartDate)));
       setIsRetroWizardOpen(false);
+      showToast({ message: `Пакет применён · баланс ${finalBalance} ур.`, tone: 'success' });
       await Promise.all([refreshAllLessons(), Promise.resolve(onRefresh?.())]);
       calculateStudentBilling(student.id).then(setBillingCalc).catch(() => {});
-    } catch (e: any) {
-      alert(e?.message || 'Ошибка применения пакета с прошлой даты');
+    } catch (e: unknown) {
+      showToast({
+        message:
+          e instanceof Error && e.message ? e.message : 'Ошибка применения пакета с прошлой даты',
+        tone: 'error',
+      });
     } finally {
       setIsApplyingRetro(false);
     }
@@ -520,10 +542,12 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
         await navigator.clipboard.writeText(msg);
         setCopyState('invoice');
         hapticNotification('success');
+        showToast({ message: `Счёт для ${studentName} скопирован`, tone: 'success' });
         setTimeout(() => setCopyState(null), 2000);
       }
     } catch (e) {
       console.error('Copy invoice failed:', e);
+      showToast({ message: 'Не удалось скопировать счёт', tone: 'error' });
     }
   };
 
@@ -537,10 +561,12 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
         await navigator.clipboard.writeText(withBalance);
         setCopyState('report');
         hapticNotification('success');
+        showToast({ message: 'Отчёт для родителей скопирован', tone: 'success' });
         setTimeout(() => setCopyState(null), 2000);
       }
     } catch (e) {
       console.error('Copy report failed:', e);
+      showToast({ message: 'Не удалось скопировать отчёт', tone: 'error' });
     } finally {
       setIsCopyingReport(false);
     }
@@ -595,7 +621,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
   const handleSaveAllSettings = async () => {
     if (isSaving) return;
     if (!studentName.trim()) {
-      alert('Пожалуйста, введите имя ученика');
+      showToast({ message: 'Пожалуйста, введите имя ученика', tone: 'warning' });
       return;
     }
 
@@ -621,7 +647,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
       }
       hapticNotification('success');
       setActiveTab('archive');
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error('Save settings error:', e);
       hapticNotification('error');
     } finally {
@@ -715,23 +741,23 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
 
           <div className="shrink-0">
             {isCompleted && (
-              <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg">
-                ✅ Был (-1)
+              <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-lg tabular-nums">
+                -1 ур.
               </span>
             )}
             {isPenalty && (
-              <span className="text-[10px] font-semibold text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-lg">
-                🔥 Сгорел (-1)
+              <span className="text-[10px] font-semibold text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-lg tabular-nums">
+                -1 ур.
               </span>
             )}
             {isExcused && (
-              <span className="text-[10px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-lg">
-                🛑 Отмена (0)
+              <span className="text-[10px] font-semibold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-lg tabular-nums">
+                0 ур.
               </span>
             )}
             {isPlanned && (
               <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-lg">
-                ⏳ План
+                План
               </span>
             )}
           </div>
@@ -751,7 +777,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                 className="text-[11px] font-semibold text-rose-600 hover:underline flex items-center gap-1"
               >
                 <span>Причина: {l.miss_reason}</span>
-                <Edit2 className="w-2.5 h-2.5" />
+                <Edit2 className="w-2.5 h-2.5" aria-hidden="true" />
               </button>
             ) : (
               <span />
@@ -759,7 +785,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
 
             {hasCustomNote && (
               <div className="text-[11px] text-slate-600 bg-amber-50/70 px-2 py-0.5 rounded-md truncate max-w-[220px]">
-                📝 {l.notes}
+                {l.notes}
               </div>
             )}
           </div>
@@ -767,53 +793,58 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
 
         {/* 1-Tap Quick Attendance Status Switcher */}
         <div
-          className="flex items-center gap-1 pt-1 border-t border-slate-100"
+          className="flex items-center gap-1 pt-1.5 border-t border-slate-100"
           onClick={(e) => e.stopPropagation()}
         >
           <button
             type="button"
             onClick={() => handleQuickLessonStatus(l.id, 'completed')}
-            className={`flex-1 py-1 px-1.5 rounded-lg font-bold text-[11px] flex items-center justify-center gap-1 transition-all active:scale-95 ${
+            className={`touch-hit flex-1 h-8 px-1.5 rounded-lg font-semibold text-[11px] flex items-center justify-center gap-1 transition-all active:scale-95 ${
               isCompleted
                 ? 'bg-emerald-600 text-white shadow-2xs'
                 : 'bg-slate-50 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700'
             }`}
           >
-            <span>✅ Был</span>
+            <Check className="w-3 h-3 stroke-[2.5]" aria-hidden="true" />
+            <span>Был</span>
           </button>
 
           <button
             type="button"
             onClick={() => handleQuickLessonStatus(l.id, 'missed_penalty')}
-            className={`flex-1 py-1 px-1.5 rounded-lg font-bold text-[11px] flex items-center justify-center gap-1 transition-all active:scale-95 ${
+            className={`touch-hit flex-1 h-8 px-1.5 rounded-lg font-semibold text-[11px] flex items-center justify-center gap-1 transition-all active:scale-95 ${
               isPenalty
                 ? 'bg-orange-500 text-white shadow-2xs'
                 : 'bg-slate-50 hover:bg-orange-50 text-slate-600 hover:text-orange-700'
             }`}
           >
-            <span>🔥 Сгорел</span>
+            <Flame className="w-3 h-3" aria-hidden="true" />
+            <span>Сгорел</span>
           </button>
 
           <button
             type="button"
             onClick={() => handleQuickLessonStatus(l.id, 'missed_excused')}
-            className={`flex-1 py-1 px-1.5 rounded-lg font-bold text-[11px] flex items-center justify-center gap-1 transition-all active:scale-95 ${
+            className={`touch-hit flex-1 h-8 px-1.5 rounded-lg font-semibold text-[11px] flex items-center justify-center gap-1 transition-all active:scale-95 ${
               isExcused
                 ? 'bg-rose-500 text-white shadow-2xs'
                 : 'bg-slate-50 hover:bg-rose-50 text-slate-600 hover:text-rose-700'
             }`}
           >
-            <span>🛑 Отмена</span>
+            <Ban className="w-3 h-3" aria-hidden="true" />
+            <span>Отмена</span>
           </button>
 
           {!isPlanned && (
             <button
               type="button"
               onClick={() => handleQuickLessonStatus(l.id, 'planned')}
-              className="py-1 px-2 rounded-lg font-bold text-[11px] bg-slate-50 hover:bg-blue-50 text-slate-500 hover:text-blue-700 transition-all active:scale-95"
+              className="touch-hit h-8 px-2 rounded-lg font-semibold text-[11px] bg-slate-50 hover:bg-blue-50 text-slate-500 hover:text-blue-700 inline-flex items-center gap-1 transition-all active:scale-95"
               title="Вернуть в план"
+              aria-label="Вернуть в план"
             >
-              <span>↩️ План</span>
+              <RotateCcw className="w-3 h-3" aria-hidden="true" />
+              <span>План</span>
             </button>
           )}
         </div>
@@ -824,7 +855,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
   return (
     <div className="fixed inset-0 z-50 bg-[#f4f5f8] flex flex-col">
       {/* Top Bar */}
-      <div className="flex items-center justify-between px-4 pt-4 pb-3 bg-white border-b border-slate-200/80">
+      <div className="flex items-center justify-between px-4 pt-safe pb-3 bg-white border-b border-slate-200/80">
         <button
           type="button"
           onClick={(e) => {
@@ -832,10 +863,11 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
             hapticImpact('light');
             onBack();
           }}
-          className="w-9 h-9 flex items-center justify-center rounded-xl bg-slate-100 text-slate-700 active:scale-90 transition-transform"
+          className="touch-hit w-9 h-9 flex items-center justify-center rounded-xl bg-slate-100 text-slate-700 active:scale-90 transition-transform"
           title="Назад"
+          aria-label="Назад к списку учеников"
         >
-          <ArrowLeft className="w-5 h-5" strokeWidth={2.5} />
+          <ArrowLeft className="w-5 h-5" strokeWidth={2.5} aria-hidden="true" />
         </button>
 
         <div className="text-center min-w-0 px-2">
@@ -879,32 +911,35 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                 href={tgUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center active:scale-90 transition-transform"
+                aria-label="Открыть Telegram ученика"
+                className="touch-hit w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center active:scale-90 transition-transform"
                 title="Открыть Telegram ученика"
               >
-                <Send className="w-4 h-4" />
+                <Send className="w-4 h-4" aria-hidden="true" />
               </a>
             )}
             {studentPhone && (
               <a
                 href={`tel:${studentPhone}`}
-                className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center active:scale-90 transition-transform"
+                aria-label="Позвонить ученику"
+                className="touch-hit w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center active:scale-90 transition-transform"
                 title="Позвонить ученику"
               >
-                <Phone className="w-4 h-4" />
+                <Phone className="w-4 h-4" aria-hidden="true" />
               </a>
             )}
             {!tgUrl && !studentPhone && (
               <button
                 type="button"
+                aria-label="Настройки профиля"
                 onClick={() => {
                   hapticImpact('light');
                   setActiveTab('settings');
                 }}
-                className="w-9 h-9 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center active:scale-90 transition-transform"
+                className="touch-hit w-9 h-9 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center active:scale-90 transition-transform"
                 title="Настройки профиля"
               >
-                <Settings className="w-4 h-4" />
+                <Settings className="w-4 h-4" aria-hidden="true" />
               </button>
             )}
           </div>
@@ -982,7 +1017,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => handleAdjustBalance(-1)}
-                    className="h-8 px-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs flex items-center active:scale-95 tabular-nums"
+                    className="touch-hit h-9 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs flex items-center active:scale-95 tabular-nums"
                     title="Списать 1 урок"
                   >
                     -1
@@ -990,7 +1025,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => handleAdjustBalance(1)}
-                    className="h-8 px-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-xs flex items-center gap-0.5 active:scale-95 tabular-nums"
+                    className="touch-hit h-9 px-3 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 font-semibold text-xs flex items-center gap-0.5 active:scale-95 tabular-nums"
                     title="Добавить 1 урок"
                   >
                     +1
@@ -998,10 +1033,10 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                   <button
                     type="button"
                     onClick={handleTriggerPaymentModal}
-                    className="h-8 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs flex items-center gap-1 shadow-2xs active:scale-95 tabular-nums"
+                    className="touch-hit h-9 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs flex items-center gap-1 shadow-2xs active:scale-95 tabular-nums"
                     title="Зафиксировать оплату"
                   >
-                    <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                    <Plus className="w-3.5 h-3.5 stroke-[2.5]" aria-hidden="true" />
                     <span>Оплата</span>
                   </button>
                 </div>
@@ -1091,8 +1126,8 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                   }`}
                   title="Открыть пакет задним числом с прошлой даты"
                 >
-                  <Package className="w-3.5 h-3.5" />
-                  <span>С даты</span>
+                  <Package className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                  <span>Пакет с даты</span>
                 </button>
               </div>
             </div>
@@ -1474,17 +1509,19 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                 </div>
 
                 <div className="flex bg-slate-100 p-0.5 rounded-xl gap-0.5 flex-1">
-                  {[
-                    { id: 'all', label: 'Все' },
-                    { id: 'upcoming', label: 'Будущие' },
-                    { id: 'past', label: 'Прошлые' },
-                  ].map((dir) => (
+                  {(
+                    [
+                      { id: 'all', label: 'Все' },
+                      { id: 'upcoming', label: 'Будущие' },
+                      { id: 'past', label: 'Прошлые' },
+                    ] as const
+                  ).map((dir) => (
                     <button
                       key={dir.id}
                       type="button"
                       onClick={() => {
                         hapticImpact('light');
-                        setDirectionFilter(dir.id as any);
+                        setDirectionFilter(dir.id);
                       }}
                       className={`flex-1 py-1 text-[11px] font-bold rounded-lg transition-all ${
                         directionFilter === dir.id
@@ -1903,24 +1940,29 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
 
               <button
                 type="button"
-                onClick={() => {
-                  if (
-                    confirm(
-                      `Вы уверены, что хотите удалить ученика «${student.name}» и всю его историю?`
-                    )
-                  ) {
-                    onDeleteStudent(student.id);
-                  }
-                }}
+                onClick={() => setIsDeleteConfirmOpen(true)}
                 className="w-full py-3 rounded-2xl bg-rose-50 text-rose-600 text-xs font-bold border border-rose-200/80 flex items-center justify-center gap-1.5 active:scale-98"
               >
-                <Trash2 className="w-4 h-4" />
+                <Trash2 className="w-4 h-4" aria-hidden="true" />
                 <span>Удалить ученика</span>
               </button>
             </div>
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        isOpen={isDeleteConfirmOpen}
+        danger
+        title="Удалить ученика?"
+        description={`Ученик «${student.name}» и вся история его уроков будут удалены безвозвратно.`}
+        confirmLabel="Удалить"
+        onClose={() => setIsDeleteConfirmOpen(false)}
+        onConfirm={() => {
+          setIsDeleteConfirmOpen(false);
+          onDeleteStudent(student.id);
+        }}
+      />
 
       {/* Modal for editing Miss Reason */}
       {editingReasonLesson && (

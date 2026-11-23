@@ -2,17 +2,18 @@
 
 import React, { useState } from 'react';
 import { Lesson, Student, Makeup } from '@/types';
-import { Calendar, Archive, Clock, X, Check } from 'lucide-react';
-import { format, parseISO, nextSunday, setHours, setMinutes } from 'date-fns';
+import { Calendar, Archive, X, Check } from 'lucide-react';
+import { format, parseISO, nextSunday } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
 import { getTashkentNow } from '@/lib/formatters';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 interface SundayMakeupsSectionProps {
   makeups?: Makeup[];
   lessons: Lesson[];
   students: Student[];
-  onScheduleSundayMakeup: (makeupIdOrLesson: any, sundayDate: string, timeStr: string) => Promise<void>;
+  onScheduleSundayMakeup: (makeupIdOrLesson: string, sundayDate: string, timeStr: string) => Promise<void>;
   onArchiveMakeup: (makeupIdOrLessonId: string) => Promise<void>;
 }
 
@@ -28,6 +29,7 @@ export const SundayMakeupsSection: React.FC<SundayMakeupsSectionProps> = ({
 
   const [selectedItem, setSelectedItem] = useState<{ id: string; studentName: string; reason?: string } | null>(null);
   const [selectedTime, setSelectedTime] = useState('12:00 - 13:30');
+  const [archiveTarget, setArchiveTarget] = useState<{ id: string; studentName: string } | null>(null);
 
   const now = getTashkentNow();
   const upcomingSunday = nextSunday(now);
@@ -116,15 +118,13 @@ export const SundayMakeupsSection: React.FC<SundayMakeupsSectionProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  if (confirm(`Перенести пропуск ученика «${item.studentName}» в архив без отработки?`)) {
-                    hapticNotification('warning');
-                    onArchiveMakeup(item.id);
-                  }
+                  hapticImpact('light');
+                  setArchiveTarget({ id: item.id, studentName: item.studentName });
                 }}
                 className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 text-xs font-medium border border-gray-200 active:scale-95 transition-all"
                 title="В архив (без отработки)"
               >
-                <Archive className="w-3.5 h-3.5 text-gray-500" />
+                <Archive className="w-3.5 h-3.5 text-gray-500" aria-hidden="true" />
                 <span>В архив</span>
               </button>
             </div>
@@ -206,6 +206,24 @@ export const SundayMakeupsSection: React.FC<SundayMakeupsSectionProps> = ({
           </div>
         </div>
       )}
+      <ConfirmDialog
+        isOpen={Boolean(archiveTarget)}
+        title="Перенести пропуск в архив?"
+        description={
+          archiveTarget
+            ? `Пропуск ученика «${archiveTarget.studentName}» будет перенесён в архив без отработки.`
+            : undefined
+        }
+        confirmLabel="В архив"
+        onClose={() => setArchiveTarget(null)}
+        onConfirm={async () => {
+          if (!archiveTarget) return;
+          const targetId = archiveTarget.id;
+          setArchiveTarget(null);
+          hapticNotification('warning');
+          await onArchiveMakeup(targetId);
+        }}
+      />
     </section>
   );
 };

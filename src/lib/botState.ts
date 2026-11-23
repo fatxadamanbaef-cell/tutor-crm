@@ -136,7 +136,7 @@ async function mutateState(fn: (s: BotState) => BotState | null): Promise<boolea
     if (!next) return false;
 
     const newVersion = row.version + 1;
-    const updatePayload: any = {
+    const updatePayload = {
       notes: JSON.stringify(next),
       monthly_target_lessons: newVersion,
     };

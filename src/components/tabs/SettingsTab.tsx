@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useId } from 'react';
 import { CreditCard, Check, CalendarClock, Send, Download, Info, ExternalLink, Loader2, CloudUpload, BellRing } from 'lucide-react';
 import {
-  getCachedTutorSettings,
   loadTutorSettingsWithMeta,
   saveTutorSettings,
   TutorSettings,
@@ -12,6 +11,11 @@ import {
 import { ensureRecurringLessonsForAllActiveStudents } from '@/lib/storage';
 import { generateMonthlyExportData } from '@/lib/reports';
 import { hapticImpact, hapticNotification, getTelegramWebApp } from '@/lib/telegram';
+import { useToast } from '@/components/ui/ToastProvider';
+
+function getErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
+}
 
 interface SettingsTabProps {
   onRefresh?: () => Promise<void> | void;
@@ -20,6 +24,7 @@ interface SettingsTabProps {
 const REMINDER_PRESETS = [10, 15, 20, 30];
 
 export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
+  const { showToast } = useToast();
   const baseId = useId();
   const [settings, setSettings] = useState<TutorSettings>(DEFAULT_SETTINGS);
   const [isLoadingSettings, setIsLoadingSettings] = useState(true);
@@ -41,8 +46,6 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
 
   useEffect(() => {
     let active = true;
-    // Fast client cache hydrate for instant render
-    setSettings(getCachedTutorSettings());
 
     // Fetch authoritative settings from Supabase (or detect localStorage migration)
     loadTutorSettingsWithMeta()
@@ -74,11 +77,12 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
       setNeedsMigration(false);
       setSavedNotice(true);
       hapticNotification('success');
+      showToast({ message: 'Реквизиты и настройки сохранены', tone: 'success' });
       setTimeout(() => setSavedNotice(false), 2200);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to save tutor settings:', err);
       hapticNotification('error');
-      setSaveError(err?.message || 'Не удалось сохранить реквизиты в Supabase');
+      setSaveError(getErrorMessage(err, 'Не удалось сохранить реквизиты в Supabase'));
     } finally {
       setIsSavingSettings(false);
     }
@@ -98,9 +102,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
           ? `✅ Создано ${createdCount} новых уроков на 9 недель вперёд`
           : '✅ Все уроки на 9 недель вперёд уже запланированы'
       );
-    } catch (e: any) {
+    } catch (e: unknown) {
       hapticNotification('error');
-      setExtendResult(`❌ Ошибка: ${e?.message || 'не удалось продлить расписание'}`);
+      setExtendResult(`❌ Ошибка: ${getErrorMessage(e, 'не удалось продлить расписание')}`);
     } finally {
       setIsExtending(false);
     }
@@ -138,9 +142,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
       } else {
         setDigestResult('⚠️ Не удалось отправить сводку (проверьте /start в боте)');
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       hapticNotification('error');
-      setDigestResult(`❌ Ошибка сети: ${e?.message || 'не удалось отправить'}`);
+      setDigestResult(`❌ Ошибка сети: ${getErrorMessage(e, 'не удалось отправить')}`);
     } finally {
       setIsSendingDigest(false);
     }
@@ -190,7 +194,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
     try {
       const exportData = await generateMonthlyExportData();
       if (!exportData.csvContent) {
-        alert('Нет данных активных учеников для экспорта');
+        showToast({ message: 'Нет данных активных учеников для экспорта', tone: 'warning' });
         return;
       }
       const blob = new Blob(['\uFEFF' + exportData.csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -198,27 +202,32 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
       const a = document.createElement('a');
       a.href = url;
       const monthTag = new Date().toISOString().substring(0, 7);
-      a.download = `tutor-crm-report-${monthTag}.csv`;
+      const fileName = `tutor-crm-report-${monthTag}.csv`;
+      a.download = fileName;
       a.click();
       URL.revokeObjectURL(url);
       hapticNotification('success');
-    } catch (e: any) {
-      alert('Ошибка экспорта: ' + (e?.message || String(e)));
+      showToast({ message: `Отчёт ${fileName} скачан`, tone: 'success' });
+    } catch (e: unknown) {
+      showToast({
+        message: 'Ошибка экспорта: ' + (e instanceof Error ? e.message : String(e)),
+        tone: 'error',
+      });
     } finally {
       setIsExporting(false);
     }
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#f2f2f7] pb-28 overflow-y-auto">
-      <div className="px-4 pt-6 pb-4 bg-white border-b border-gray-200 sticky top-0 z-10">
-        <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Настройки</h1>
-        <p className="text-xs text-gray-500 font-semibold mt-0.5">Реквизиты для счетов и управление ботом</p>
+    <div className="flex flex-col h-full bg-[#f4f5f8] pb-28 overflow-y-auto">
+      <div className="px-4 pt-safe pb-3 bg-white border-b border-slate-200/80 sticky top-0 z-10">
+        <h1 className="text-lg font-bold text-slate-900 tracking-tight leading-tight">Настройки</h1>
+        <p className="text-xs text-slate-500 font-semibold mt-0.5">Реквизиты для счетов и управление ботом</p>
       </div>
 
       <div className="p-4 space-y-4">
         {/* Payment Details Form */}
-        <form onSubmit={handleSaveSettings} className="bg-white rounded-3xl p-4 shadow-xs border border-gray-200/80 space-y-3">
+        <form onSubmit={handleSaveSettings} className="bg-white rounded-2xl p-4 shadow-2xs border border-slate-200/80 space-y-3">
           <div className="flex items-center justify-between gap-2 pb-1">
             <div className="flex items-center gap-2">
               <div className="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600">
@@ -325,11 +334,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
                     hapticImpact('light');
                     setSettings((p) => ({ ...p, reminderMinutesBefore: min }));
                   }}
-                  className={`py-1.5 rounded-xl text-xs font-semibold tabular-nums border transition-all active:scale-95 ${
-                    settings.reminderMinutesBefore === min
-                      ? 'bg-slate-900 text-white border-slate-900'
-                      : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
-                  }`}
+                  className={`py-1.5 rounded-xl text-xs font-semibold tabular-nums border transition-all active:scale-95 ${settings.reminderMinutesBefore === min
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                    }`}
                 >
                   {min} мин
                 </button>
@@ -350,11 +358,10 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
           <button
             type="submit"
             disabled={isSavingSettings}
-            className={`w-full py-2.5 rounded-2xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-98 disabled:opacity-60 ${
-              savedNotice
-                ? 'bg-emerald-600 text-white shadow-sm'
-                : 'bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/20'
-            }`}
+            className={`w-full py-2.5 rounded-2xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-98 disabled:opacity-60 ${savedNotice
+              ? 'bg-emerald-600 text-white shadow-sm'
+              : 'bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/20'
+              }`}
           >
             {isSavingSettings ? (
               <>
@@ -371,7 +378,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
         </form>
 
         {/* Automation & Bot Controls */}
-        <div className="bg-white rounded-3xl p-4 shadow-xs border border-gray-200/80 space-y-2.5">
+        <div className="bg-white rounded-2xl p-4 shadow-2xs border border-slate-200/80 space-y-2.5">
           <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
             Управление расписанием и ботом
           </h2>
@@ -439,7 +446,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
         </div>
 
         {/* About & Support */}
-        <div className="bg-white rounded-3xl shadow-xs border border-gray-200/80 divide-y divide-gray-100">
+        <div className="bg-white rounded-2xl shadow-2xs border border-slate-200/80 divide-y divide-slate-100">
           <div className="p-4 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">

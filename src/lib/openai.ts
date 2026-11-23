@@ -9,7 +9,6 @@ import {
   saveStudent,
   deleteLesson,
   getAttendanceSummary,
-  getPendingMakeups,
   parseTimeRange,
   saveLesson,
   planRecurringLessonsForStudent,
@@ -22,7 +21,6 @@ import { getTashkentTodayStr, getTashkentNow, dayOfWeekOf, addDaysStr, WD_SHORT,
 import { resolveStudent, findExistingByName } from './nameMatch';
 import { getHistory, appendHistory } from './botState';
 import { generateStudentReport } from './reports';
-import { supabase } from './supabase';
 
 const MODEL = process.env.OPENAI_MODEL || 'gpt-4.1';
 const MAX_STEPS = 8;
@@ -74,14 +72,19 @@ const studentNameProp = {
   description: 'Имя ученика как в списке учеников (допустимы небольшие искажения из-за распознавания голоса)',
 };
 
-function fn(name: string, description: string, properties: Record<string, unknown>, required: string[] = []) {
+function fn(
+  name: string,
+  description: string,
+  properties: Record<string, unknown>,
+  required: string[] = []
+): OpenAI.Chat.Completions.ChatCompletionTool {
   return { type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } };
 }
 
 // ===========================================================================
 // TOOLS FOR GPT-4.1 (Hybrid Billing, Balance Tracking, Attendance, Schedule)
 // ===========================================================================
-const TOOLS = [
+const TOOLS: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   // 1. Отметка статуса урока
   fn(
     'markLessonStatus',
@@ -239,14 +242,45 @@ function createToolbox(): Toolbox {
 
   const timeOf = (l: Lesson) => (l.time_str || '').split('-')[0].trim();
 
-  const handlers: Record<string, (a: any) => Promise<unknown>> = {
+interface ToolArgs {
+  studentName?: string;
+  date?: string;
+  status?: string;
+  missReason?: string;
+  lessonNotes?: string;
+  fromDate?: string;
+  toDate?: string;
+  toStartTime?: string;
+  reason?: string;
+  name?: string;
+  billingType?: BillingType;
+  lessonRate?: number;
+  lessonsBalance?: number;
+  monthlyTargetLessons?: number;
+  billingDay?: string;
+  recurringDaysAndTimes?: Array<{ dayOfWeek?: number; timeStr?: string }>;
+  startDate?: string;
+  endDate?: string;
+  lessonsCount?: number;
+  amount_uzs?: number;
+  payment_method?: string;
+  note?: string;
+  period?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  time?: string;
+  startTime?: string;
+  notes?: string;
+}
+
+  const handlers: Record<string, (a: ToolArgs) => Promise<unknown>> = {
     // 1. markLessonStatus
     async markLessonStatus(a) {
-      const student = await pickStudent(a.studentName);
+      const student = await pickStudent(String(a.studentName || ''));
       const date = a.date ? assertDate(a.date) : today;
       const { lessons } = await load();
 
-      let targetStatus: LessonStatus = a.status;
+      let targetStatus = (a.status || 'completed') as LessonStatus;
       if (targetStatus === 'missed') {
         targetStatus = 'missed_penalty';
       }
@@ -287,8 +321,9 @@ function createToolbox(): Toolbox {
 
     // 2. rescheduleLesson
     async rescheduleLesson(a) {
-      const student = await pickStudent(a.studentName);
+      const student = await pickStudent(String(a.studentName || ''));
       const toDate = assertDate(a.toDate, 'toDate');
+      const toStartTime = String(a.toStartTime || '16:00');
       const { lessons } = await load();
 
       const studentLessons = lessons
@@ -325,7 +360,7 @@ function createToolbox(): Toolbox {
       const originalDate = lesson ? lesson.date.substring(0, 10) : null;
 
       if (lesson && originalDate !== toDate) {
-        await updateLessonTime(lesson.id, a.toStartTime, toDate);
+        await updateLessonTime(lesson.id, toStartTime, toDate);
         await updateLessonDetails(lesson.id, {
           status: 'planned',
           miss_reason: undefined,
@@ -333,7 +368,7 @@ function createToolbox(): Toolbox {
           notes: a.reason ? `Перенос с ${originalDate}: ${a.reason}` : `Перенос с ${originalDate}`,
         });
       } else if (lesson && originalDate === toDate) {
-        await updateLessonTime(lesson.id, a.toStartTime, toDate);
+        await updateLessonTime(lesson.id, toStartTime, toDate);
         await updateLessonDetails(lesson.id, {
           status: 'planned',
           miss_reason: undefined,
@@ -344,23 +379,24 @@ function createToolbox(): Toolbox {
         lesson = await saveLesson({
           student_id: student.id,
           date: toDate,
-          time_str: a.toStartTime,
+          time_str: toStartTime,
           status: 'planned',
           notes: a.reason ? `Перенос: ${a.reason}` : 'Запланированный урок',
         });
       }
 
       cache = null;
-      writes.push(`${student.name}: перенос${originalDate ? ` с ${originalDate}` : ''} на ${toDate} в ${a.toStartTime}`);
-      return { success: true, message: `Урок ученика ${student.name} успешно запланирован на ${toDate} в ${a.toStartTime} ✅. Статус: запланирован.` };
+      writes.push(`${student.name}: перенос${originalDate ? ` с ${originalDate}` : ''} на ${toDate} в ${toStartTime}`);
+      return { success: true, message: `Урок ученика ${student.name} успешно запланирован на ${toDate} в ${toStartTime} ✅. Статус: запланирован.` };
     },
 
     // 3. setupOrUpdateStudent
     async setupOrUpdateStudent(a) {
+      const studentNameInput = String(a.name || '').trim();
       const { students } = await load();
-      const existing = findExistingByName(a.name.trim(), students);
+      const existing = findExistingByName(studentNameInput, students);
 
-      const slots: RecurringSlot[] = (a.recurringDaysAndTimes || []).map((s: any) => {
+      const slots: RecurringSlot[] = (a.recurringDaysAndTimes || []).map((s) => {
         const timeStr = String(s.timeStr || '16:00');
         const parsed = parseTimeRange(timeStr, 60);
         return {
@@ -372,9 +408,11 @@ function createToolbox(): Toolbox {
 
       const saved = await saveStudent({
         id: existing?.id,
-        name: existing?.name || a.name.trim(),
+        name: existing?.name || studentNameInput,
         monthly_target_lessons: a.monthlyTargetLessons || existing?.monthly_target_lessons || 12,
-        billing_day: a.billingDay || existing?.billing_day || '10',
+        billing_day:
+          a.billingDay ||
+          (existing?.billing_day !== undefined ? String(existing.billing_day) : '10'),
         billing_type: a.billingType || existing?.billing_type || 'date_to_date',
         lesson_rate: typeof a.lessonRate === 'number' ? a.lessonRate : (existing?.lesson_rate ?? 300000),
         lessons_balance: typeof a.lessonsBalance === 'number' ? a.lessonsBalance : (existing?.lessons_balance ?? 0),
@@ -401,7 +439,7 @@ function createToolbox(): Toolbox {
 
     // 4. calculateStudentBilling
     async calculateStudentBilling(a) {
-      const student = await pickStudent(a.studentName);
+      const student = await pickStudent(String(a.studentName || ''));
       const [calc, settings] = await Promise.all([
         calculateStudentBilling(student.id, a.startDate, a.endDate),
         getTutorSettings(),
@@ -426,7 +464,7 @@ function createToolbox(): Toolbox {
 
     // 5. addStudentPayment
     async addStudentPayment(a) {
-      const student = await pickStudent(a.studentName);
+      const student = await pickStudent(String(a.studentName || ''));
       const count = Math.round(Number(a.lessonsCount) || 0);
       if (count <= 0) throw new Error('Количество уроков должно быть больше 0.');
 
@@ -475,7 +513,7 @@ function createToolbox(): Toolbox {
 
     // 6. getStudentArchiveReport
     async getStudentArchiveReport(a) {
-      const student = await pickStudent(a.studentName);
+      const student = await pickStudent(String(a.studentName || ''));
       const report = await generateStudentReport(student.id);
       if (!report) return { message: `Не удалось сформировать отчет для ${student.name}` };
       return {
@@ -546,7 +584,7 @@ function createToolbox(): Toolbox {
 
     // 9. deleteLesson
     async deleteLesson(a) {
-      const student = await pickStudent(a.studentName);
+      const student = await pickStudent(String(a.studentName || ''));
       const date = assertDate(a.date);
       const { lessons } = await load();
 
@@ -575,7 +613,7 @@ function createToolbox(): Toolbox {
 
     // 10. addLesson
     async addLesson(a) {
-      const student = await pickStudent(a.studentName);
+      const student = await pickStudent(String(a.studentName || ''));
       const date = assertDate(a.date, 'date');
       const parsed = parseTimeRange(a.startTime || '16:00', 90);
       const timeStr = `${parsed.start} - ${parsed.end}`;
@@ -600,10 +638,10 @@ function createToolbox(): Toolbox {
     async run(name, rawArgs) {
       const fn = handlers[name];
       if (!fn) throw new Error(`Неизвестный инструмент: ${name}`);
-      let parsed = {};
+      let parsed: ToolArgs = {};
       try {
-        parsed = rawArgs ? JSON.parse(rawArgs) : {};
-      } catch (e) {
+        parsed = rawArgs ? (JSON.parse(rawArgs) as ToolArgs) : {};
+      } catch {
         throw new Error(`Ошибка парсинга JSON аргументов для ${name}: ${rawArgs}`);
       }
       return fn(parsed);
@@ -658,7 +696,9 @@ ${studentsBrief}
    - Для добавления разового или дополнительного урока (не меняя старые уроки) — вызывай addLesson.
 4. Отвечай кратко, профессионально и по делу. Форматируй важные цифры и балансы жирным шрифтом.`;
 
-    const messages: any[] = [{ role: 'system', content: systemPrompt }];
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      { role: 'system', content: systemPrompt },
+    ];
 
     // Add recent context
     const history = await getHistory();
@@ -673,7 +713,7 @@ ${studentsBrief}
       const response = await getClient().chat.completions.create({
         model: MODEL,
         messages,
-        tools: TOOLS as any,
+        tools: TOOLS,
         tool_choice: 'auto',
       });
 
@@ -687,8 +727,8 @@ ${studentsBrief}
       }
 
       for (const call of calls) {
-        const fnCall = (call as any).function;
-        const result = await toolbox.run(fnCall.name, fnCall.arguments);
+        if (call.type !== 'function') continue;
+        const result = await toolbox.run(call.function.name, call.function.arguments);
         let content = JSON.stringify(result);
         if (content.length > 7000) content = content.slice(0, 7000) + '…(обрезано)';
         messages.push({ role: 'tool', tool_call_id: call.id, content });
@@ -705,9 +745,10 @@ ${studentsBrief}
     const html = toTelegramHtml(finalText);
     await appendHistory(text, `${finalText}${doneLine ? ' ' + doneLine : ''}`);
     return html;
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('OpenAI Error:', e);
-    return `❌ Ошибка ИИ: ${esc(String(e?.message || e).slice(0, 300))}`;
+    const errMsg = e instanceof Error ? e.message : String(e);
+    return `❌ Ошибка ИИ: ${esc(errMsg.slice(0, 300))}`;
   }
 }
 

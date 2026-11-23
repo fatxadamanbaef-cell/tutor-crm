@@ -20,9 +20,10 @@ import {
 } from '@/lib/storage';
 import { getTashkentNow, getStudentBillingPeriod } from '@/lib/formatters';
 import { initTelegramApp, getTelegramWebApp } from '@/lib/telegram';
-import { Loader2 } from 'lucide-react';
+import { Loader2, WifiOff, RotateCcw } from 'lucide-react';
 
 import { BottomNav, TabType } from '@/components/BottomNav';
+import { ToastProvider, useToast } from '@/components/ui/ToastProvider';
 import { ClientsTab } from '@/components/tabs/ClientsTab';
 import { ScheduleTab } from '@/components/tabs/ScheduleTab';
 import { StatsTab } from '@/components/tabs/StatsTab';
@@ -34,13 +35,23 @@ import { EditLessonModal } from '@/components/modals/EditLessonModal';
 import { AddPaymentModal } from '@/components/modals/AddPaymentModal';
 import { getTutorSettings } from '@/lib/settings';
 
-export default function Dashboard() {
+export default function Page() {
+  return (
+    <ToastProvider>
+      <Dashboard />
+    </ToastProvider>
+  );
+}
+
+function Dashboard() {
+  const { showToast } = useToast();
   const [activeTab, setActiveTab] = useState<TabType>('schedule');
   const [students, setStudents] = useState<Student[]>([]);
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [makeups, setMakeups] = useState<Makeup[]>([]);
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [isAddStudentOpen, setIsAddStudentOpen] = useState(false);
   const [isAddLessonOpen, setIsAddLessonOpen] = useState(false);
@@ -58,16 +69,22 @@ export default function Dashboard() {
   const [paymentsVersion, setPaymentsVersion] = useState<number>(0);
   const [lessonsRevision, setLessonsRevision] = useState<number>(0);
 
+  const fetchDashboardData = useCallback(async () => {
+    const [sData, lData, mData] = await Promise.all([
+      getStudents(false),
+      getLessons(),
+      getPendingMakeups(),
+    ]);
+    return { sData, lData, mData };
+  }, []);
+
   const refreshData = useCallback(async () => {
     try {
-      const [sData, lData, mData] = await Promise.all([
-        getStudents(false),
-        getLessons(),
-        getPendingMakeups(),
-      ]);
+      const { sData, lData, mData } = await fetchDashboardData();
       setStudents(sData);
       setLessons(lData);
       setMakeups(mData);
+      setLoadError(null);
       setLoading(false);
 
       // Deep link to edit lesson
@@ -82,13 +99,15 @@ export default function Dashboard() {
           }
         }
       }
-    } catch (e) {
+    } catch (e: unknown) {
       console.error('Data load error:', e);
+      setLoadError(e instanceof Error && e.message ? e.message : 'Проверьте подключение к интернету');
       setLoading(false);
     }
-  }, []);
+  }, [fetchDashboardData]);
 
   useEffect(() => {
+    let cancelled = false;
     initTelegramApp();
     // Disable vertical swipe-to-close inside the app
     const tg = getTelegramWebApp();
@@ -97,7 +116,38 @@ export default function Dashboard() {
         tg.disableVerticalSwipes();
       } catch {}
     }
-    refreshData();
+
+    fetchDashboardData()
+      .then(({ sData, lData, mData }) => {
+        if (cancelled) return;
+        setStudents(sData);
+        setLessons(lData);
+        setMakeups(mData);
+        setLoadError(null);
+        setLoading(false);
+
+        if (typeof window !== 'undefined') {
+          const params = new URLSearchParams(window.location.search);
+          const editLessonId = params.get('editLesson');
+          if (editLessonId) {
+            const lessonToEdit = lData.find((l) => l.id === editLessonId);
+            if (lessonToEdit) {
+              setSelectedLesson(lessonToEdit);
+              window.history.replaceState({}, '', window.location.pathname);
+            }
+          }
+        }
+      })
+      .catch((e: unknown) => {
+        console.error('Data load error:', e);
+        if (!cancelled) {
+          setLoadError(
+            e instanceof Error && e.message ? e.message : 'Проверьте подключение к интернету'
+          );
+          setLoading(false);
+        }
+      });
+
     getTutorSettings().catch(() => {});
 
     // Lightweight background heartbeat to ensure Telegram reminders/digests stay reliable while app is open
@@ -109,8 +159,11 @@ export default function Dashboard() {
     };
     triggerCronCheck();
     const cronTimer = setInterval(triggerCronCheck, 3 * 60 * 1000);
-    return () => clearInterval(cronTimer);
-  }, [refreshData]);
+    return () => {
+      cancelled = true;
+      clearInterval(cronTimer);
+    };
+  }, [fetchDashboardData]);
 
   // Live recalculated attendance stats per student's individual billing period (from billing_day)
   const liveStudents = useMemo(() => {
@@ -162,8 +215,8 @@ export default function Dashboard() {
     setSelectedStudentId(student.id);
   }, []);
 
-  const handleSetLessonStatus = useCallback(
-    async (lessonId: string, status: LessonStatus, missReason?: string) => {
+  const commitLessonStatus = useCallback(
+    async (lessonId: string, status: LessonStatus, missReason?: string): Promise<boolean> => {
       try {
         const prevLesson = lessons.find((l) => l.id === lessonId);
         const prevDeducted = prevLesson ? isDeductedStatus(prevLesson.status) : false;
@@ -212,12 +265,46 @@ export default function Dashboard() {
             )
           );
         }
+        return true;
       } catch (e) {
         console.error('Status change failed:', e);
+        showToast({ message: 'Не удалось обновить статус урока', tone: 'error' });
         refreshData();
+        return false;
       }
     },
-    [lessons, refreshData]
+    [lessons, refreshData, showToast]
+  );
+
+  const handleSetLessonStatus = useCallback(
+    async (lessonId: string, status: LessonStatus, missReason?: string) => {
+      const prevLesson = lessons.find((l) => l.id === lessonId);
+      const ok = await commitLessonStatus(lessonId, status, missReason);
+      if (!ok || !prevLesson || prevLesson.status === status) return;
+
+      const studentName =
+        prevLesson.student_name ||
+        students.find((s) => s.id === prevLesson.student_id)?.name ||
+        'Ученик';
+      const actionLabel =
+        status === 'completed'
+          ? 'проведён (-1 ур.)'
+          : status === 'missed_penalty'
+          ? 'сгорел (-1 ур.)'
+          : status === 'missed_excused'
+          ? 'отмена (баланс сохранён)'
+          : 'возвращён в план';
+
+      showToast({
+        message: `${studentName}: ${actionLabel}`,
+        tone: status === 'missed_penalty' ? 'warning' : 'success',
+        actionLabel: 'Отменить',
+        onAction: () => {
+          void commitLessonStatus(lessonId, prevLesson.status, prevLesson.miss_reason);
+        },
+      });
+    },
+    [lessons, students, commitLessonStatus, showToast]
   );
 
   const handleUpdateLessonNote = useCallback(async (lessonId: string, notes: string) => {
@@ -291,44 +378,57 @@ export default function Dashboard() {
         setLessons((prev) => prev.filter((l) => l.student_id !== studentId));
         setSelectedStudentId(null);
         await deleteStudent(studentId);
+        showToast({ message: 'Ученик удалён', tone: 'default' });
       } catch (e) {
         console.error('Delete error:', e);
+        showToast({ message: 'Не удалось удалить ученика', tone: 'error' });
         refreshData();
       }
     },
-    [refreshData]
+    [refreshData, showToast]
   );
 
-  const handleSaveStudent = useCallback(async (data: any) => {
-    try {
-      const saved = await saveStudent(data);
-      setStudents((prev) => [...prev.filter((s) => s.id !== saved.id), saved]);
-      setIsAddStudentOpen(false);
-      // Refresh lessons for this student's new slots
-      getLessons()
-        .then(setLessons)
-        .catch(() => {});
-    } catch (e: any) {
-      console.error('Save error:', e);
-      throw e;
-    }
-  }, []);
+  const handleSaveStudent = useCallback(
+    async (data: Parameters<typeof saveStudent>[0]) => {
+      try {
+        const saved = await saveStudent(data);
+        setStudents((prev) => [...prev.filter((s) => s.id !== saved.id), saved]);
+        setIsAddStudentOpen(false);
+        showToast({ message: `Ученик «${saved.name}» добавлен`, tone: 'success' });
+        // Refresh lessons for this student's new slots
+        getLessons()
+          .then(setLessons)
+          .catch(() => {});
+      } catch (e: unknown) {
+        console.error('Save error:', e);
+        throw e;
+      }
+    },
+    [showToast]
+  );
 
-  const handleSaveStudentInfo = useCallback(async (studentId: string, updates: any) => {
-    try {
-      await updateStudentSettings(studentId, updates);
-      const [updatedStudents, updatedLessons] = await Promise.all([
-        getStudents(false),
-        getLessons(),
-      ]);
-      setStudents(updatedStudents);
-      setLessons(updatedLessons);
-    } catch (e: any) {
-      console.error('Failed to save student info:', e);
-      alert('Ошибка при сохранении: ' + (e?.message || String(e)));
-      throw e;
-    }
-  }, []);
+  const handleSaveStudentInfo = useCallback(
+    async (studentId: string, updates: Parameters<typeof updateStudentSettings>[1]) => {
+      try {
+        await updateStudentSettings(studentId, updates);
+        const [updatedStudents, updatedLessons] = await Promise.all([
+          getStudents(false),
+          getLessons(),
+        ]);
+        setStudents(updatedStudents);
+        setLessons(updatedLessons);
+        showToast({ message: 'Профиль ученика сохранён', tone: 'success' });
+      } catch (e: unknown) {
+        console.error('Failed to save student info:', e);
+        showToast({
+          message: 'Ошибка при сохранении: ' + (e instanceof Error ? e.message : String(e)),
+          tone: 'error',
+        });
+        throw e;
+      }
+    },
+    [showToast]
+  );
 
   const handleUpdateLessonTime = useCallback(
     async (lessonId: string, timeStr: string, dateStr?: string) => {
@@ -366,8 +466,33 @@ export default function Dashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#f4f5f8] flex items-center justify-center">
+      <div className="min-h-dvh bg-[#f4f5f8] flex items-center justify-center">
         <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+      </div>
+    );
+  }
+
+  if (loadError && students.length === 0 && lessons.length === 0) {
+    return (
+      <div className="min-h-dvh bg-[#f4f5f8] flex flex-col items-center justify-center px-6 text-center gap-3">
+        <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center">
+          <WifiOff className="w-6 h-6" aria-hidden="true" />
+        </div>
+        <div className="space-y-1 max-w-xs">
+          <h2 className="text-base font-bold text-slate-900">Не удалось загрузить CRM</h2>
+          <p className="text-xs text-slate-500">{loadError}</p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setLoading(true);
+            void refreshData();
+          }}
+          className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+        >
+          <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
+          <span>Повторить</span>
+        </button>
       </div>
     );
   }
@@ -378,7 +503,7 @@ export default function Dashboard() {
   const hasProfile = Boolean(selectedStudent);
 
   return (
-    <div className="h-screen bg-[#f4f5f8] overflow-hidden relative selection:bg-blue-100">
+    <div className="h-dvh bg-[#f4f5f8] overflow-hidden relative selection:bg-blue-100">
       {/* Telegram BackButton controller */}
       <TelegramBackButtonController
         hasProfile={hasProfile}
@@ -512,8 +637,10 @@ export default function Dashboard() {
               );
             }
             setIsAddLessonOpen(false);
+            showToast({ message: 'Урок добавлен в расписание', tone: 'success' });
           } catch (e) {
             console.error('Failed to save lesson:', e);
+            showToast({ message: 'Не удалось сохранить урок', tone: 'error' });
             refreshData();
           }
         }}
@@ -554,8 +681,10 @@ export default function Dashboard() {
             await updateLessonDetails(lessonId, updates);
             setLessonsRevision((v) => v + 1);
             setSelectedLesson(null);
+            showToast({ message: 'Урок обновлён', tone: 'success' });
           } catch (e) {
             console.error('Update failed:', e);
+            showToast({ message: 'Не удалось обновить урок', tone: 'error' });
             refreshData();
           }
         }}
@@ -574,8 +703,10 @@ export default function Dashboard() {
             setLessons((prev) => prev.filter((l) => l.id !== lessonId));
             await deleteLesson(lessonId);
             setSelectedLesson(null);
+            showToast({ message: 'Урок удалён', tone: 'default' });
           } catch (e) {
             console.error('Delete failed:', e);
+            showToast({ message: 'Не удалось удалить урок', tone: 'error' });
             refreshData();
           }
         }}
@@ -592,6 +723,7 @@ export default function Dashboard() {
             )
           );
           setPaymentsVersion((v) => v + 1);
+          showToast({ message: `Оплата записана · баланс ${newBalance} ур.`, tone: 'success' });
           await refreshData();
         }}
       />
@@ -614,13 +746,13 @@ function TelegramBackButtonController({
   onCloseProfile,
 }: BackBtnProps) {
   useEffect(() => {
-    const tg = getTelegramWebApp();
-    if (!tg?.BackButton) return;
+    const backButton = getTelegramWebApp()?.BackButton;
+    if (!backButton) return;
 
     const shouldShow = hasProfile || hasOverlay;
 
     if (!shouldShow) {
-      tg.BackButton.hide();
+      backButton.hide();
       return;
     }
 
@@ -632,11 +764,11 @@ function TelegramBackButtonController({
       }
     };
 
-    tg.BackButton.show();
-    tg.BackButton.onClick(handler);
+    backButton.show();
+    backButton.onClick(handler);
 
     return () => {
-      tg.BackButton.offClick(handler);
+      backButton.offClick(handler);
     };
   }, [hasProfile, hasOverlay, onCloseOverlay, onCloseProfile]);
 

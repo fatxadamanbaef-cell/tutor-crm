@@ -12,7 +12,19 @@ export const maxDuration = 60;
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://tutor-crm-kappa.vercel.app';
 
-async function editTelegramMessage(chatId: number | string, messageId: number, text: string, replyMarkup?: any) {
+interface TelegramMessage {
+  chat: { id: number | string };
+  from?: { id?: number | string; first_name?: string; username?: string };
+  text?: string;
+  voice?: { file_id: string };
+}
+
+async function editTelegramMessage(
+  chatId: number | string,
+  messageId: number,
+  text: string,
+  replyMarkup?: Record<string, unknown>
+) {
   const botToken = process.env.TELEGRAM_BOT_TOKEN;
   if (!botToken) return;
   const url = `https://api.telegram.org/bot${botToken}/editMessageText`;
@@ -22,7 +34,7 @@ async function editTelegramMessage(chatId: number | string, messageId: number, t
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, message_id: messageId, text, parse_mode: 'HTML', reply_markup: replyMarkup }),
     });
-  } catch (error) {}
+  } catch {}
 }
 
 async function answerCallbackQuery(callbackQueryId: string, text?: string) {
@@ -34,7 +46,7 @@ async function answerCallbackQuery(callbackQueryId: string, text?: string) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ callback_query_id: callbackQueryId, text: text || '' }),
     });
-  } catch (e) {}
+  } catch {}
 }
 
 async function buildStudentsKeyboard() {
@@ -75,7 +87,7 @@ async function syncWebhookIfMissingSecret(): Promise<void> {
   }
 }
 
-async function registerChatId(chatId: number | string, username?: string) {
+async function registerChatId(chatId: number | string) {
   if (!supabase) return;
   const chatIdStr = String(chatId).trim();
   if (!chatIdStr) return;
@@ -107,10 +119,14 @@ async function sendChatAction(chatId: number | string, action: string = 'typing'
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chatId, action }),
     });
-  } catch (e) {}
+  } catch {}
 }
 
-async function sendLongMessage(chatId: number | string, text: string, replyMarkup?: any) {
+async function sendLongMessage(
+  chatId: number | string,
+  text: string,
+  replyMarkup?: Record<string, unknown>
+) {
   const LIMIT = 3800;
   if (text.length <= LIMIT) return sendTelegramMessage(chatId, text, replyMarkup);
   const chunks: string[] = [];
@@ -129,9 +145,9 @@ async function sendLongMessage(chatId: number | string, text: string, replyMarku
   }
 }
 
-async function handleMessage(message: any) {
+async function handleMessage(message: TelegramMessage) {
   const chatId = message.chat.id;
-  if (chatId) await registerChatId(chatId, message.from?.username);
+  if (chatId) await registerChatId(chatId);
 
   let rawText = '';
   if (message.text) {
@@ -260,7 +276,7 @@ export async function POST(req: NextRequest) {
       const data = cq.data || '';
       const chatId = cq.message?.chat?.id || cq.from?.id;
       const messageId = cq.message?.message_id;
-      if (chatId) await registerChatId(chatId, cq.from?.username);
+      if (chatId) await registerChatId(chatId);
 
       if (data.startsWith('report:')) {
         const studentId = data.replace('report:', '');

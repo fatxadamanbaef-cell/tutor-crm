@@ -2,9 +2,9 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { Lesson, Student, Payment } from '@/types';
-import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addMonths } from 'date-fns';
+import { format, parseISO, startOfMonth, endOfMonth, startOfWeek, endOfWeek, addMonths } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { getTashkentNow, getTashkentTodayStr } from '@/lib/formatters';
+import { getTashkentTodayStr } from '@/lib/formatters';
 import { getLessonsByRange, getPaymentsByRange } from '@/lib/storage';
 import {
   CheckCircle2,
@@ -23,13 +23,14 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
+import { useToast } from '@/components/ui/ToastProvider';
 
 interface StatsTabProps {
   lessons: Lesson[];
   students: Student[];
   paymentsVersion?: number;
   onOpenStudent?: (student: Student) => void;
-  summary?: any; // legacy compatibility
+  summary?: unknown; // legacy compatibility
 }
 
 function getPaymentsPlural(n: number): string {
@@ -47,17 +48,18 @@ export const StatsTab: React.FC<StatsTabProps> = ({
   paymentsVersion = 0,
   onOpenStudent,
 }) => {
+  const { showToast } = useToast();
   const [period, setPeriod] = useState<'week' | 'month'>('month');
   const [monthOffset, setMonthOffset] = useState<number>(0);
   const [archiveLessons, setArchiveLessons] = useState<Lesson[] | null>(null);
   const [periodPayments, setPeriodPayments] = useState<Payment[]>([]);
-  const [isLoadingRange, setIsLoadingRange] = useState<boolean>(false);
+  const [loadedRangeKey, setLoadedRangeKey] = useState<string>('');
   const [copied, setCopied] = useState(false);
 
   const todayStr = getTashkentTodayStr();
 
   const { startStr, endStr, periodTitle, monthLabel, isArchiveMonth } = useMemo(() => {
-    const now = getTashkentNow();
+    const now = parseISO(`${todayStr}T12:00:00+05:00`);
     if (period === 'week') {
       const start = startOfWeek(now, { weekStartsOn: 1 });
       const end = endOfWeek(now, { weekStartsOn: 1 });
@@ -85,10 +87,12 @@ export const StatsTab: React.FC<StatsTabProps> = ({
     };
   }, [period, monthOffset, todayStr]);
 
+  const rangeKey = `${startStr}_${endStr}_${isArchiveMonth}_${paymentsVersion}`;
+  const isLoadingRange = loadedRangeKey !== rangeKey;
+
   // Fetch payments (always) and lessons (when viewing archive months outside default window)
   useEffect(() => {
     let cancelled = false;
-    setIsLoadingRange(true);
 
     const fetchData = async () => {
       try {
@@ -112,7 +116,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
         console.error('[StatsTab] Failed to load range analytics:', err);
       } finally {
         if (!cancelled) {
-          setIsLoadingRange(false);
+          setLoadedRangeKey(rangeKey);
         }
       }
     };
@@ -121,9 +125,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [startStr, endStr, isArchiveMonth, paymentsVersion]);
-
-  const effectiveLessons = isArchiveMonth ? (archiveLessons ?? []) : lessons;
+  }, [startStr, endStr, isArchiveMonth, paymentsVersion, rangeKey]);
 
   const {
     conductedCount,
@@ -141,6 +143,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
     lowBalanceStudents,
     studentBreakdown,
   } = useMemo(() => {
+    const effectiveLessons = isArchiveMonth ? (archiveLessons ?? []) : lessons;
     const activeStudents = students.filter((s) => s.is_active !== false);
     const studentMap = new Map<string, Student>();
     students.forEach((s) => studentMap.set(s.id, s));
@@ -282,7 +285,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
       lowBalanceStudents: lowBal,
       studentBreakdown: breakdown,
     };
-  }, [effectiveLessons, periodPayments, students, period, startStr, endStr, isArchiveMonth]);
+  }, [archiveLessons, lessons, periodPayments, students, period, startStr, endStr, isArchiveMonth]);
 
   const handleCopySummary = () => {
     hapticImpact('light');
@@ -309,6 +312,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
       navigator.clipboard.writeText(text);
       setCopied(true);
       hapticNotification('success');
+      showToast({ message: 'Сводка скопирована в буфер', tone: 'success' });
       setTimeout(() => setCopied(false), 2000);
     }
   };
@@ -330,23 +334,27 @@ export const StatsTab: React.FC<StatsTabProps> = ({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `tutor-crm-${period}-${startStr}_${endStr}.csv`;
+    const fileName = `tutor-crm-${period}-${startStr}_${endStr}.csv`;
+    a.download = fileName;
     a.click();
     URL.revokeObjectURL(url);
     hapticNotification('success');
+    showToast({ message: `Отчёт ${fileName} скачан`, tone: 'success' });
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#f2f2f7] pb-28 px-4 pt-5 overflow-y-auto space-y-3.5">
+    <div className="flex flex-col h-full bg-[#f4f5f8] pb-28 px-4 pt-safe overflow-y-auto space-y-3.5">
       {/* Header */}
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Аналитика и доход</h1>
-          <p className="text-xs text-gray-500 font-semibold mt-0.5 truncate">{periodTitle}</p>
+          <h1 className="text-lg font-bold text-slate-900 tracking-tight leading-tight">
+            Аналитика и доход
+          </h1>
+          <p className="text-xs text-slate-500 font-semibold mt-0.5 truncate">{periodTitle}</p>
         </div>
 
         {/* Period Switcher */}
-        <div className="bg-gray-200 p-0.5 rounded-xl flex shrink-0">
+        <div className="bg-slate-200/80 p-0.5 rounded-xl flex shrink-0">
           <button
             type="button"
             onClick={() => {
@@ -354,7 +362,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
               setPeriod('week');
             }}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              period === 'week' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500'
+              period === 'week' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
             }`}
           >
             Неделя
@@ -366,7 +374,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
               setPeriod('month');
             }}
             className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              period === 'month' ? 'bg-white text-gray-900 shadow-xs' : 'text-gray-500'
+              period === 'month' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
             }`}
           >
             Месяц

@@ -33,49 +33,14 @@ export const AddPaymentModal: React.FC<AddPaymentModalProps> = ({
   onSaved,
 }) => {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
-  const lessonsInputRef = useRef<HTMLInputElement | null>(null);
-  const dateInputRef = useRef<HTMLInputElement | null>(null);
   const isOpenRef = useRef(isOpen);
-  isOpenRef.current = isOpen;
 
   const baseId = useId();
   const titleId = `${baseId}-title`;
-  const lessonsInputId = `${baseId}-lessons`;
-  const amountInputId = `${baseId}-amount`;
-  const dateInputId = `${baseId}-date`;
-  const noteInputId = `${baseId}-note`;
-  const errorId = `${baseId}-error`;
-
-  const [lessonsStr, setLessonsStr] = useState<string>('12');
-  const [amountStr, setAmountStr] = useState<string>('3600000');
-  const [isAmountCustom, setIsAmountCustom] = useState<boolean>(false);
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('payme');
-  const [paidDate, setPaidDate] = useState<string>(getTashkentTodayStr());
-  const [note, setNote] = useState<string>('');
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  const lessonRate = student?.lesson_rate || 300000;
-  const currentBalance = student?.lessons_balance ?? 0;
-
-  // Reset form values whenever opened for a student
-  useEffect(() => {
-    if (isOpen && student) {
-      const defaultLessons = Math.max(1, Number(student.monthly_target_lessons) || 8);
-      const rate = student.lesson_rate || 300000;
-      setLessonsStr(String(defaultLessons));
-      setAmountStr(String(defaultLessons * rate));
-      setIsAmountCustom(false);
-      setPaymentMethod('payme');
-      setPaidDate(getTashkentTodayStr());
-      setNote('');
-      setErrorMsg(null);
-      setIsSubmitting(false);
-    }
-  }, [isOpen, student]);
 
   // Open/close native <dialog> via showModal() / close()
   useEffect(() => {
+    isOpenRef.current = isOpen;
     const dialog = dialogRef.current;
     if (!dialog) return;
 
@@ -118,16 +83,85 @@ export const AddPaymentModal: React.FC<AddPaymentModalProps> = ({
     };
   }, []);
 
+  const handleDialogClose = () => {
+    const dialog = dialogRef.current;
+    if (dialog) {
+      dialog.returnValue = '';
+    }
+    if (isOpenRef.current) {
+      onClose();
+    }
+  };
+
+  return (
+    <dialog
+      ref={dialogRef}
+      aria-labelledby={titleId}
+      onClose={handleDialogClose}
+      {...({ closedby: 'any' } as Record<string, string>)}
+      className="m-auto mb-0 sm:mb-auto w-full max-w-md rounded-t-3xl sm:rounded-3xl p-0 border border-slate-200/80 bg-white text-slate-900 shadow-2xl open:flex open:flex-col max-h-[90vh] overflow-hidden"
+    >
+      {isOpen && student && (
+        <AddPaymentModalBody
+          key={student.id}
+          student={student}
+          baseId={baseId}
+          titleId={titleId}
+          onClose={onClose}
+          onSaved={onSaved}
+        />
+      )}
+    </dialog>
+  );
+};
+
+interface AddPaymentModalBodyProps {
+  student: Student;
+  baseId: string;
+  titleId: string;
+  onClose: () => void;
+  onSaved: (result: { payment: Payment; newBalance: number; studentId: string }) => void | Promise<void>;
+}
+
+const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
+  student,
+  baseId,
+  titleId,
+  onClose,
+  onSaved,
+}) => {
+  const lessonsInputRef = useRef<HTMLInputElement | null>(null);
+  const dateInputRef = useRef<HTMLInputElement | null>(null);
+
+  const lessonsInputId = `${baseId}-lessons`;
+  const amountInputId = `${baseId}-amount`;
+  const dateInputId = `${baseId}-date`;
+  const noteInputId = `${baseId}-note`;
+  const errorId = `${baseId}-error`;
+
+  const lessonRate = student.lesson_rate || 300000;
+  const currentBalance = student.lessons_balance ?? 0;
+  const defaultLessons = Math.max(1, Number(student.monthly_target_lessons) || 8);
+
+  const [lessonsStr, setLessonsStr] = useState<string>(String(defaultLessons));
+  const [amountStr, setAmountStr] = useState<string>(String(defaultLessons * lessonRate));
+  const [isAmountCustom, setIsAmountCustom] = useState<boolean>(false);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('payme');
+  const [paidDate, setPaidDate] = useState<string>(getTashkentTodayStr());
+  const [note, setNote] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
   const lessonsCount = parseDigits(lessonsStr);
   const amountUzs = parseDigits(amountStr);
   const autoAmount = lessonsCount * lessonRate;
   const projectedBalance = currentBalance + lessonsCount;
 
   const lessonPresets = useMemo(() => {
-    const target = Math.max(1, Number(student?.monthly_target_lessons) || 8);
+    const target = Math.max(1, Number(student.monthly_target_lessons) || 8);
     const set = new Set<number>([4, 8, 12, target]);
     return Array.from(set).sort((a, b) => a - b).slice(0, 4);
-  }, [student?.monthly_target_lessons]);
+  }, [student.monthly_target_lessons]);
 
   const handleLessonsChange = (raw: string) => {
     const clean = raw.replace(/\D/g, '').slice(0, 3);
@@ -162,19 +196,9 @@ export const AddPaymentModal: React.FC<AddPaymentModalProps> = ({
     setErrorMsg(null);
   };
 
-  const handleDialogClose = () => {
-    const dialog = dialogRef.current;
-    if (dialog) {
-      dialog.returnValue = '';
-    }
-    if (isOpenRef.current) {
-      onClose();
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!student || isSubmitting) return;
+    if (isSubmitting) return;
 
     if (lessonsCount <= 0 && amountUzs <= 0) {
       setErrorMsg('Укажите количество уроков или сумму оплаты.');
@@ -206,25 +230,21 @@ export const AddPaymentModal: React.FC<AddPaymentModalProps> = ({
       hapticNotification('success');
       await onSaved({ payment, newBalance, studentId: student.id });
       onClose();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to record payment:', err);
       hapticNotification('error');
-      setErrorMsg(err?.message || 'Не удалось сохранить оплату. Проверьте подключение.');
+      setErrorMsg(
+        err instanceof Error && err.message
+          ? err.message
+          : 'Не удалось сохранить оплату. Проверьте подключение.'
+      );
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <dialog
-      ref={dialogRef}
-      aria-labelledby={titleId}
-      onClose={handleDialogClose}
-      {...({ closedby: 'any' } as Record<string, string>)}
-      className="m-auto mb-0 sm:mb-auto w-full max-w-md rounded-t-3xl sm:rounded-3xl p-0 border border-slate-200/80 bg-white text-slate-900 shadow-2xl open:flex open:flex-col max-h-[90vh] overflow-hidden"
-    >
-      {student && (
-        <div className="flex flex-col max-h-[90vh] overflow-y-auto p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] sm:pb-5 space-y-4 text-xs">
+    <div className="flex flex-col max-h-[90vh] overflow-y-auto p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] sm:pb-5 space-y-4 text-xs">
           {/* Header */}
           <div className="flex items-start justify-between gap-2 pb-2.5 border-b border-slate-100">
             <div className="flex items-center gap-2.5 min-w-0">
@@ -473,7 +493,5 @@ export const AddPaymentModal: React.FC<AddPaymentModalProps> = ({
             </div>
           </form>
         </div>
-      )}
-    </dialog>
   );
 };

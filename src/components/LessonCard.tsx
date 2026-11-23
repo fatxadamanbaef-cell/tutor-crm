@@ -222,10 +222,10 @@ export const LessonCard: React.FC<LessonCardProps> = React.memo(function LessonC
               <button
                 type="button"
                 onClick={handleCompleted}
-                className="h-8 px-2.5 rounded-xl bg-white border border-slate-200 text-slate-700 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 active:bg-emerald-100 text-xs font-semibold inline-flex items-center gap-1 shadow-2xs active:scale-95 transition-all"
+                className="touch-hit h-9 px-3 rounded-xl bg-white border border-slate-200 text-slate-700 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700 active:bg-emerald-100 text-xs font-semibold inline-flex items-center gap-1 shadow-2xs active:scale-95 transition-all"
                 title="Проведён (-1 баланс)"
               >
-                <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                <Check className="w-3.5 h-3.5 stroke-[2.5]" aria-hidden="true" />
                 <span>Был</span>
               </button>
             ) : (
@@ -361,42 +361,42 @@ export const LessonCard: React.FC<LessonCardProps> = React.memo(function LessonC
             <button
               type="button"
               onClick={handleCompleted}
-              className={`flex-1 py-2 px-2 text-center text-xs font-semibold rounded-xl border transition-all active:scale-95 flex items-center justify-center gap-1 ${
+              className={`touch-hit flex-1 py-2 px-2 text-center text-xs font-semibold rounded-xl border transition-all active:scale-95 flex items-center justify-center gap-1 ${
                 isCompleted
                   ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
                   : 'bg-emerald-50/70 text-emerald-800 border-emerald-200/80 hover:bg-emerald-100/80'
               }`}
               title="Проведён (-1 с баланса)"
             >
-              <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+              <Check className="w-3.5 h-3.5 stroke-[2.5]" aria-hidden="true" />
               <span>Был</span>
             </button>
 
             <button
               type="button"
               onClick={handlePenalty}
-              className={`flex-1 py-2 px-2 text-center text-xs font-semibold rounded-xl border transition-all active:scale-95 flex items-center justify-center gap-1 ${
+              className={`touch-hit flex-1 py-2 px-2 text-center text-xs font-semibold rounded-xl border transition-all active:scale-95 flex items-center justify-center gap-1 ${
                 isPenalty
                   ? 'bg-orange-600 text-white border-orange-600 shadow-xs'
                   : 'bg-orange-50/70 text-orange-800 border-orange-200/80 hover:bg-orange-100/80'
               }`}
               title="Пропуск без предупреждения (-1 с баланса)"
             >
-              <Flame className="w-3.5 h-3.5" />
+              <Flame className="w-3.5 h-3.5" aria-hidden="true" />
               <span>Сгорел</span>
             </button>
 
             <button
               type="button"
               onClick={handleExcused}
-              className={`flex-1 py-2 px-2 text-center text-xs font-semibold rounded-xl border transition-all active:scale-95 flex items-center justify-center gap-1 ${
+              className={`touch-hit flex-1 py-2 px-2 text-center text-xs font-semibold rounded-xl border transition-all active:scale-95 flex items-center justify-center gap-1 ${
                 isExcused
                   ? 'bg-rose-600 text-white border-rose-600 shadow-xs'
                   : 'bg-rose-50/70 text-rose-800 border-rose-200/80 hover:bg-rose-100/80'
               }`}
               title="Уважительная отмена (баланс сохраняется)"
             >
-              <Ban className="w-3.5 h-3.5" />
+              <Ban className="w-3.5 h-3.5" aria-hidden="true" />
               <span>Отмена</span>
             </button>
 
@@ -406,11 +406,11 @@ export const LessonCard: React.FC<LessonCardProps> = React.memo(function LessonC
                 hapticImpact('light');
                 if (onEditLesson) onEditLesson(lesson);
               }}
-              className="w-9 h-9 rounded-xl border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 transition-all active:scale-95 flex items-center justify-center shrink-0"
+              className="touch-hit w-9 h-9 rounded-xl border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 transition-all active:scale-95 flex items-center justify-center shrink-0"
               title="Перенести или изменить урок"
               aria-label="Перенести или изменить урок"
             >
-              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <SlidersHorizontal className="w-3.5 h-3.5" aria-hidden="true" />
             </button>
           </div>
         </div>

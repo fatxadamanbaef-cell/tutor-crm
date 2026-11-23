@@ -150,7 +150,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
             <button
               type="button"
               onClick={handleTodayClick}
-              className="h-7 text-[11px] font-semibold text-blue-700 bg-blue-50 border border-blue-200/80 px-2 rounded-lg active:scale-95 transition-all"
+              className="touch-hit h-8 text-[11px] font-semibold text-blue-700 bg-blue-50 border border-blue-200/80 px-2.5 rounded-lg active:scale-95 transition-all"
             >
               Сегодня
             </button>
@@ -158,12 +158,13 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
 
           <button
             type="button"
+            aria-pressed={isMonthView}
             onClick={() => {
               hapticImpact('light');
               setIsMonthView(!isMonthView);
               setCurrentMonthDate(selectedDate);
             }}
-            className={`h-7 flex items-center gap-1 text-[11px] font-semibold px-2 rounded-lg border transition-all active:scale-95 ${
+            className={`touch-hit h-8 flex items-center gap-1 text-[11px] font-semibold px-2.5 rounded-lg border transition-all active:scale-95 ${
               isMonthView
                 ? 'bg-slate-900 text-white border-slate-900'
                 : 'bg-slate-50/90 text-slate-700 border-slate-200 hover:bg-slate-100'
@@ -171,12 +172,12 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
           >
             {isMonthView ? (
               <>
-                <List className="w-3 h-3" />
+                <List className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>Неделя</span>
               </>
             ) : (
               <>
-                <LayoutGrid className="w-3 h-3" />
+                <LayoutGrid className="w-3.5 h-3.5" aria-hidden="true" />
                 <span>Месяц</span>
               </>
             )}
@@ -189,11 +190,11 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
                 hapticImpact('light');
                 onQuickAdd();
               }}
-              className="w-7 h-7 rounded-lg bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center shadow-xs active:scale-95 transition-all shrink-0 animate-in fade-in zoom-in-95 duration-150 motion-reduce:animate-none"
+              className="touch-hit w-8 h-8 rounded-lg bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center shadow-xs active:scale-95 transition-all shrink-0 animate-in fade-in zoom-in-95 duration-150 motion-reduce:animate-none"
               title="Добавить урок"
               aria-label="Добавить урок"
             >
-              <Plus className="w-4 h-4 stroke-[2.5]" />
+              <Plus className="w-4 h-4 stroke-[2.5]" aria-hidden="true" />
             </button>
           )}
         </div>
@@ -212,6 +213,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
               <button
                 key={dayStr}
                 ref={isSelected ? selectedChipRef : null}
+                aria-current={isSelected ? 'date' : undefined}
                 onClick={() => handleDayClick(day)}
                 className={`flex flex-col items-center justify-between min-w-[44px] h-[56px] py-1 px-1 rounded-xl border transition-all active:scale-95 shrink-0 relative ${
                   isSelected
@@ -262,13 +264,14 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
           <div className="flex items-center justify-between">
             <button
               type="button"
+              aria-label="Предыдущий месяц"
               onClick={() => {
                 hapticImpact('light');
                 setCurrentMonthDate(subMonths(currentMonthDate, 1));
               }}
-              className="p-1.5 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 active:scale-95"
+              className="touch-hit p-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 active:scale-95"
             >
-              <ChevronLeft className="w-4 h-4" />
+              <ChevronLeft className="w-4 h-4" aria-hidden="true" />
             </button>
 
             <span className="text-xs font-bold capitalize text-slate-900">
@@ -277,13 +280,14 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
 
             <button
               type="button"
+              aria-label="Следующий месяц"
               onClick={() => {
                 hapticImpact('light');
                 setCurrentMonthDate(addMonths(currentMonthDate, 1));
               }}
-              className="p-1.5 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 active:scale-95"
+              className="touch-hit p-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 active:scale-95"
             >
-              <ChevronRight className="w-4 h-4" />
+              <ChevronRight className="w-4 h-4" aria-hidden="true" />
             </button>
           </div>
 

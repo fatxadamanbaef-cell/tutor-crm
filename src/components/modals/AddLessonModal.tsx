@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Student, Lesson, LessonStatus } from '@/types';
 import { X, CalendarPlus, AlertTriangle } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
 import { getTashkentTodayStr, dayOfWeekOf } from '@/lib/formatters';
 import { format } from 'date-fns';
+import { useToast } from '@/components/ui/ToastProvider';
 
 interface AddLessonModalProps {
   isOpen: boolean;
@@ -33,6 +34,33 @@ function slotDurationMinutes(start: string, end?: string): number {
   return diff >= 15 && diff <= 300 ? diff : 90;
 }
 
+function getStudentSlotDefaults(
+  students: Student[],
+  targetStudentId: string,
+  targetDateStr: string
+): { startTime: string; duration: number } | null {
+  const student = students.find((s) => s.id === targetStudentId);
+  const slots = student?.recurring_schedule || [];
+  if (slots.length === 0) return null;
+  const dow = dayOfWeekOf(targetDateStr);
+  const matched = slots.find((sl) => Number(sl.dayOfWeek) === dow) || slots[0];
+  if (!matched?.startTime) return null;
+  const cleanStart = matched.startTime.substring(0, 5);
+  return {
+    startTime: cleanStart,
+    duration: slotDurationMinutes(cleanStart, matched.endTime?.substring(0, 5)),
+  };
+}
+
+function formatInitialDate(initialDate?: Date): string {
+  if (!initialDate) return getTashkentTodayStr();
+  try {
+    return format(initialDate, 'yyyy-MM-dd');
+  } catch {
+    return getTashkentTodayStr();
+  }
+}
+
 export const AddLessonModal: React.FC<AddLessonModalProps> = ({
   isOpen,
   onClose,
@@ -43,63 +71,64 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({
   initialStudentId,
   onSave,
 }) => {
-  const [studentId, setStudentId] = useState(students[0]?.id || '');
-  const [lessonDate, setLessonDate] = useState(getTashkentTodayStr());
-  const [startTime, setStartTime] = useState('18:00');
-  const [duration, setDuration] = useState<number | string>(90);
-  const [notes, setNotes] = useState('');
-  const [lessonStatus, setLessonStatus] = useState<LessonStatus>('planned');
+  if (!isOpen) return null;
+  return (
+    <AddLessonModalContent
+      onClose={onClose}
+      students={students}
+      lessons={lessons}
+      initialDate={initialDate}
+      initialStartTime={initialStartTime}
+      initialStudentId={initialStudentId}
+      onSave={onSave}
+    />
+  );
+};
 
-  const applyStudentSlotDefaults = useCallback(
-    (targetStudentId: string, targetDateStr: string, preserveStartTime?: boolean) => {
-      const student = students.find((s) => s.id === targetStudentId);
-      const slots = student?.recurring_schedule || [];
-      if (slots.length === 0) return;
-      const dow = dayOfWeekOf(targetDateStr);
-      const matched = slots.find((sl) => Number(sl.dayOfWeek) === dow) || slots[0];
-      if (matched?.startTime) {
-        const cleanStart = matched.startTime.substring(0, 5);
-        if (!preserveStartTime) {
-          setStartTime(cleanStart);
-        }
-        setDuration(slotDurationMinutes(cleanStart, matched.endTime?.substring(0, 5)));
-      }
-    },
-    [students]
+const AddLessonModalContent: React.FC<Omit<AddLessonModalProps, 'isOpen'>> = ({
+  onClose,
+  students,
+  lessons = [],
+  initialDate,
+  initialStartTime,
+  initialStudentId,
+  onSave,
+}) => {
+  const { showToast } = useToast();
+  const resolvedStudentId =
+    initialStudentId && students.some((s) => s.id === initialStudentId)
+      ? initialStudentId
+      : students[0]?.id || '';
+  const initialDateStr = formatInitialDate(initialDate);
+  const initialSlotDefaults = resolvedStudentId
+    ? getStudentSlotDefaults(students, resolvedStudentId, initialDateStr)
+    : null;
+
+  const [studentId, setStudentId] = useState(resolvedStudentId);
+  const [lessonDate, setLessonDate] = useState(initialDateStr);
+  const [startTime, setStartTime] = useState(
+    initialStartTime || initialSlotDefaults?.startTime || '18:00'
+  );
+  const [duration, setDuration] = useState<number | string>(
+    initialSlotDefaults?.duration ?? 90
+  );
+  const [notes, setNotes] = useState('');
+  const [lessonStatus, setLessonStatus] = useState<LessonStatus>(
+    initialDateStr < getTashkentTodayStr() ? 'completed' : 'planned'
   );
 
-  // Sync state whenever modal opens
-  useEffect(() => {
-    if (isOpen) {
-      const targetStudentId =
-        initialStudentId && students.some((s) => s.id === initialStudentId)
-          ? initialStudentId
-          : studentId && students.some((s) => s.id === studentId)
-          ? studentId
-          : students[0]?.id || '';
-
-      setStudentId(targetStudentId);
-
-      let dateFormatted = getTashkentTodayStr();
-      if (initialDate) {
-        try {
-          dateFormatted = format(initialDate, 'yyyy-MM-dd');
-        } catch {}
-      }
-      setLessonDate(dateFormatted);
-      setLessonStatus(dateFormatted < getTashkentTodayStr() ? 'completed' : 'planned');
-      setNotes('');
-
-      if (initialStartTime) {
-        setStartTime(initialStartTime);
-        if (targetStudentId) {
-          applyStudentSlotDefaults(targetStudentId, dateFormatted, true);
-        }
-      } else if (targetStudentId) {
-        applyStudentSlotDefaults(targetStudentId, dateFormatted, false);
-      }
+  const applyStudentSlotDefaults = (
+    targetStudentId: string,
+    targetDateStr: string,
+    preserveStartTime?: boolean
+  ) => {
+    const defaults = getStudentSlotDefaults(students, targetStudentId, targetDateStr);
+    if (!defaults) return;
+    if (!preserveStartTime) {
+      setStartTime(defaults.startTime);
     }
-  }, [isOpen, initialDate, initialStartTime, initialStudentId, students]);
+    setDuration(defaults.duration);
+  };
 
   const calculateEndTime = (start: string, durationMinutes: number | string): string => {
     try {
@@ -146,8 +175,6 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({
     return null;
   }, [dayOccupiedLessons, startTime, duration]);
 
-  if (!isOpen) return null;
-
   const handleDateChange = (newDate: string) => {
     setLessonDate(newDate);
     if (newDate < getTashkentTodayStr()) {
@@ -169,7 +196,7 @@ export const AddLessonModal: React.FC<AddLessonModalProps> = ({
     e.preventDefault();
     const effectiveStudentId = studentId || students[0]?.id;
     if (!effectiveStudentId) {
-      alert('Сначала добавьте ученика');
+      showToast({ message: 'Сначала добавьте ученика во вкладке «Ученики»', tone: 'warning' });
       return;
     }
 

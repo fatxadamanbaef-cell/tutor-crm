@@ -25,8 +25,11 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   ] as const;
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200/80 pb-safe z-40">
-      <div className="flex items-center justify-around max-w-md mx-auto px-2 py-1.5">
+    <nav
+      aria-label="Основная навигация"
+      className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200/80 pb-safe z-40"
+    >
+      <div className="flex items-center justify-around max-w-md mx-auto px-2 py-1">
         {tabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -34,12 +37,15 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             <button
               key={tab.id}
               type="button"
+              aria-current={isActive ? 'page' : undefined}
               onClick={() => {
                 if (!isActive) hapticImpact('light');
                 onChangeTab(tab.id);
               }}
-              className={`relative flex flex-col items-center justify-center w-18 h-12 rounded-2xl transition-all active:scale-95 ${
-                isActive ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'
+              className={`relative flex flex-col items-center justify-center w-20 h-11 rounded-2xl transition-all active:scale-95 ${
+                isActive
+                  ? 'bg-blue-50/90 text-blue-600'
+                  : 'text-slate-400 hover:text-slate-600'
               }`}
             >
               <div className="relative">
@@ -48,6 +54,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
                     isActive ? 'scale-105' : ''
                   }`}
                   strokeWidth={isActive ? 2.5 : 2}
+                  aria-hidden="true"
                 />
                 {'badge' in tab && tab.badge > 0 && (
                   <span className="absolute -top-1 -right-2.5 min-w-[15px] h-[15px] px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold tabular-nums flex items-center justify-center leading-none">
@@ -66,6 +73,6 @@ export const BottomNav: React.FC<BottomNavProps> = ({
           );
         })}
       </div>
-    </div>
+    </nav>
   );
 };

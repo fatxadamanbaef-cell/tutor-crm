@@ -36,7 +36,7 @@ export default function RootLayout({
           strategy="beforeInteractive"
         />
       </head>
-      <body className="min-h-full bg-[#f2f2f7] text-gray-900 antialiased select-none font-sans overflow-x-hidden" suppressHydrationWarning>
+      <body className="min-h-dvh bg-[#f4f5f8] text-slate-900 antialiased select-none font-sans" suppressHydrationWarning>
         {children}
       </body>
     </html>

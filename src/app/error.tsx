@@ -27,7 +27,7 @@ export default function Error({
             try {
               localStorage.clear();
               window.location.reload();
-            } catch(e) {}
+            } catch {}
           }}
           className="bg-red-800 hover:bg-red-700 text-white font-medium py-2.5 px-4 rounded-xl text-xs"
         >
