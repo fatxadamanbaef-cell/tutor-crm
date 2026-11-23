@@ -20,8 +20,6 @@ import {
   Trash2,
   Plus,
   Wallet,
-  ChevronDown,
-  ChevronUp,
   Package,
   Sparkles,
   Loader2,
@@ -48,11 +46,15 @@ import {
   extractBillingDayNumber,
   isRealNote,
   formatTashkentPaymentDate,
+  isIsoDateString,
+  formatShortRuDate,
+  addDaysStr,
 } from '@/lib/formatters';
 import {
-  getStudentHorizonLessons,
-  getUnmarkedPastLessons,
+  ensureRecurringLessonsForStudent,
+  getStudentLessonsArchive,
   initializePackageFromPastDate,
+  startNewPackageForStudent,
   topUpStudentBalance,
   calculateStudentBilling,
   setLessonStatusDirect,
@@ -61,6 +63,14 @@ import {
   PAYMENT_METHOD_LABELS,
   type updateStudentSettings,
 } from '@/lib/storage';
+import {
+  computeStudentCycleSummary,
+  buildArchivePeriods,
+  classifyLessonKind,
+  getLessonDateStr,
+  sortLessonsAsc,
+  type PlannedSlotLabel,
+} from '@/lib/packageCycle';
 import { generateStudentReport } from '@/lib/reports';
 import { getTutorSettings, buildParentInvoiceMessage } from '@/lib/settings';
 import { AddPaymentModal } from '@/components/modals/AddPaymentModal';
@@ -167,46 +177,29 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     student.recurring_schedule || []
   );
   const [billingCalc, setBillingCalc] = useState<BillingCalculation | null>(null);
-  const [copyState, setCopyState] = useState<'invoice' | 'report' | null>(null);
+  const [copyState, setCopyState] = useState<'invoice' | 'report' | 'archive_report' | null>(null);
   const [isCopyingReport, setIsCopyingReport] = useState(false);
 
-  // Horizon & Timeline state (7 / 14 / 30 / 60 days)
-  const [daysHorizon, setDaysHorizon] = useState<7 | 14 | 30 | 60>(30);
-  const [directionFilter, setDirectionFilter] = useState<'all' | 'past' | 'upcoming'>('all');
-  const [showPastInAllView, setShowPastInAllView] = useState<boolean>(false);
-  const [horizonLessons, setHorizonLessons] = useState<Lesson[]>([]);
-  const [loadedHorizonKey, setLoadedHorizonKey] = useState<string>('');
+  // Full lessons archive & simplified 3-tab schedule view
+  const [allStudentLessons, setAllStudentLessons] = useState<Lesson[]>([]);
+  const [loadedLessonsKey, setLoadedLessonsKey] = useState<string>('');
+  const [scheduleView, setScheduleView] = useState<'current' | 'upcoming' | 'archive'>('current');
+  const [cycleSubFilter, setCycleSubFilter] = useState<
+    'all' | 'completed' | 'missed' | 'remaining'
+  >('all');
+  const [upcomingHorizonDays, setUpcomingHorizonDays] = useState<30 | 60>(30);
+  const [selectedArchiveId, setSelectedArchiveId] = useState<string>('');
+  const [isCopyingArchiveReport, setIsCopyingArchiveReport] = useState<boolean>(false);
 
-  // Unmarked past lessons state
-  const [unmarkedLessons, setUnmarkedLessons] = useState<Lesson[]>([]);
-
-  // Retroactive package wizard state
-  const [isRetroWizardOpen, setIsRetroWizardOpen] = useState<boolean>(false);
-  const [retroStartDate, setRetroStartDate] = useState<string>(() => {
-    const now = getTashkentNow();
-    const curY = now.getFullYear();
-    const curM = now.getMonth();
-    const curD = now.getDate();
-    const bMatch = String(student.billing_day || '10').match(/\d+/);
-    const bNum = bMatch ? Math.min(31, Math.max(1, parseInt(bMatch[0], 10))) : 10;
-    let y = curY;
-    let m = curM;
-    if (curD < bNum) {
-      m -= 1;
-      if (m < 0) {
-        m = 11;
-        y -= 1;
-      }
-    }
-    const maxDayInMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
-    const d = new Date(Date.UTC(y, m, Math.min(bNum, maxDayInMonth)));
-    return d.toISOString().substring(0, 10);
-  });
-  const [retroPackageCount, setRetroPackageCount] = useState<number>(
-    student.monthly_target_lessons || 12
+  // New Package / Retroactive Package Panel state
+  const [isNewPackagePanelOpen, setIsNewPackagePanelOpen] = useState<boolean>(false);
+  const [newPkgStartDate, setNewPkgStartDate] = useState<string>(() => getTashkentTodayStr());
+  const [newPkgCount, setNewPkgCount] = useState<number>(student.monthly_target_lessons || 12);
+  const [newPkgBalanceMode, setNewPkgBalanceMode] = useState<'reset' | 'add' | 'keep'>(() =>
+    (student.lessons_balance ?? 0) >= (student.monthly_target_lessons || 12) ? 'keep' : 'reset'
   );
   const [retroExcludedDates, setRetroExcludedDates] = useState<string[]>([]);
-  const [isApplyingRetro, setIsApplyingRetro] = useState<boolean>(false);
+  const [isApplyingNewPkg, setIsApplyingNewPkg] = useState<boolean>(false);
 
   // Inline reason edit modal state
   const [editingReasonLesson, setEditingReasonLesson] = useState<{
@@ -234,12 +227,26 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
   const tgUrl = getTelegramUrl(studentTelegram);
   const billingPeriod = useMemo(() => getStudentBillingPeriod(billingDay || '10'), [billingDay]);
 
-  // Keep lessonsBalance synced with parent student updates without an effect
+  // Keep lessonsBalance, billingDay, monthlyTarget synced with parent student updates without an effect
   const propBalance = student.lessons_balance ?? 0;
   const [prevPropBalance, setPrevPropBalance] = useState<number>(propBalance);
   if (propBalance !== prevPropBalance) {
     setPrevPropBalance(propBalance);
     setLessonsBalance(propBalance);
+  }
+
+  const propBillingDay = String(student.billing_day || '10');
+  const [prevPropBillingDay, setPrevPropBillingDay] = useState<string>(propBillingDay);
+  if (propBillingDay !== prevPropBillingDay) {
+    setPrevPropBillingDay(propBillingDay);
+    setBillingDay(propBillingDay);
+  }
+
+  const propMonthlyTarget = student.monthly_target_lessons || 12;
+  const [prevPropMonthlyTarget, setPrevPropMonthlyTarget] = useState<number>(propMonthlyTarget);
+  if (propMonthlyTarget !== prevPropMonthlyTarget) {
+    setPrevPropMonthlyTarget(propMonthlyTarget);
+    setMonthlyTarget(propMonthlyTarget);
   }
 
   // Count parent lessons for this student (only changes when lessons are added/deleted, not on status tap)
@@ -248,33 +255,31 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     [lessons, student.id]
   );
 
-  const horizonKey = `${student.id}_${daysHorizon}`;
-  const isLoadingHorizon = loadedHorizonKey !== horizonKey;
+  const lessonsKey = `${student.id}_${studentLessonsCount}_${lessonsRevision}`;
+  const isLoadingLessons = loadedLessonsKey !== lessonsKey;
 
-  // Load horizon lessons and unmarked past lessons (only on student/horizon change or add/delete)
+  // Load full student lesson history + auto-ensured future recurring slots
   useEffect(() => {
     let isMounted = true;
 
-    Promise.all([
-      getUnmarkedPastLessons(student.id),
-      getStudentHorizonLessons(student.id, daysHorizon),
-    ])
-      .then(([unmarked, horizon]) => {
+    ensureRecurringLessonsForStudent(student.id, 9)
+      .catch((e) => console.error('ensureRecurringLessonsForStudent error:', e))
+      .then(() => getStudentLessonsArchive(student.id))
+      .then((list) => {
         if (isMounted) {
-          setUnmarkedLessons(unmarked);
-          setHorizonLessons(horizon);
-          setLoadedHorizonKey(horizonKey);
+          setAllStudentLessons(sortLessonsAsc(list));
+          setLoadedLessonsKey(lessonsKey);
         }
       })
       .catch((err) => {
-        console.error('Failed to load student horizon lessons:', err);
-        if (isMounted) setLoadedHorizonKey(horizonKey);
+        console.error('Failed to load student lessons:', err);
+        if (isMounted) setLoadedLessonsKey(lessonsKey);
       });
 
     return () => {
       isMounted = false;
     };
-  }, [student.id, daysHorizon, horizonKey, studentLessonsCount, lessonsRevision]);
+  }, [student.id, lessonsKey]);
 
   // Load billing calculation
   useEffect(() => {
@@ -355,12 +360,9 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
   };
 
   const refreshAllLessons = async () => {
-    const [unmarked, horizon] = await Promise.all([
-      getUnmarkedPastLessons(student.id),
-      getStudentHorizonLessons(student.id, daysHorizon),
-    ]);
-    setUnmarkedLessons(unmarked);
-    setHorizonLessons(horizon);
+    await ensureRecurringLessonsForStudent(student.id, 9).catch(() => {});
+    const list = await getStudentLessonsArchive(student.id);
+    setAllStudentLessons(sortLessonsAsc(list));
   };
 
   const handleAdjustBalance = async (delta: number) => {
@@ -376,13 +378,20 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     }
   };
 
+  const unmarkedLessons = useMemo(
+    () =>
+      allStudentLessons.filter((l) => {
+        const d = getLessonDateStr(l);
+        return d <= todayStr && (l.status === 'planned' || (l.status as string) === 'scheduled');
+      }),
+    [allStudentLessons, todayStr]
+  );
+
   // 1-Tap Quick Status Switching with Idempotent Balance Updates
   const handleQuickLessonStatus = async (lessonId: string, targetStatus: LessonStatus) => {
     hapticImpact('medium');
 
-    const currentLesson =
-      horizonLessons.find((l) => l.id === lessonId) ||
-      unmarkedLessons.find((l) => l.id === lessonId);
+    const currentLesson = allStudentLessons.find((l) => l.id === lessonId);
 
     if (!currentLesson || currentLesson.status === targetStatus) return;
 
@@ -397,11 +406,8 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
 
     // Optimistic UI updates
     setLessonsBalance((prev) => prev + delta);
-    setHorizonLessons((prev) =>
+    setAllStudentLessons((prev) =>
       prev.map((l) => (l.id === lessonId ? { ...l, status: targetStatus } : l))
-    );
-    setUnmarkedLessons((prev) =>
-      prev.filter((l) => !(l.id === lessonId && targetStatus !== 'planned'))
     );
 
     try {
@@ -425,9 +431,8 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     const countToDeduct = unmarkedLessons.length;
     const lessonIds = unmarkedLessons.map((l) => l.id);
 
-    setUnmarkedLessons([]);
     setLessonsBalance((prev) => prev - countToDeduct);
-    setHorizonLessons((prev) =>
+    setAllStudentLessons((prev) =>
       prev.map((l) =>
         lessonIds.includes(l.id) ? { ...l, status: 'completed' as LessonStatus } : l
       )
@@ -441,9 +446,9 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     await Promise.all([refreshAllLessons(), Promise.resolve(onRefresh?.())]);
   };
 
-  // Retroactive package preview slots
+  // Retroactive package preview slots (only when newPkgStartDate < todayStr)
   const retroSlotsPreview = useMemo(() => {
-    if (!retroStartDate || retroStartDate > todayStr) return [];
+    if (!newPkgStartDate || newPkgStartDate >= todayStr) return [];
 
     const slots =
       recurringSlots.length > 0 ? recurringSlots : student.recurring_schedule || [];
@@ -456,7 +461,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     }));
 
     const items: Array<{ date: string; dow: number; timeStr: string }> = [];
-    let cur = retroStartDate;
+    let cur = newPkgStartDate;
 
     while (cur <= todayStr) {
       const d = new Date(`${cur}T12:00:00+05:00`);
@@ -477,7 +482,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     }
 
     return items;
-  }, [retroStartDate, recurringSlots, student.recurring_schedule, todayStr]);
+  }, [newPkgStartDate, recurringSlots, student.recurring_schedule, todayStr]);
 
   const toggleExcludeDate = (d: string) => {
     hapticImpact('light');
@@ -490,34 +495,70 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     0,
     retroSlotsPreview.filter((s) => !retroExcludedDates.includes(s.date)).length
   );
-  const retroRemainingBalance = retroPackageCount - retroCompletedCount;
+  const retroRemainingBalance = newPkgCount - retroCompletedCount;
 
-  const handleApplyRetroPackage = async () => {
-    setIsApplyingRetro(true);
+  const openNewPackagePanel = (preferredMode?: 'reset' | 'add' | 'keep') => {
+    hapticImpact('light');
+    const targetSize = monthlyTarget || 12;
+    setNewPkgStartDate(todayStr);
+    setNewPkgCount(targetSize);
+    setRetroExcludedDates([]);
+    if (preferredMode) {
+      setNewPkgBalanceMode(preferredMode);
+    } else if (lessonsBalance >= targetSize) {
+      setNewPkgBalanceMode('keep');
+    } else {
+      setNewPkgBalanceMode('reset');
+    }
+    setIsNewPackagePanelOpen(true);
+  };
+
+  const handleApplyNewPackage = async () => {
+    if (!newPkgStartDate || isApplyingNewPkg) return;
+    setIsApplyingNewPkg(true);
     hapticNotification('success');
+    const pkgSize = Math.max(1, Number(newPkgCount) || 12);
+
     try {
-      const { finalBalance } = await initializePackageFromPastDate(
-        student.id,
-        retroStartDate,
-        retroPackageCount,
-        retroExcludedDates
-      );
-      setLessonsBalance(finalBalance);
-      setBillingType('package');
-      setMonthlyTarget(retroPackageCount);
-      setBillingDay(String(extractBillingDayNumber(retroStartDate)));
-      setIsRetroWizardOpen(false);
-      showToast({ message: `Пакет применён · баланс ${finalBalance} ур.`, tone: 'success' });
+      if (newPkgStartDate < todayStr) {
+        const { finalBalance } = await initializePackageFromPastDate(
+          student.id,
+          newPkgStartDate,
+          pkgSize,
+          retroExcludedDates
+        );
+        setLessonsBalance(finalBalance);
+        setBillingType('package');
+        setMonthlyTarget(pkgSize);
+        setBillingDay(newPkgStartDate);
+        setIsNewPackagePanelOpen(false);
+        showToast({ message: `Пакет применён · баланс ${finalBalance} ур.`, tone: 'success' });
+      } else {
+        const { finalBalance, startDate } = await startNewPackageForStudent(student.id, {
+          startDate: newPkgStartDate,
+          packageSize: pkgSize,
+          balanceMode: newPkgBalanceMode,
+        });
+        setLessonsBalance(finalBalance);
+        setBillingType('package');
+        setMonthlyTarget(pkgSize);
+        setBillingDay(startDate);
+        setIsNewPackagePanelOpen(false);
+        showToast({
+          message: `Новый пакет ${pkgSize} ур. с ${formatShortRuDate(startDate)} · баланс ${finalBalance} ур.`,
+          tone: 'success',
+        });
+      }
       await Promise.all([refreshAllLessons(), Promise.resolve(onRefresh?.())]);
       calculateStudentBilling(student.id).then(setBillingCalc).catch(() => {});
     } catch (e: unknown) {
       showToast({
         message:
-          e instanceof Error && e.message ? e.message : 'Ошибка применения пакета с прошлой даты',
+          e instanceof Error && e.message ? e.message : 'Ошибка запуска нового пакета',
         tone: 'error',
       });
     } finally {
-      setIsApplyingRetro(false);
+      setIsApplyingNewPkg(false);
     }
   };
 
@@ -557,8 +598,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     try {
       const report = await generateStudentReport(student.id);
       if (report?.parentForwardText && navigator.clipboard) {
-        const withBalance = `${report.parentForwardText}\n\n⚖️ Текущий баланс уроков: ${lessonsBalance} ур.`;
-        await navigator.clipboard.writeText(withBalance);
+        await navigator.clipboard.writeText(report.parentForwardText);
         setCopyState('report');
         hapticNotification('success');
         showToast({ message: 'Отчёт для родителей скопирован', tone: 'success' });
@@ -572,51 +612,178 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     }
   };
 
-  // Filter lessons for timeline
-  const timelineLessons = useMemo(() => {
-    return horizonLessons.filter((l) => {
-      const lDate = l.date.substring(0, 10);
-      if (directionFilter === 'past') return lDate < todayStr;
-      if (directionFilter === 'upcoming') return lDate >= todayStr;
-      return true;
-    });
-  }, [horizonLessons, directionFilter, todayStr]);
+  // Active cycle / package summary (single source of truth)
+  const cycleSummary = useMemo(
+    () =>
+      computeStudentCycleSummary(
+        {
+          id: student.id,
+          billing_type: billingType,
+          billing_day: billingDay,
+          monthly_target_lessons: monthlyTarget,
+          lessons_balance: lessonsBalance,
+          recurring_schedule: recurringSlots,
+        },
+        allStudentLessons,
+        todayStr
+      ),
+    [
+      student.id,
+      billingType,
+      billingDay,
+      monthlyTarget,
+      lessonsBalance,
+      recurringSlots,
+      allStudentLessons,
+      todayStr,
+    ]
+  );
 
-  // Horizon summary counts
-  const horizonStats = useMemo(() => {
+  const archivePeriods = useMemo(
+    () =>
+      buildArchivePeriods(
+        {
+          id: student.id,
+          billing_type: billingType,
+          billing_day: billingDay,
+          monthly_target_lessons: monthlyTarget,
+          lessons_balance: lessonsBalance,
+          recurring_schedule: recurringSlots,
+        },
+        allStudentLessons,
+        studentPayments,
+        cycleSummary.startDate,
+        todayStr
+      ),
+    [
+      student.id,
+      billingType,
+      billingDay,
+      monthlyTarget,
+      lessonsBalance,
+      recurringSlots,
+      allStudentLessons,
+      studentPayments,
+      cycleSummary.startDate,
+      todayStr,
+    ]
+  );
+
+  const activeArchivePeriod = useMemo(
+    () => archivePeriods.find((p) => p.id === selectedArchiveId) || archivePeriods[0] || null,
+    [archivePeriods, selectedArchiveId]
+  );
+
+  const handleCopyArchiveReport = async () => {
+    if (!activeArchivePeriod) return;
+    hapticImpact('light');
+    setIsCopyingArchiveReport(true);
+    try {
+      const report = await generateStudentReport(student.id, {
+        startDate: activeArchivePeriod.startDate,
+        endDate: activeArchivePeriod.endDate,
+        label: activeArchivePeriod.label,
+      });
+      if (report?.parentForwardText && navigator.clipboard) {
+        await navigator.clipboard.writeText(report.parentForwardText);
+        setCopyState('archive_report');
+        hapticNotification('success');
+        showToast({ message: 'Отчёт за выбранный период скопирован', tone: 'success' });
+        setTimeout(() => setCopyState(null), 2000);
+      }
+    } catch (e) {
+      console.error('Copy archive report failed:', e);
+      showToast({ message: 'Не удалось скопировать отчёт', tone: 'error' });
+    } finally {
+      setIsCopyingArchiveReport(false);
+    }
+  };
+
+  // Current cycle partitioned lists
+  const todayCycleLessons = useMemo(
+    () => cycleSummary.cycleLessons.filter((l) => getLessonDateStr(l) === todayStr),
+    [cycleSummary.cycleLessons, todayStr]
+  );
+
+  const remainingPlannedInCycle = useMemo(
+    () =>
+      cycleSummary.cycleLessons.filter((l) => {
+        const d = getLessonDateStr(l);
+        return d > todayStr && classifyLessonKind(l) === 'planned';
+      }),
+    [cycleSummary.cycleLessons, todayStr]
+  );
+
+  const pastCycleLessonsDesc = useMemo(
+    () =>
+      cycleSummary.cycleLessons
+        .filter((l) => getLessonDateStr(l) < todayStr)
+        .slice()
+        .reverse(),
+    [cycleSummary.cycleLessons, todayStr]
+  );
+
+  const filteredCycleLessons = useMemo(() => {
+    if (cycleSubFilter === 'all') return cycleSummary.cycleLessons;
+    if (cycleSubFilter === 'completed') {
+      return cycleSummary.cycleLessons
+        .filter((l) => classifyLessonKind(l) === 'completed')
+        .slice()
+        .reverse();
+    }
+    if (cycleSubFilter === 'missed') {
+      return cycleSummary.cycleLessons
+        .filter((l) => {
+          const kind = classifyLessonKind(l);
+          return kind === 'excused' || kind === 'penalty';
+        })
+        .slice()
+        .reverse();
+    }
+    return cycleSummary.cycleLessons.filter((l) => classifyLessonKind(l) === 'planned');
+  }, [cycleSummary.cycleLessons, cycleSubFilter]);
+
+  // Future lessons for "Будущие" tab
+  const upcomingWindowLessons = useMemo(() => {
+    const endHorizonStr = addDaysStr(todayStr, upcomingHorizonDays);
+    return allStudentLessons.filter((l) => {
+      const d = getLessonDateStr(l);
+      return d >= todayStr && d <= endHorizonStr;
+    });
+  }, [allStudentLessons, todayStr, upcomingHorizonDays]);
+
+  const upcomingClosingCount = useMemo(() => {
+    if (billingType !== 'package') return 0;
+    return upcomingWindowLessons.filter((l) => Boolean(cycleSummary.plannedSlotNumbers[l.id]))
+      .length;
+  }, [billingType, upcomingWindowLessons, cycleSummary.plannedSlotNumbers]);
+
+  // Archive period lessons & stats
+  const archivePeriodLessons = useMemo(() => {
+    if (!activeArchivePeriod) return [];
+    return allStudentLessons
+      .filter((l) => {
+        const d = getLessonDateStr(l);
+        return d >= activeArchivePeriod.startDate && d <= activeArchivePeriod.endDate;
+      })
+      .slice()
+      .reverse();
+  }, [allStudentLessons, activeArchivePeriod]);
+
+  const archivePeriodStats = useMemo(() => {
     let completed = 0;
     let penalty = 0;
     let excused = 0;
     let planned = 0;
-
-    timelineLessons.forEach((l) => {
-      if (l.status === 'completed') completed++;
-      else if (l.status === 'missed_penalty') penalty++;
-      else if (l.status === 'missed_excused') excused++;
-      else if (l.status === 'missed') {
-        if (l.needs_makeup) excused++;
-        else penalty++;
-      } else {
-        planned++;
-      }
-    });
-
+    for (const l of archivePeriodLessons) {
+      const k = classifyLessonKind(l);
+      if (k === 'completed') completed++;
+      else if (k === 'penalty') penalty++;
+      else if (k === 'excused') excused++;
+      else planned++;
+    }
     return { completed, penalty, excused, planned };
-  }, [timelineLessons]);
-
-  // Group lessons into Past, Today, and Upcoming
-  const pastTimelineLessons = useMemo(
-    () => timelineLessons.filter((l) => l.date.substring(0, 10) < todayStr),
-    [timelineLessons, todayStr]
-  );
-  const todayTimelineLessons = useMemo(
-    () => timelineLessons.filter((l) => l.date.substring(0, 10) === todayStr),
-    [timelineLessons, todayStr]
-  );
-  const upcomingTimelineLessons = useMemo(
-    () => timelineLessons.filter((l) => l.date.substring(0, 10) > todayStr),
-    [timelineLessons, todayStr]
-  );
+  }, [archivePeriodLessons]);
 
   const handleSaveAllSettings = async () => {
     if (isSaving) return;
@@ -687,7 +854,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     if (onUpdateLessonMissReason) {
       await onUpdateLessonMissReason(editingReasonLesson.id, reasonInput.trim());
     }
-    setHorizonLessons((prev) =>
+    setAllStudentLessons((prev) =>
       prev.map((l) =>
         l.id === editingReasonLesson.id ? { ...l, miss_reason: reasonInput.trim() } : l
       )
@@ -696,7 +863,10 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
   };
 
   // Render a single lesson card in the student's timeline
-  const renderLessonCard = (l: Lesson) => {
+  const renderLessonCard = (
+    l: Lesson,
+    options?: { slotLabel?: PlannedSlotLabel; isNextPackage?: boolean }
+  ) => {
     const isCompleted = l.status === 'completed';
     const isPenalty =
       l.status === 'missed_penalty' || (l.status === 'missed' && !l.needs_makeup);
@@ -705,6 +875,8 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
     const isPlanned = !isCompleted && !isPenalty && !isExcused;
     const dateParsed = parseISO(l.date);
     const hasCustomNote = isRealNote(l.notes);
+    const slotLabel = options?.slotLabel;
+    const isNextPackage = options?.isNextPackage;
 
     return (
       <div
@@ -755,7 +927,24 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                 0 ур.
               </span>
             )}
-            {isPlanned && (
+            {isPlanned && slotLabel && (
+              <span
+                className={`text-[10px] font-semibold px-2 py-0.5 rounded-lg tabular-nums border ${
+                  slotLabel.isFinal
+                    ? 'text-indigo-700 bg-indigo-50 border-indigo-200'
+                    : 'text-blue-700 bg-blue-50 border-blue-200/70'
+                }`}
+              >
+                {slotLabel.index}/{slotLabel.total}
+                {slotLabel.isFinal ? ' · финал' : ''}
+              </span>
+            )}
+            {isPlanned && !slotLabel && isNextPackage && (
+              <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-lg">
+                След. пакет
+              </span>
+            )}
+            {isPlanned && !slotLabel && !isNextPackage && (
               <span className="text-[10px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-lg">
                 План
               </span>
@@ -882,7 +1071,9 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
           </div>
           <span className="text-[11px] text-slate-500 font-medium block tabular-nums">
             {lessonRate.toLocaleString('ru-RU')} сум/ур. •{' '}
-            {billingType === 'package' ? 'Пакет' : `Оплата ${billingDay}`}
+            {billingType === 'package'
+              ? `Пакет · с ${formatShortRuDate(cycleSummary.startDate)}`
+              : `Оплата ${extractBillingDayNumber(billingDay)}-го`}
           </span>
         </div>
 
@@ -1042,35 +1233,115 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                 </div>
               </div>
 
-              {/* Row 2: Compact Billing Calculation Strip */}
-              {billingCalc && (
-                <div className="px-3 py-2 rounded-xl bg-slate-50 border border-slate-200/70 text-xs flex items-center justify-between gap-2 tabular-nums">
-                  {billingCalc.billingType === 'date_to_date' ? (
+              {/* Row 2: Active Cycle / Package Summary Card */}
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/70 space-y-2.5 tabular-nums">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  {billingType === 'package' ? (
                     <>
-                      <span className="text-slate-600 font-medium truncate">
-                        Цикл {billingPeriod.startShort} – {billingPeriod.endShort} (
-                        {billingCalc.scheduledLessonsCount} ур.)
+                      <span className="text-slate-700 font-semibold truncate">
+                        📦 Пакет · с {formatShortRuDate(cycleSummary.startDate)}
                       </span>
-                      <span className="text-emerald-700 font-semibold shrink-0">
-                        К оплате: {billingCalc.netAmount?.toLocaleString('ru-RU')} сум
-                      </span>
+                      {cycleSummary.isExhausted ? (
+                        <span
+                          className={`font-semibold shrink-0 ${
+                            cycleSummary.debtLessons > 0 ? 'text-rose-700' : 'text-amber-700'
+                          }`}
+                        >
+                          {cycleSummary.debtLessons > 0
+                            ? `Долг ${cycleSummary.debtLessons} ур.`
+                            : 'Завершён'}
+                        </span>
+                      ) : cycleSummary.estimatedEndDate ? (
+                        <span className="text-indigo-700 font-semibold shrink-0">
+                          до ~{formatShortRuDate(cycleSummary.estimatedEndDate)}
+                        </span>
+                      ) : (
+                        <span className="text-slate-500 font-medium shrink-0">
+                          Ост. {cycleSummary.remainingLessons} ур.
+                        </span>
+                      )}
                     </>
                   ) : (
                     <>
-                      <span className="text-slate-600 font-medium truncate">
-                        Пакет {billingCalc.packageSize} ур. (с {billingPeriod.startShort} по{' '}
-                        {billingPeriod.endShort}: {student.conducted_this_month || 0}/
-                        {billingCalc.packageSize})
+                      <span className="text-slate-700 font-semibold truncate">
+                        📅 Цикл {billingPeriod.startShort} – {billingPeriod.endShort}
                       </span>
-                      <span className="text-emerald-700 font-semibold shrink-0">
-                        {billingCalc.packageAmount?.toLocaleString('ru-RU')} сум
-                      </span>
+                      {billingCalc ? (
+                        <span className="text-emerald-700 font-semibold shrink-0">
+                          К оплате: {billingCalc.netAmount?.toLocaleString('ru-RU')} сум
+                        </span>
+                      ) : (
+                        <span className="text-slate-500 font-medium shrink-0">
+                          {cycleSummary.totalLessons} ур.
+                        </span>
+                      )}
                     </>
                   )}
                 </div>
-              )}
 
-              {/* Row 3: Unified Parent Copy & Retro Package Bar */}
+                {/* Progress Bar */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-[11px] font-semibold">
+                    <span className="text-slate-700">
+                      {cycleSummary.usedLessons} из {cycleSummary.totalLessons} ур. ({cycleSummary.progressPct}%)
+                    </span>
+                    {cycleSummary.prepaidExtraLessons > 0 && (
+                      <span className="text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-1.5 py-0.5 rounded-md text-[10px]">
+                        +{cycleSummary.prepaidExtraLessons} след. пакет
+                      </span>
+                    )}
+                  </div>
+                  <div className="w-full h-1.5 bg-slate-200/80 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        billingType === 'package' && cycleSummary.isExhausted
+                          ? 'bg-rose-500'
+                          : billingType === 'package' && cycleSummary.remainingLessons <= 2
+                          ? 'bg-amber-500'
+                          : 'bg-blue-600'
+                      }`}
+                      style={{ width: `${cycleSummary.progressPct}%` }}
+                    />
+                  </div>
+                </div>
+
+                {/* 4 Cycle Stat Pills */}
+                <div className="grid grid-cols-4 gap-1.5 text-[11px] font-semibold">
+                  <div className="px-2 py-1 rounded-lg bg-white border border-slate-200/70 text-emerald-700 text-center">
+                    ✅ {cycleSummary.completedLessons}
+                    <span className="block text-[9px] text-slate-400 font-medium">Был</span>
+                  </div>
+                  <div className="px-2 py-1 rounded-lg bg-white border border-slate-200/70 text-orange-700 text-center">
+                    🔥 {cycleSummary.penaltyLessons}
+                    <span className="block text-[9px] text-slate-400 font-medium">Сгорел</span>
+                  </div>
+                  <div className="px-2 py-1 rounded-lg bg-white border border-slate-200/70 text-rose-700 text-center">
+                    🛑 {cycleSummary.excusedLessons}
+                    <span className="block text-[9px] text-slate-400 font-medium">Отмены</span>
+                  </div>
+                  <div className="px-2 py-1 rounded-lg bg-white border border-slate-200/70 text-blue-700 text-center">
+                    ⏳ {cycleSummary.remainingLessons}
+                    <span className="block text-[9px] text-slate-400 font-medium">
+                      {billingType === 'package' ? 'Осталось' : 'План'}
+                    </span>
+                  </div>
+                </div>
+
+                {billingType === 'package' &&
+                  cycleSummary.isExhausted &&
+                  cycleSummary.prepaidExtraLessons > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => openNewPackagePanel('keep')}
+                      className="w-full py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold flex items-center justify-center gap-1.5 shadow-2xs active:scale-[0.99] transition-all"
+                    >
+                      <Package className="w-3.5 h-3.5" aria-hidden="true" />
+                      <span>Начать новый пакет ({lessonsBalance} ур. на балансе)</span>
+                    </button>
+                  )}
+              </div>
+
+              {/* Row 3: Unified Parent Copy & New Package Bar */}
               <div className="grid grid-cols-3 gap-1.5 pt-0.5">
                 <button
                   type="button"
@@ -1116,35 +1387,39 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    hapticImpact('light');
-                    setIsRetroWizardOpen((prev) => !prev);
+                    if (isNewPackagePanelOpen) {
+                      hapticImpact('light');
+                      setIsNewPackagePanelOpen(false);
+                    } else {
+                      openNewPackagePanel();
+                    }
                   }}
                   className={`py-2 px-2 rounded-xl text-[11px] font-bold border flex items-center justify-center gap-1 active:scale-95 transition-all ${
-                    isRetroWizardOpen
+                    isNewPackagePanelOpen
                       ? 'bg-indigo-600 text-white border-indigo-600'
                       : 'bg-indigo-50/80 hover:bg-indigo-100 text-indigo-700 border-indigo-200/80'
                   }`}
-                  title="Открыть пакет задним числом с прошлой даты"
+                  title="Запустить новый пакет с сегодняшней или прошлой даты"
                 >
                   <Package className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-                  <span>Пакет с даты</span>
+                  <span>Новый пакет</span>
                 </button>
               </div>
             </div>
 
-            {/* Retroactive Package Wizard Inline Panel */}
-            {isRetroWizardOpen && (
+            {/* New Package / Retroactive Package Inline Panel */}
+            {isNewPackagePanelOpen && (
               <div className="bg-white rounded-2xl p-4 shadow-sm border border-indigo-200 space-y-3 animate-in fade-in-50 duration-150">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <Sparkles className="w-4 h-4 text-indigo-600" />
                     <h4 className="text-xs font-semibold text-slate-900">
-                      Открыть пакет с прошлой даты
+                      Новый пакет уроков
                     </h4>
                   </div>
                   <button
                     type="button"
-                    onClick={() => setIsRetroWizardOpen(false)}
+                    onClick={() => setIsNewPackagePanelOpen(false)}
                     className="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-slate-400"
                   >
                     <X className="w-3.5 h-3.5" />
@@ -1152,8 +1427,9 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                 </div>
 
                 <p className="text-[11px] text-slate-500 leading-snug">
-                  Заполняет уроки по расписанию с даты старта до сегодняшнего дня, отмечает
-                  проведённые и вычисляет точный остаток баланса.
+                  {newPkgStartDate < todayStr
+                    ? 'Прошлая дата: заполнит уроки по расписанию с выбранного дня, отметит проведённые и пересчитает остаток.'
+                    : 'Текущая или будущая дата: запустит отсчёт нового пакета и обновит дату старта.'}
                 </p>
 
                 <div className="grid grid-cols-2 gap-2">
@@ -1163,9 +1439,8 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                     </label>
                     <input
                       type="date"
-                      value={retroStartDate}
-                      max={todayStr}
-                      onChange={(e) => setRetroStartDate(e.target.value)}
+                      value={newPkgStartDate}
+                      onChange={(e) => setNewPkgStartDate(e.target.value)}
                       className="w-full text-xs font-bold text-slate-900 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-200 focus:outline-hidden"
                     />
                   </div>
@@ -1176,83 +1451,149 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                     </label>
                     <input
                       type="number"
-                      value={retroPackageCount}
+                      value={newPkgCount}
                       min={1}
                       max={100}
-                      onChange={(e) => setRetroPackageCount(Number(e.target.value))}
+                      onChange={(e) => setNewPkgCount(Number(e.target.value))}
                       className="w-full text-xs font-semibold tabular-nums text-slate-900 bg-slate-50 px-2.5 py-1.5 rounded-xl border border-slate-200 focus:outline-hidden"
                     />
                   </div>
                 </div>
 
-                {/* Slots Preview & Exclude toggles */}
-                <div className="space-y-1.5 pt-1">
-                  <div className="flex items-center justify-between">
+                {newPkgStartDate < todayStr ? (
+                  <>
+                    {/* Retroactive Slots Preview & Exclude toggles */}
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase block">
+                          Уроки в периоде ({retroSlotsPreview.length})
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          Нажмите, чтобы отметить пропуск
+                        </span>
+                      </div>
+
+                      {retroSlotsPreview.length === 0 ? (
+                        <div className="text-center py-4 text-xs text-slate-400 bg-slate-50 rounded-2xl">
+                          В выбранном диапазоне нет уроков по регулярному расписанию
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-1.5 bg-slate-50 rounded-2xl border border-slate-200/60">
+                          {retroSlotsPreview.map((slot, idx) => {
+                            const isExcluded = retroExcludedDates.includes(slot.date);
+                            const d = parseISO(`${slot.date}T12:00:00+05:00`);
+                            return (
+                              <button
+                                key={idx}
+                                type="button"
+                                onClick={() => toggleExcludeDate(slot.date)}
+                                className={`px-2 py-1 rounded-xl text-[11px] font-bold border transition-all active:scale-95 ${
+                                  isExcluded
+                                    ? 'bg-rose-50 border-rose-200 text-rose-700 line-through opacity-80'
+                                    : 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                                }`}
+                              >
+                                <span>
+                                  {format(d, 'd MMM, EEE', { locale: ru })}:{' '}
+                                  {isExcluded ? '🛑 Пропуск' : '✅ Был'}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Calculation Summary Line */}
+                    <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl text-xs flex items-center justify-between tabular-nums">
+                      <span className="text-slate-700 font-semibold">
+                        Проведено: <b>{retroCompletedCount} ур.</b>
+                      </span>
+                      <span className="font-semibold text-indigo-800">
+                        Остаток на сегодня: {retroRemainingBalance} ур.
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="space-y-1.5 pt-1">
                     <span className="text-[10px] font-bold text-slate-400 uppercase block">
-                      Уроки в периоде ({retroSlotsPreview.length})
+                      Что сделать со старым балансом ({lessonsBalance} ур.)?
                     </span>
-                    <span className="text-[10px] text-slate-400">
-                      Нажмите, чтобы отметить пропуск
-                    </span>
+                    <div className="space-y-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          hapticImpact('light');
+                          setNewPkgBalanceMode('reset');
+                        }}
+                        className={`w-full text-left px-3 py-2 rounded-xl border text-xs font-semibold transition-all tabular-nums ${
+                          newPkgBalanceMode === 'reset'
+                            ? 'bg-indigo-50 border-indigo-400 text-indigo-900'
+                            : 'bg-slate-50 border-slate-200 text-slate-700'
+                        }`}
+                      >
+                        Начать с нуля (= {Math.max(1, Number(newPkgCount) || 12)} ур.)
+                      </button>
+
+                      {lessonsBalance !== 0 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            hapticImpact('light');
+                            setNewPkgBalanceMode('add');
+                          }}
+                          className={`w-full text-left px-3 py-2 rounded-xl border text-xs font-semibold transition-all tabular-nums ${
+                            newPkgBalanceMode === 'add'
+                              ? 'bg-indigo-50 border-indigo-400 text-indigo-900'
+                              : 'bg-slate-50 border-slate-200 text-slate-700'
+                          }`}
+                        >
+                          Добавить к остатку ({lessonsBalance} + {Math.max(1, Number(newPkgCount) || 12)} ={' '}
+                          {lessonsBalance + Math.max(1, Number(newPkgCount) || 12)} ур.)
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          hapticImpact('light');
+                          setNewPkgBalanceMode('keep');
+                        }}
+                        className={`w-full text-left px-3 py-2 rounded-xl border text-xs font-semibold transition-all tabular-nums ${
+                          newPkgBalanceMode === 'keep'
+                            ? 'bg-indigo-50 border-indigo-400 text-indigo-900'
+                            : 'bg-slate-50 border-slate-200 text-slate-700'
+                        }`}
+                      >
+                        Только дата старта (баланс {lessonsBalance} ур. не менять)
+                      </button>
+                    </div>
                   </div>
-
-                  {retroSlotsPreview.length === 0 ? (
-                    <div className="text-center py-4 text-xs text-slate-400 bg-slate-50 rounded-2xl">
-                      В выбранном диапазоне нет уроков по регулярному расписанию
-                    </div>
-                  ) : (
-                    <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-1.5 bg-slate-50 rounded-2xl border border-slate-200/60">
-                      {retroSlotsPreview.map((slot, idx) => {
-                        const isExcluded = retroExcludedDates.includes(slot.date);
-                        const d = parseISO(`${slot.date}T12:00:00+05:00`);
-                        return (
-                          <button
-                            key={idx}
-                            type="button"
-                            onClick={() => toggleExcludeDate(slot.date)}
-                            className={`px-2 py-1 rounded-xl text-[11px] font-bold border transition-all active:scale-95 ${
-                              isExcluded
-                                ? 'bg-rose-50 border-rose-200 text-rose-700 line-through opacity-80'
-                                : 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                            }`}
-                          >
-                            <span>
-                              {format(d, 'd MMM, EEE', { locale: ru })}:{' '}
-                              {isExcluded ? '🛑 Пропуск' : '✅ Был'}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* Calculation Summary Line */}
-                <div className="p-3 bg-indigo-50/70 border border-indigo-100 rounded-xl text-xs flex items-center justify-between tabular-nums">
-                  <span className="text-slate-700 font-semibold">
-                    Проведено: <b>{retroCompletedCount} ур.</b>
-                  </span>
-                  <span className="font-semibold text-indigo-800">
-                    Остаток на сегодня: {retroRemainingBalance} ур.
-                  </span>
-                </div>
+                )}
 
                 {/* Submit Action */}
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    onClick={() => setIsRetroWizardOpen(false)}
+                    onClick={() => setIsNewPackagePanelOpen(false)}
                     className="flex-1 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold"
                   >
                     Отмена
                   </button>
                   <button
                     type="button"
-                    disabled={isApplyingRetro || retroSlotsPreview.length === 0}
-                    onClick={handleApplyRetroPackage}
+                    disabled={
+                      isApplyingNewPkg ||
+                      (newPkgStartDate < todayStr && retroSlotsPreview.length === 0)
+                    }
+                    onClick={handleApplyNewPackage}
                     className="flex-2 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold shadow-sm active:scale-95 transition-all"
                   >
-                    {isApplyingRetro ? 'Применение...' : 'Применить и пересчитать'}
+                    {isApplyingNewPkg
+                      ? 'Применение...'
+                      : newPkgStartDate < todayStr
+                      ? 'Применить и пересчитать'
+                      : 'Запустить пакет'}
                   </button>
                 </div>
               </div>
@@ -1461,16 +1802,10 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
               </div>
             )}
 
-            {/* COMPACT SCHEDULE HORIZON FILTER BAR */}
+            {/* SIMPLIFIED 3-TAB SCHEDULE & ARCHIVE SECTION */}
             <div className="bg-white rounded-2xl p-3.5 shadow-2xs border border-slate-200/80 space-y-2.5">
               <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-semibold text-slate-800">Расписание ученика</span>
-                  <span className="text-[11px] font-medium text-slate-400 tabular-nums">
-                    • ✅ {horizonStats.completed} · 🔥 {horizonStats.penalty} · 🛑{' '}
-                    {horizonStats.excused} · 📅 {horizonStats.planned}
-                  </span>
-                </div>
+                <span className="text-xs font-semibold text-slate-800">Расписание ученика</span>
                 {onAddLessonForStudent && (
                   <button
                     type="button"
@@ -1486,150 +1821,284 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                 )}
               </div>
 
-              {/* Combined Horizon + Direction Bar */}
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex bg-slate-100 p-0.5 rounded-xl gap-0.5">
-                  {([7, 14, 30, 60] as const).map((h) => (
-                    <button
-                      key={h}
-                      type="button"
-                      onClick={() => {
-                        hapticImpact('light');
-                        setDaysHorizon(h);
-                      }}
-                      className={`px-2 py-1 text-[11px] font-bold rounded-lg transition-all ${
-                        daysHorizon === h
-                          ? 'bg-white text-slate-900 shadow-2xs'
-                          : 'text-slate-500 hover:text-slate-900'
-                      }`}
-                    >
-                      {h}д
-                    </button>
-                  ))}
-                </div>
+              {/* 3 Main Views: Current Cycle | Upcoming | Archive */}
+              <div className="flex bg-slate-100 p-0.5 rounded-xl gap-0.5">
+                {(
+                  [
+                    {
+                      id: 'current',
+                      label: billingType === 'package' ? 'Текущий пакет' : 'Текущий период',
+                    },
+                    { id: 'upcoming', label: 'Будущие' },
+                    { id: 'archive', label: 'Архив' },
+                  ] as const
+                ).map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => {
+                      hapticImpact('light');
+                      setScheduleView(tab.id);
+                    }}
+                    className={`flex-1 py-1.5 text-[11px] font-bold rounded-lg transition-all ${
+                      scheduleView === tab.id
+                        ? 'bg-white text-slate-900 shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
 
-                <div className="flex bg-slate-100 p-0.5 rounded-xl gap-0.5 flex-1">
+              {/* Sub-filters for Current Cycle */}
+              {scheduleView === 'current' && (
+                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-0.5 tabular-nums">
                   {(
                     [
-                      { id: 'all', label: 'Все' },
-                      { id: 'upcoming', label: 'Будущие' },
-                      { id: 'past', label: 'Прошлые' },
+                      { id: 'all', label: `Все (${cycleSummary.cycleLessons.length})` },
+                      { id: 'completed', label: `✅ Был (${cycleSummary.completedLessons})` },
+                      {
+                        id: 'missed',
+                        label: `🛑 Отмены и пропуски (${cycleSummary.excusedLessons + cycleSummary.penaltyLessons})`,
+                      },
+                      {
+                        id: 'remaining',
+                        label: `⏳ Осталось (${cycleSummary.cycleLessons.filter((l) => classifyLessonKind(l) === 'planned').length})`,
+                      },
                     ] as const
-                  ).map((dir) => (
+                  ).map((chip) => (
                     <button
-                      key={dir.id}
+                      key={chip.id}
                       type="button"
                       onClick={() => {
                         hapticImpact('light');
-                        setDirectionFilter(dir.id);
+                        setCycleSubFilter(chip.id);
                       }}
-                      className={`flex-1 py-1 text-[11px] font-bold rounded-lg transition-all ${
-                        directionFilter === dir.id
-                          ? 'bg-white text-slate-900 shadow-2xs'
-                          : 'text-slate-500'
+                      className={`shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all active:scale-95 ${
+                        cycleSubFilter === chip.id
+                          ? 'bg-slate-900 text-white border-slate-900'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
                       }`}
                     >
-                      {dir.label}
+                      {chip.label}
                     </button>
                   ))}
                 </div>
-              </div>
-            </div>
+              )}
 
-            {/* Interactive Timeline of Lessons (Today & Upcoming first, Past collapsible in 'all' mode!) */}
-            <div className="space-y-3">
-              {isLoadingHorizon ? (
-                <div className="bg-white rounded-2xl p-8 text-center text-slate-400 text-xs font-medium border border-slate-200/80">
-                  Загрузка расписания...
+              {/* Sub-controls for Upcoming */}
+              {scheduleView === 'upcoming' && (
+                <div className="flex items-center justify-between gap-2 pt-0.5 text-[11px] tabular-nums">
+                  <span className="text-slate-600 font-medium">
+                    За {upcomingHorizonDays} дн: <b>{upcomingWindowLessons.length} ур.</b>
+                    {billingType === 'package' && upcomingClosingCount > 0
+                      ? ` (${upcomingClosingCount} закрывают пакет)`
+                      : ''}
+                  </span>
+                  <div className="flex bg-slate-100 p-0.5 rounded-lg gap-0.5 shrink-0">
+                    {([30, 60] as const).map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => {
+                          hapticImpact('light');
+                          setUpcomingHorizonDays(d);
+                        }}
+                        className={`px-2 py-0.5 rounded-md font-bold transition-all ${
+                          upcomingHorizonDays === d
+                            ? 'bg-white text-slate-900 shadow-2xs'
+                            : 'text-slate-500'
+                        }`}
+                      >
+                        {d}д
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              ) : timelineLessons.length === 0 ? (
-                <div className="bg-white rounded-2xl p-8 text-center text-slate-400 text-xs font-medium border border-slate-200/80">
-                  В выбранном периоде ({daysHorizon} дн) нет уроков
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {/* PAST LESSONS (Collapsible in 'all' mode so Today is immediately visible!) */}
-                  {directionFilter !== 'upcoming' && pastTimelineLessons.length > 0 && (
-                    <div className="space-y-2">
-                      {directionFilter === 'all' ? (
+              )}
+
+              {/* Sub-controls for Archive */}
+              {scheduleView === 'archive' && archivePeriods.length > 0 && (
+                <div className="space-y-2 pt-0.5">
+                  <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+                    {archivePeriods.map((ap) => {
+                      const isSelected = activeArchivePeriod?.id === ap.id;
+                      return (
                         <button
+                          key={ap.id}
                           type="button"
                           onClick={() => {
                             hapticImpact('light');
-                            setShowPastInAllView((prev) => !prev);
+                            setSelectedArchiveId(ap.id);
                           }}
-                          className="w-full py-2 px-3 rounded-xl bg-white border border-slate-200/80 text-xs font-bold text-slate-600 flex items-center justify-between shadow-2xs active:scale-[0.99]"
+                          className={`shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-semibold border transition-all active:scale-95 tabular-nums ${
+                            isSelected
+                              ? 'bg-slate-900 text-white border-slate-900'
+                              : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                          }`}
                         >
-                          <span>
-                            Прошедшие занятия за {daysHorizon} дн ({pastTimelineLessons.length})
-                          </span>
-                          <span className="text-blue-600 flex items-center gap-1 text-[11px]">
-                            <span>{showPastInAllView ? 'Скрыть' : 'Показать'}</span>
-                            {showPastInAllView ? (
-                              <ChevronUp className="w-3.5 h-3.5" />
-                            ) : (
-                              <ChevronDown className="w-3.5 h-3.5" />
-                            )}
-                          </span>
+                          {ap.label}
                         </button>
-                      ) : (
+                      );
+                    })}
+                  </div>
+
+                  {activeArchivePeriod && (
+                    <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-50 border border-slate-200/70 text-[11px] tabular-nums">
+                      <div className="flex items-center gap-2 font-semibold flex-wrap">
+                        <span className="text-emerald-700">✅ {archivePeriodStats.completed}</span>
+                        <span className="text-orange-700">🔥 {archivePeriodStats.penalty}</span>
+                        <span className="text-rose-700">🛑 {archivePeriodStats.excused}</span>
+                        <span className="text-slate-500">Всего: {archivePeriodLessons.length}</span>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={isCopyingArchiveReport}
+                        onClick={handleCopyArchiveReport}
+                        className={`px-2.5 py-1 rounded-lg font-bold border flex items-center gap-1 shrink-0 active:scale-95 transition-all ${
+                          copyState === 'archive_report'
+                            ? 'bg-emerald-600 text-white border-emerald-600'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {copyState === 'archive_report' ? (
+                          <Check className="w-3 h-3" />
+                        ) : (
+                          <FileText className="w-3 h-3" />
+                        )}
+                        <span>
+                          {copyState === 'archive_report'
+                            ? 'Скопирован!'
+                            : isCopyingArchiveReport
+                            ? 'Готовлю...'
+                            : 'Отчёт'}
+                        </span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Interactive Timeline Content */}
+            <div className="space-y-3">
+              {isLoadingLessons ? (
+                <div className="bg-white rounded-2xl p-8 text-center text-slate-400 text-xs font-medium border border-slate-200/80">
+                  Загрузка расписания...
+                </div>
+              ) : scheduleView === 'current' ? (
+                cycleSummary.cycleLessons.length === 0 ? (
+                  <div className="bg-white rounded-2xl p-8 text-center text-slate-400 text-xs font-medium border border-slate-200/80">
+                    В текущем {billingType === 'package' ? 'пакете' : 'периоде'} пока нет уроков
+                  </div>
+                ) : cycleSubFilter === 'all' ? (
+                  <div className="space-y-3">
+                    {/* TODAY SECTION */}
+                    {todayCycleLessons.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 h-px bg-blue-200" />
+                          <div className="bg-blue-600 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-2xs flex items-center gap-1.5">
+                            <Calendar className="w-3 h-3" />
+                            <span>
+                              Сегодня, {format(getTashkentNow(), 'd MMMM', { locale: ru })}
+                            </span>
+                            <span className="bg-blue-700 px-1.5 py-0.2 rounded-full text-[10px] tabular-nums">
+                              {todayCycleLessons.length} ур.
+                            </span>
+                          </div>
+                          <div className="flex-1 h-px bg-blue-200" />
+                        </div>
+                        <div className="space-y-2">
+                          {todayCycleLessons.map((l) =>
+                            renderLessonCard(l, {
+                              slotLabel: cycleSummary.plannedSlotNumbers[l.id],
+                            })
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* REMAINING IN CURRENT PACKAGE / PERIOD */}
+                    {remainingPlannedInCycle.length > 0 && (
+                      <div className="space-y-2">
                         <div className="flex items-center gap-2 px-1">
                           <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">
-                            Прошедшие занятия ({pastTimelineLessons.length})
+                            {billingType === 'package'
+                              ? `Осталось в пакете (${remainingPlannedInCycle.length})`
+                              : `Предстоящие в периоде (${remainingPlannedInCycle.length})`}
                           </span>
                           <div className="flex-1 h-px bg-slate-200" />
                         </div>
-                      )}
-
-                      {(directionFilter === 'past' || showPastInAllView) && (
                         <div className="space-y-2">
-                          {pastTimelineLessons.map(renderLessonCard)}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* TODAY SECTION */}
-                  {directionFilter !== 'past' && (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1 h-px bg-blue-200" />
-                        <div className="bg-blue-600 text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-2xs flex items-center gap-1.5">
-                          <Calendar className="w-3 h-3" />
-                          <span>
-                            Сегодня, {format(getTashkentNow(), 'd MMMM', { locale: ru })}
-                          </span>
-                          {todayTimelineLessons.length > 0 && (
-                            <span className="bg-blue-700 px-1.5 py-0.2 rounded-full text-[10px] tabular-nums">
-                              {todayTimelineLessons.length} ур.
-                            </span>
+                          {remainingPlannedInCycle.map((l) =>
+                            renderLessonCard(l, {
+                              slotLabel: cycleSummary.plannedSlotNumbers[l.id],
+                            })
                           )}
                         </div>
-                        <div className="flex-1 h-px bg-blue-200" />
                       </div>
+                    )}
 
-                      {todayTimelineLessons.length > 0 && (
-                        <div className="space-y-2">
-                          {todayTimelineLessons.map(renderLessonCard)}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* UPCOMING LESSONS */}
-                  {directionFilter !== 'past' && upcomingTimelineLessons.length > 0 && (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2 px-1">
-                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">
-                          Предстоящие занятия ({upcomingTimelineLessons.length})
-                        </span>
-                        <div className="flex-1 h-px bg-slate-200" />
-                      </div>
+                    {/* PAST COMPLETED / MISSED IN THIS CYCLE (Newest first!) */}
+                    {pastCycleLessonsDesc.length > 0 && (
                       <div className="space-y-2">
-                        {upcomingTimelineLessons.map(renderLessonCard)}
+                        <div className="flex items-center gap-2 px-1">
+                          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">
+                            {billingType === 'package'
+                              ? `Пройдено и отменено в пакете (${pastCycleLessonsDesc.length})`
+                              : `Прошедшие в периоде (${pastCycleLessonsDesc.length})`}
+                          </span>
+                          <div className="flex-1 h-px bg-slate-200" />
+                        </div>
+                        <div className="space-y-2">
+                          {pastCycleLessonsDesc.map((l) => renderLessonCard(l))}
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
+                ) : filteredCycleLessons.length === 0 ? (
+                  <div className="bg-white rounded-2xl p-6 text-center text-slate-400 text-xs font-medium border border-slate-200/80">
+                    По выбранному фильтру уроков нет
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {filteredCycleLessons.map((l) =>
+                      renderLessonCard(l, {
+                        slotLabel: cycleSummary.plannedSlotNumbers[l.id],
+                      })
+                    )}
+                  </div>
+                )
+              ) : scheduleView === 'upcoming' ? (
+                upcomingWindowLessons.length === 0 ? (
+                  <div className="bg-white rounded-2xl p-8 text-center text-slate-400 text-xs font-medium border border-slate-200/80">
+                    В ближайшие {upcomingHorizonDays} дней уроков не запланировано
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {upcomingWindowLessons.map((l) => {
+                      const slotLabel = cycleSummary.plannedSlotNumbers[l.id];
+                      const isNextPackage =
+                        billingType === 'package' &&
+                        !slotLabel &&
+                        classifyLessonKind(l) === 'planned';
+                      return renderLessonCard(l, { slotLabel, isNextPackage });
+                    })}
+                  </div>
+                )
+              ) : archivePeriods.length === 0 ? (
+                <div className="bg-white rounded-2xl p-8 text-center text-slate-400 text-xs font-medium border border-slate-200/80">
+                  Прошлых пакетов и периодов пока нет
+                </div>
+              ) : archivePeriodLessons.length === 0 ? (
+                <div className="bg-white rounded-2xl p-8 text-center text-slate-400 text-xs font-medium border border-slate-200/80">
+                  За выбранный период уроков не найдено
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {archivePeriodLessons.map((l) => renderLessonCard(l))}
                 </div>
               )}
             </div>
@@ -1841,15 +2310,28 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
 
                 <div>
                   <label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">
-                    День оплаты
+                    {billingType === 'package' ? 'Дата старта пакета' : 'День оплаты'}
                   </label>
-                  <input
-                    type="text"
-                    value={billingDay}
-                    onChange={(e) => setBillingDay(e.target.value)}
-                    placeholder="10 число"
-                    className="w-full text-xs font-bold text-slate-900 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 focus:outline-hidden focus:border-blue-500"
-                  />
+                  {billingType === 'package' ? (
+                    <input
+                      type="date"
+                      value={isIsoDateString(billingDay) ? billingDay : cycleSummary.startDate}
+                      onChange={(e) => setBillingDay(e.target.value)}
+                      className="w-full text-xs font-bold text-slate-900 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 focus:outline-hidden focus:border-blue-500"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={
+                        isIsoDateString(billingDay)
+                          ? String(extractBillingDayNumber(billingDay))
+                          : billingDay
+                      }
+                      onChange={(e) => setBillingDay(e.target.value)}
+                      placeholder="10 число"
+                      className="w-full text-xs font-bold text-slate-900 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 focus:outline-hidden focus:border-blue-500"
+                    />
+                  )}
                 </div>
               </div>
             </div>

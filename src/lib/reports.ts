@@ -1,8 +1,20 @@
 import { supabase } from './supabase';
-import { Student, Lesson, LessonStatus } from '@/types';
+import { Student, Lesson, LessonStatus, RecurringSlot } from '@/types';
 import { format, parseISO, startOfMonth, endOfMonth } from 'date-fns';
 import { ru } from 'date-fns/locale';
-import { getTashkentNow } from './formatters';
+import {
+  addDaysStr,
+  formatLongRuDate,
+  getStudentBillingPeriod,
+  getTashkentNow,
+  getTashkentTodayStr,
+} from './formatters';
+import {
+  classifyLessonKind,
+  computeStudentCycleSummary,
+  getLessonDateStr,
+  type StudentCycleSummary,
+} from './packageCycle';
 
 export interface StudentAttendanceReport {
   student: Student;
@@ -47,18 +59,70 @@ export function getLessonPlural(n: number): string {
   return 'уроков';
 }
 
+export interface ReportDateRangeOptions {
+  startDate?: string;
+  endDate?: string;
+  label?: string;
+}
+
+function mapReportLessonRow(
+  l: {
+    id: string;
+    student_id: string;
+    lesson_date: string;
+    start_time?: string | null;
+    end_time?: string | null;
+    status: string;
+    miss_reason?: string | null;
+    needs_makeup?: boolean | null;
+    is_makeup?: boolean | null;
+    notes?: string | null;
+    created_at: string;
+  },
+  studentName: string
+): Lesson {
+  const startTimeClean = (l.start_time || '18:00').substring(0, 5);
+  const endTimeClean = (l.end_time || '19:30').substring(0, 5);
+  const timeStr = `${startTimeClean} - ${endTimeClean}`;
+  const isoDate = `${l.lesson_date}T${startTimeClean}:00+05:00`;
+
+  const realStatus: LessonStatus =
+    l.status === 'completed'
+      ? 'completed'
+      : l.status === 'planned' || l.status === 'scheduled'
+      ? 'planned'
+      : l.status === 'missed_penalty'
+      ? 'missed_penalty'
+      : l.status === 'missed_excused'
+      ? 'missed_excused'
+      : 'missed';
+
+  return {
+    id: l.id,
+    student_id: l.student_id,
+    student_name: studentName,
+    date: isoDate,
+    time_str: timeStr,
+    status: realStatus,
+    miss_reason: l.miss_reason || l.notes || undefined,
+    needs_makeup: Boolean(l.needs_makeup),
+    is_makeup: Boolean(l.is_makeup),
+    notes: l.notes || '',
+    created_at: l.created_at,
+  };
+}
+
 /**
- * Generate attendance and archive report for a student for the selected month (default: current month)
+ * Generate attendance and archive report for a student.
+ * - Default (no 2nd arg): uses the student's active cycle (current package or current billing_day cycle).
+ * - With Date: legacy calendar month report.
+ * - With { startDate, endDate, label }: custom archive period report.
  */
 export async function generateStudentReport(
   studentId: string,
-  targetMonthDate: Date = getTashkentNow()
+  targetOrOptions?: Date | ReportDateRangeOptions
 ): Promise<StudentAttendanceReport | null> {
   if (!supabase) return null;
-
-  const monthName = format(targetMonthDate, 'LLLL yyyy', { locale: ru });
-  const startStr = format(startOfMonth(targetMonthDate), 'yyyy-MM-dd');
-  const endStr = format(endOfMonth(targetMonthDate), 'yyyy-MM-dd');
 
   // 1. Fetch student
   const { data: studentData, error: stErr } = await supabase
@@ -69,14 +133,25 @@ export async function generateStudentReport(
 
   if (stErr || !studentData) return null;
 
-  const target = Number(studentData.monthly_target_lessons) || Number(studentData.package_total_lessons) || 12;
+  const target =
+    Number(studentData.monthly_target_lessons) || Number(studentData.package_total_lessons) || 12;
+
+  let recurring: RecurringSlot[] = [];
+  if (Array.isArray(studentData.recurring_schedule)) {
+    recurring = studentData.recurring_schedule;
+  } else if (typeof studentData.recurring_schedule === 'string') {
+    try {
+      recurring = JSON.parse(studentData.recurring_schedule);
+    } catch {}
+  }
 
   const student: Student = {
     id: studentData.id,
     name: studentData.name,
     monthly_target_lessons: target,
+    recurring_schedule: recurring,
     billing_day: studentData.billing_day || '10 число',
-    billing_type: (studentData.billing_type === 'package' ? 'package' : 'date_to_date'),
+    billing_type: studentData.billing_type === 'package' ? 'package' : 'date_to_date',
     lesson_rate: typeof studentData.lesson_rate === 'number' ? studentData.lesson_rate : 300000,
     lessons_balance: typeof studentData.lessons_balance === 'number' ? studentData.lessons_balance : 0,
     phone: studentData.phone || '',
@@ -101,50 +176,86 @@ export async function generateStudentReport(
 
   student.makeup_debt = pendingMakeups.length;
 
-  // 3. Fetch lessons for month
-  const { data: lessonsData } = await supabase
-    .from('tutor_lessons')
-    .select('*')
-    .eq('student_id', studentId)
-    .gte('lesson_date', startStr)
-    .lte('lesson_date', endStr)
-    .order('lesson_date', { ascending: true })
-    .order('start_time', { ascending: true });
+  const todayStr = getTashkentTodayStr();
+  const isCustomRange =
+    Boolean(targetOrOptions) &&
+    !(targetOrOptions instanceof Date) &&
+    typeof targetOrOptions === 'object';
+  const isLegacyMonthDate = targetOrOptions instanceof Date;
+
+  let periodLabel: string;
+  let reportTargetCount = target;
+  let cycleSummary: StudentCycleSummary | null = null;
+  let scopedLessons: Lesson[] = [];
+
+  if (isCustomRange) {
+    const opts = targetOrOptions as ReportDateRangeOptions;
+    const startStr = opts.startDate || addDaysStr(todayStr, -30);
+    const endStr = opts.endDate || todayStr;
+    periodLabel = opts.label || `${formatLongRuDate(startStr)} – ${formatLongRuDate(endStr)}`;
+
+    const { data: lessonsData } = await supabase
+      .from('tutor_lessons')
+      .select('*')
+      .eq('student_id', studentId)
+      .gte('lesson_date', startStr)
+      .lte('lesson_date', endStr)
+      .order('lesson_date', { ascending: true })
+      .order('start_time', { ascending: true });
+
+    scopedLessons = (lessonsData || []).map((l) => mapReportLessonRow(l, student.name));
+  } else if (isLegacyMonthDate) {
+    const targetMonthDate = targetOrOptions as Date;
+    periodLabel = format(targetMonthDate, 'LLLL yyyy', { locale: ru });
+    const startStr = format(startOfMonth(targetMonthDate), 'yyyy-MM-dd');
+    const endStr = format(endOfMonth(targetMonthDate), 'yyyy-MM-dd');
+
+    const { data: lessonsData } = await supabase
+      .from('tutor_lessons')
+      .select('*')
+      .eq('student_id', studentId)
+      .gte('lesson_date', startStr)
+      .lte('lesson_date', endStr)
+      .order('lesson_date', { ascending: true })
+      .order('start_time', { ascending: true });
+
+    scopedLessons = (lessonsData || []).map((l) => mapReportLessonRow(l, student.name));
+  } else {
+    // Active cycle mode (package or date_to_date)
+    const fetchFrom = addDaysStr(todayStr, -120);
+    const fetchTo = addDaysStr(todayStr, 65);
+
+    const { data: lessonsData } = await supabase
+      .from('tutor_lessons')
+      .select('*')
+      .eq('student_id', studentId)
+      .gte('lesson_date', fetchFrom)
+      .lte('lesson_date', fetchTo)
+      .order('lesson_date', { ascending: true })
+      .order('start_time', { ascending: true });
+
+    const allMapped = (lessonsData || []).map((l) => mapReportLessonRow(l, student.name));
+    cycleSummary = computeStudentCycleSummary(student, allMapped, todayStr);
+    reportTargetCount = cycleSummary.totalLessons;
+
+    if (student.billing_type === 'package') {
+      periodLabel = `Пакет ${cycleSummary.totalLessons} ${getLessonPlural(cycleSummary.totalLessons)} (с ${formatLongRuDate(cycleSummary.startDate)})`;
+      scopedLessons = cycleSummary.cycleLessons.filter((l) => {
+        const d = getLessonDateStr(l);
+        const kind = classifyLessonKind(l);
+        return (d >= cycleSummary!.startDate && d <= todayStr) || kind === 'planned' || d > todayStr;
+      });
+    } else {
+      periodLabel = `${formatLongRuDate(cycleSummary.startDate)} – ${formatLongRuDate(cycleSummary.endDate)}`;
+      scopedLessons = cycleSummary.cycleLessons;
+    }
+  }
 
   const completedLessons: Lesson[] = [];
   const missedLessons: Lesson[] = [];
   const plannedLessons: Lesson[] = [];
 
-  (lessonsData || []).forEach((l) => {
-    const startTimeClean = (l.start_time || '18:00').substring(0, 5);
-    const endTimeClean = (l.end_time || '19:30').substring(0, 5);
-    const timeStr = `${startTimeClean} - ${endTimeClean}`;
-    const isoDate = `${l.lesson_date}T${startTimeClean}:00+05:00`;
-
-    const realStatus: LessonStatus = l.status === 'completed'
-      ? 'completed'
-      : l.status === 'planned' || l.status === 'scheduled'
-      ? 'planned'
-      : l.status === 'missed_penalty'
-      ? 'missed_penalty'
-      : l.status === 'missed_excused'
-      ? 'missed_excused'
-      : 'missed';
-
-    const lessonItem: Lesson = {
-      id: l.id,
-      student_id: l.student_id,
-      student_name: student.name,
-      date: isoDate,
-      time_str: timeStr,
-      status: realStatus,
-      miss_reason: l.miss_reason || l.notes || undefined,
-      needs_makeup: Boolean(l.needs_makeup),
-      is_makeup: Boolean(l.is_makeup),
-      notes: l.notes || '',
-      created_at: l.created_at,
-    };
-
+  for (const lessonItem of scopedLessons) {
     if (lessonItem.status === 'completed') {
       completedLessons.push(lessonItem);
     } else if (
@@ -156,7 +267,7 @@ export async function generateStudentReport(
     } else {
       plannedLessons.push(lessonItem);
     }
-  });
+  }
 
   const penaltyCount = missedLessons.filter((l) => l.status === 'missed_penalty').length;
   const excusedCount = missedLessons.filter((l) => l.status === 'missed_excused').length;
@@ -164,12 +275,17 @@ export async function generateStudentReport(
 
   // 4. Build Telegram HTML
   let html = `📋 <b>Отчет по ученику: ${student.name}</b>\n`;
-  html += `🗓 <b>Период:</b> ${monthName}\n`;
-  html += `🎯 <b>Норма на месяц:</b> ${target} ${getLessonPlural(target)}\n`;
-  html += `📅 <b>День оплаты:</b> ${student.billing_day || 'не указан'}\n\n`;
+  html += `🗓 <b>Период:</b> ${periodLabel}\n`;
+  if (cycleSummary && student.billing_type === 'package') {
+    html += `📦 <b>Размер пакета:</b> ${cycleSummary.totalLessons} ${getLessonPlural(cycleSummary.totalLessons)}\n`;
+  } else {
+    html += `🎯 <b>Норма на период:</b> ${reportTargetCount} ${getLessonPlural(reportTargetCount)}\n`;
+    html += `📅 <b>День оплаты:</b> ${student.billing_day || 'не указан'}\n`;
+  }
+  html += `\n`;
 
   html += `📊 <b>Посещаемость:</b>\n`;
-  html += `• Проведено: <b>${completedLessons.length} из ${target}</b> ✅\n`;
+  html += `• Проведено: <b>${completedLessons.length} из ${reportTargetCount}</b> ✅\n`;
   if (penaltyCount > 0) {
     html += `• Сгорело (платный пропуск): <b>${penaltyCount}</b> 🔥\n`;
   }
@@ -179,7 +295,20 @@ export async function generateStudentReport(
   if (legacyMissedCount > 0 || (penaltyCount === 0 && excusedCount === 0 && missedLessons.length > 0)) {
     html += `• Пропущено: <b>${legacyMissedCount || missedLessons.length}</b> ❌\n`;
   }
-  html += `• Запланировано: <b>${plannedLessons.length}</b> ⏳\n`;
+  if (cycleSummary && student.billing_type === 'package') {
+    if (cycleSummary.remainingLessons > 0) {
+      html += `• Осталось в пакете: <b>${cycleSummary.remainingLessons}</b>${cycleSummary.estimatedEndDate ? ` (до ~${formatLongRuDate(cycleSummary.estimatedEndDate)})` : ''} ⏳\n`;
+    } else if (cycleSummary.debtLessons > 0) {
+      html += `• Пакет завершён, долг: <b>${cycleSummary.debtLessons} ур.</b> ⚠️\n`;
+    } else {
+      html += `• Пакет завершён (баланс: 0 ур.)\n`;
+    }
+    if (cycleSummary.prepaidExtraLessons > 0) {
+      html += `• Предоплачено на следующий пакет: <b>${cycleSummary.prepaidExtraLessons} ур.</b>\n`;
+    }
+  } else {
+    html += `• Запланировано: <b>${plannedLessons.length}</b> ⏳\n`;
+  }
   if (pendingMakeups.length > 0) {
     html += `• Долг по отработкам в ВС: <b>${pendingMakeups.length}</b> 🔄\n`;
   }
@@ -210,22 +339,54 @@ export async function generateStudentReport(
     html += `\n`;
   }
 
-  // 5. Ready-to-forward text for parents (Zero-Finance)
-  let parentText = `Здравствуйте! 📚 Направляю отчет по занятиям для ученика ${student.name} за ${monthName}:\n\n`;
-  parentText += `📊 Итоги месяца:\n`;
-  parentText += `• Норма уроков: ${target} ${getLessonPlural(target)}\n`;
-  parentText += `• Проведено занятий: ${completedLessons.length}\n`;
-  if (penaltyCount > 0) {
-    parentText += `• Сгорело (платные пропуски): ${penaltyCount}\n`;
-  }
-  if (excusedCount > 0) {
-    parentText += `• Уважительных отмен: ${excusedCount}\n`;
-  }
-  if (legacyMissedCount > 0 || (penaltyCount === 0 && excusedCount === 0 && missedLessons.length > 0)) {
-    parentText += `• Пропущено: ${legacyMissedCount || missedLessons.length}\n`;
-  }
-  if (pendingMakeups.length > 0) {
-    parentText += `• Ожидают отработки в воскресенье: ${pendingMakeups.length}\n`;
+  // 5. Ready-to-forward text for parents
+  let parentText: string;
+  if (cycleSummary && student.billing_type === 'package') {
+    parentText = `Здравствуйте! 📚 Направляю отчет по занятиям для ученика ${student.name}:\n\n`;
+    parentText += `📦 Итоги по текущему пакету (${cycleSummary.totalLessons} ур., с ${formatLongRuDate(cycleSummary.startDate)}):\n`;
+    parentText += `• Проведено занятий: ${completedLessons.length}\n`;
+    if (penaltyCount > 0) {
+      parentText += `• Сгорело (платные пропуски): ${penaltyCount}\n`;
+    }
+    if (excusedCount > 0) {
+      parentText += `• Уважительных отмен (перенесены): ${excusedCount}\n`;
+    }
+    if (legacyMissedCount > 0 || (penaltyCount === 0 && excusedCount === 0 && missedLessons.length > 0)) {
+      parentText += `• Пропущено: ${legacyMissedCount || missedLessons.length}\n`;
+    }
+    if (cycleSummary.remainingLessons > 0) {
+      const est = cycleSummary.estimatedEndDate
+        ? ` (ориентировочно до ${formatLongRuDate(cycleSummary.estimatedEndDate)})`
+        : '';
+      parentText += `• Осталось в пакете: ${cycleSummary.remainingLessons} ${getLessonPlural(cycleSummary.remainingLessons)}${est}\n`;
+    } else if (cycleSummary.debtLessons > 0) {
+      parentText += `• Пакет завершён · задолженность: ${cycleSummary.debtLessons} ${getLessonPlural(cycleSummary.debtLessons)}\n`;
+    } else {
+      parentText += `• Текущий пакет завершён (баланс: 0 ур.)\n`;
+    }
+    if (cycleSummary.prepaidExtraLessons > 0) {
+      parentText += `• Предоплачено на следующий пакет: ${cycleSummary.prepaidExtraLessons} ${getLessonPlural(cycleSummary.prepaidExtraLessons)}\n`;
+    }
+  } else {
+    parentText = `Здравствуйте! 📚 Направляю отчет по занятиям для ученика ${student.name} за ${periodLabel}:\n\n`;
+    parentText += `📊 Итоги периода:\n`;
+    parentText += `• Норма уроков: ${reportTargetCount} ${getLessonPlural(reportTargetCount)}\n`;
+    parentText += `• Проведено занятий: ${completedLessons.length}\n`;
+    if (penaltyCount > 0) {
+      parentText += `• Сгорело (платные пропуски): ${penaltyCount}\n`;
+    }
+    if (excusedCount > 0) {
+      parentText += `• Уважительных отмен: ${excusedCount}\n`;
+    }
+    if (legacyMissedCount > 0 || (penaltyCount === 0 && excusedCount === 0 && missedLessons.length > 0)) {
+      parentText += `• Пропущено: ${legacyMissedCount || missedLessons.length}\n`;
+    }
+    if (!isCustomRange && !isLegacyMonthDate) {
+      parentText += `• Текущий баланс: ${student.lessons_balance} ур.\n`;
+    }
+    if (pendingMakeups.length > 0) {
+      parentText += `• Ожидают отработки в воскресенье: ${pendingMakeups.length}\n`;
+    }
   }
   parentText += `\n`;
 
@@ -253,8 +414,13 @@ export async function generateStudentReport(
     parentText += `\n`;
   }
 
-  if (student.billing_day) {
-    parentText += `📅 День оплаты следующего периода: ${student.billing_day}\n\n`;
+  if (cycleSummary && student.billing_type === 'package') {
+    if (cycleSummary.remainingLessons > 0) {
+      parentText += `📅 Следующая оплата — после завершения оставшихся ${cycleSummary.remainingLessons} ${getLessonPlural(cycleSummary.remainingLessons)}.\n\n`;
+    }
+  } else if (student.billing_day && !isCustomRange) {
+    const bp = getStudentBillingPeriod(student.billing_day, getTashkentNow());
+    parentText += `📅 День оплаты следующего периода: ${bp.nextBillingFormatted}\n\n`;
   }
 
   parentText += `Спасибо за сотрудничество! 🙌`;
@@ -264,8 +430,8 @@ export async function generateStudentReport(
 
   return {
     student,
-    monthName,
-    targetLessons: target,
+    monthName: periodLabel,
+    targetLessons: reportTargetCount,
     completedLessons,
     missedLessons,
     plannedLessons,

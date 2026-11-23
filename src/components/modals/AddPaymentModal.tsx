@@ -3,8 +3,8 @@
 import React, { useState, useEffect, useRef, useId, useMemo } from 'react';
 import { Student, Payment, PaymentMethod } from '@/types';
 import { X, Wallet, Loader2, RotateCcw } from 'lucide-react';
-import { recordStudentPayment } from '@/lib/storage';
-import { getTashkentTodayStr } from '@/lib/formatters';
+import { recordStudentPayment, updateStudentSettings } from '@/lib/storage';
+import { getTashkentTodayStr, formatShortRuDate } from '@/lib/formatters';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
 
 export interface AddPaymentModalProps {
@@ -149,6 +149,10 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('payme');
   const [paidDate, setPaidDate] = useState<string>(getTashkentTodayStr());
   const [note, setNote] = useState<string>('');
+  const isPackageStudent = student.billing_type === 'package';
+  const [startNewPackage, setStartNewPackage] = useState<boolean>(
+    isPackageStudent && currentBalance <= 0
+  );
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -226,6 +230,13 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
         paidAt: paidDate,
         note: note.trim() || null,
       });
+
+      if (isPackageStudent && startNewPackage && lessonsCount > 0) {
+        await updateStudentSettings(student.id, {
+          billing_day: paidDate,
+          monthly_target_lessons: lessonsCount,
+        });
+      }
 
       hapticNotification('success');
       await onSaved({ payment, newBalance, studentId: student.id });
@@ -440,6 +451,31 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
                 />
               </div>
             </div>
+
+            {/* Start New Package Toggle (for package students) */}
+            {isPackageStudent && lessonsCount > 0 && (
+              <label className="flex items-start gap-2.5 p-3 rounded-xl bg-indigo-50/70 border border-indigo-200/80 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={startNewPackage}
+                  onChange={(e) => {
+                    hapticImpact('light');
+                    setStartNewPackage(e.target.checked);
+                  }}
+                  className="mt-0.5 w-4 h-4 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500 shrink-0"
+                />
+                <div className="min-w-0">
+                  <span className="text-xs font-semibold text-indigo-950 block">
+                    Начать новый пакет с {formatShortRuDate(paidDate)}
+                  </span>
+                  <span className="text-[11px] text-indigo-700/90 leading-snug block mt-0.5">
+                    {startNewPackage
+                      ? `Счётчик пакета обновится: ${lessonsCount} ур. с ${formatShortRuDate(paidDate)}`
+                      : `Текущий пакет (ост. ${currentBalance} ур.) продолжит считаться до закрытия`}
+                  </span>
+                </div>
+              </label>
+            )}
 
             {/* Balance Preview Strip */}
             <div className="px-3 py-2 rounded-xl bg-emerald-50/70 border border-emerald-200/70 flex items-center justify-between text-xs tabular-nums">

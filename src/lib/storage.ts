@@ -1,6 +1,7 @@
 import { Student, Lesson, Makeup, AttendanceSummary, LessonStatus, RecurringSlot, BillingType, BillingCalculation, Payment, PaymentMethod } from '@/types';
 import { supabase } from './supabase';
-import { getTashkentTodayStr, getTashkentNow, getTashkentDateString, dayOfWeekOf, addDaysStr, getStudentBillingPeriod, extractBillingDayNumber } from './formatters';
+import { getTashkentTodayStr, getTashkentNow, getTashkentDateString, dayOfWeekOf, addDaysStr, extractBillingDayNumber } from './formatters';
+import { computeStudentCycleSummary, type StudentCycleSummary } from './packageCycle';
 import { generateUUID } from './uuid';
 import { format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, subMonths, addDays } from 'date-fns';
 
@@ -158,8 +159,8 @@ export async function getStudents(includeStats: boolean = true): Promise<Student
   }
 
   const makeupsCountMap: Record<string, number> = {};
-  const conductedCountMap: Record<string, number> = {};
-  const missedCountMap: Record<string, number> = {};
+  const lessonsByStudentMap = new Map<string, Lesson[]>();
+  const todayStr = getTashkentTodayStr();
 
   if (includeStats) {
     // Active makeups count
@@ -172,32 +173,24 @@ export async function getStudents(includeStats: boolean = true): Promise<Student
       makeupsCountMap[m.student_id] = (makeupsCountMap[m.student_id] || 0) + 1;
     });
 
-    // Calculate attendance per student's individual billing period (anchored on s.billing_day)
+    // Fetch lessons over an expanded window so extended packages and projections calculate accurately
     const now = getTashkentNow();
-    const windowStart = format(startOfMonth(subMonths(now, 1)), 'yyyy-MM-dd');
-    const windowEnd = format(addDays(now, 35), 'yyyy-MM-dd');
+    const windowStart = format(startOfMonth(subMonths(now, 2)), 'yyyy-MM-dd');
+    const windowEnd = format(addDays(now, 45), 'yyyy-MM-dd');
 
     const { data: periodLessons } = await supabase
       .from('tutor_lessons')
-      .select('student_id, lesson_date, status')
+      .select('id, student_id, lesson_date, start_time, end_time, status, needs_makeup, created_at')
       .gte('lesson_date', windowStart)
-      .lte('lesson_date', windowEnd);
+      .lte('lesson_date', windowEnd)
+      .order('lesson_date', { ascending: true })
+      .order('start_time', { ascending: true });
 
-    const studentPeriodMap: Record<string, { startDate: string; endDate: string }> = {};
-    (studentsData || []).forEach((s) => {
-      const p = getStudentBillingPeriod(s.billing_day || '10', now);
-      studentPeriodMap[s.id] = { startDate: p.startDate, endDate: p.endDate };
-    });
-
-    (periodLessons || []).forEach((l) => {
-      const p = studentPeriodMap[l.student_id];
-      const d = getTashkentDateString(l.lesson_date);
-      if (p && (d < p.startDate || d > p.endDate)) return;
-
-      const isCompleted = l.status === 'completed';
-      const isMissed = l.status === 'missed' || l.status === 'missed_excused' || l.status === 'missed_penalty';
-      if (isCompleted) conductedCountMap[l.student_id] = (conductedCountMap[l.student_id] || 0) + 1;
-      if (isMissed) missedCountMap[l.student_id] = (missedCountMap[l.student_id] || 0) + 1;
+    ((periodLessons || []) as LessonDbRow[]).forEach((row) => {
+      const mapped = mapLessonRow(row);
+      const list = lessonsByStudentMap.get(row.student_id);
+      if (list) list.push(mapped);
+      else lessonsByStudentMap.set(row.student_id, [mapped]);
     });
   }
 
@@ -214,7 +207,7 @@ export async function getStudents(includeStats: boolean = true): Promise<Student
     const lessonRate = typeof s.lesson_rate === 'number' ? s.lesson_rate : 300000;
     const lessonsBalance = typeof s.lessons_balance === 'number' ? s.lessons_balance : 0;
 
-    return {
+    const baseStudent: Student = {
       id: s.id,
       name: s.name,
       monthly_target_lessons: target,
@@ -230,9 +223,30 @@ export async function getStudents(includeStats: boolean = true): Promise<Student
       is_active: s.is_active !== false,
       created_at: s.created_at,
       makeup_debt: makeupsCountMap[s.id] || 0,
-      conducted_this_month: conductedCountMap[s.id] || 0,
-      missed_this_month: missedCountMap[s.id] || 0,
+      conducted_this_month: 0,
+      missed_this_month: 0,
     };
+
+    if (includeStats) {
+      const summary: StudentCycleSummary = computeStudentCycleSummary(
+        baseStudent,
+        lessonsByStudentMap.get(s.id) || [],
+        todayStr
+      );
+      baseStudent.conducted_this_month = summary.usedLessons;
+      baseStudent.missed_this_month = summary.excusedLessons;
+      baseStudent.cycle_start_date = summary.startDate;
+      baseStudent.cycle_end_date = summary.endDate;
+      baseStudent.cycle_used_lessons = summary.usedLessons;
+      baseStudent.cycle_total_lessons = summary.totalLessons;
+      baseStudent.cycle_completed_lessons = summary.completedLessons;
+      baseStudent.cycle_penalty_lessons = summary.penaltyLessons;
+      baseStudent.cycle_excused_lessons = summary.excusedLessons;
+      baseStudent.cycle_remaining_lessons = summary.remainingLessons;
+      baseStudent.cycle_prepaid_extra = summary.prepaidExtraLessons;
+    }
+
+    return baseStudent;
   });
 }
 
@@ -373,15 +387,15 @@ function mapLessonRow(l: LessonDbRow): Lesson {
 }
 
 /**
- * Loads lessons within an active window (defaults to 1st of previous month to +35 days ahead).
- * Prevents loading entire database history into client memory.
+ * Loads lessons within an active window (defaults to 1st of 2 months ago to +45 days ahead).
+ * Prevents loading entire database history into client memory while covering extended packages.
  */
 export async function getLessons(fromDate?: string, toDate?: string): Promise<Lesson[]> {
   if (!supabase) throw new Error('Supabase is not initialized');
 
   const now = getTashkentNow();
-  const defaultFrom = format(startOfMonth(subMonths(now, 1)), 'yyyy-MM-dd');
-  const defaultTo = format(addDays(now, 35), 'yyyy-MM-dd');
+  const defaultFrom = format(startOfMonth(subMonths(now, 2)), 'yyyy-MM-dd');
+  const defaultTo = format(addDays(now, 45), 'yyyy-MM-dd');
 
   const from = fromDate ? getTashkentDateString(fromDate) : defaultFrom;
   const to = toDate ? getTashkentDateString(toDate) : defaultTo;
@@ -690,8 +704,8 @@ export async function initializePackageFromPastDate(
   ).length;
   const finalBalance = packageLessonsCount - completedCount;
 
-  // Set student balance, billing_day from startClean, and ensure billing_type is 'package'
-  const newBillingDay = String(extractBillingDayNumber(startClean));
+  // Set student balance, full ISO billing_day from startClean, and ensure billing_type is 'package'
+  const newBillingDay = startClean;
   const { error: updErr } = await supabase
     .from('tutor_students')
     .update({
@@ -720,6 +734,67 @@ export async function initializePackageFromPastDate(
     updatedLessons: (refreshedLessons || []).map(mapLessonRow),
     finalBalance,
   };
+}
+
+export async function startNewPackageForStudent(
+  studentId: string,
+  params: {
+    startDate: string;
+    packageSize: number;
+    balanceMode: 'reset' | 'add' | 'keep';
+  }
+): Promise<{ finalBalance: number; startDate: string; packageSize: number }> {
+  if (!supabase) throw new Error('Supabase is not initialized');
+
+  const startClean = getTashkentDateString(params.startDate);
+  const size = Math.max(1, Math.round(Number(params.packageSize) || 12));
+
+  const { data: student, error: sErr } = await supabase
+    .from('tutor_students')
+    .select('id, lessons_balance')
+    .eq('id', studentId)
+    .single();
+
+  if (sErr || !student) throw new Error('Student not found');
+
+  let finalBalance = typeof student.lessons_balance === 'number' ? student.lessons_balance : 0;
+
+  if (params.balanceMode === 'reset') {
+    finalBalance = size;
+    const { error: updErr } = await supabase
+      .from('tutor_students')
+      .update({
+        lessons_balance: finalBalance,
+        billing_type: 'package',
+        monthly_target_lessons: size,
+        billing_day: startClean,
+      })
+      .eq('id', studentId);
+    if (updErr) throw updErr;
+  } else if (params.balanceMode === 'add') {
+    finalBalance = await topUpStudentBalance(studentId, size);
+    const { error: updErr } = await supabase
+      .from('tutor_students')
+      .update({
+        billing_type: 'package',
+        monthly_target_lessons: size,
+        billing_day: startClean,
+      })
+      .eq('id', studentId);
+    if (updErr) throw updErr;
+  } else {
+    const { error: updErr } = await supabase
+      .from('tutor_students')
+      .update({
+        billing_type: 'package',
+        monthly_target_lessons: size,
+        billing_day: startClean,
+      })
+      .eq('id', studentId);
+    if (updErr) throw updErr;
+  }
+
+  return { finalBalance, startDate: startClean, packageSize: size };
 }
 
 export function isDeductedStatus(status?: string | null): boolean {

@@ -58,8 +58,8 @@ export const LessonCard: React.FC<LessonCardProps> = React.memo(function LessonC
   const [isEditingNote, setIsEditingNote] = useState(false);
   const [noteDraft, setNoteDraft] = useState(isRealNote(lesson.notes) ? lesson.notes || '' : '');
 
-  const target = student?.monthly_target_lessons || 12;
-  const conducted = student?.conducted_this_month || 0;
+  const target = student?.cycle_total_lessons || student?.monthly_target_lessons || 12;
+  const conducted = student?.cycle_used_lessons ?? student?.conducted_this_month ?? 0;
   const balance = student?.lessons_balance ?? 0;
 
   const timeParts = (lesson.time_str || '18:00 - 19:30').split(' - ');

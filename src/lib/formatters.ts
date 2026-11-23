@@ -301,6 +301,42 @@ export function formatTashkentPaymentDate(input: string): string {
 }
 
 /**
+ * Returns true if input is an explicit ISO date string YYYY-MM-DD
+ */
+export function isIsoDateString(val?: string | number | null): boolean {
+  if (val === null || val === undefined) return false;
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(val).trim());
+}
+
+/**
+ * Formats YYYY-MM-DD (or ISO timestamp) as short Russian date in UTC+5, e.g. "23 окт"
+ */
+export function formatShortRuDate(dateStr?: string | null): string {
+  if (!dateStr) return '';
+  try {
+    const clean = getTashkentDateString(dateStr);
+    const d = parseISO(`${clean}T12:00:00+05:00`);
+    return format(d, 'd MMM', { locale: ru }).replace('.', '');
+  } catch {
+    return String(dateStr);
+  }
+}
+
+/**
+ * Formats YYYY-MM-DD (or ISO timestamp) as long Russian date in UTC+5, e.g. "23 октября"
+ */
+export function formatLongRuDate(dateStr?: string | null): string {
+  if (!dateStr) return '';
+  try {
+    const clean = getTashkentDateString(dateStr);
+    const d = parseISO(`${clean}T12:00:00+05:00`);
+    return format(d, 'd MMMM', { locale: ru });
+  } catch {
+    return String(dateStr);
+  }
+}
+
+/**
  * Returns true if lesson notes contain real user-entered text rather than auto-generated placeholders.
  */
 export function isRealNote(notes?: string | null): boolean {

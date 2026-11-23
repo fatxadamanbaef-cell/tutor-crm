@@ -18,7 +18,8 @@ import {
   archiveMakeup,
   isDeductedStatus,
 } from '@/lib/storage';
-import { getTashkentNow, getStudentBillingPeriod } from '@/lib/formatters';
+import { getTashkentNow, getTashkentTodayStr } from '@/lib/formatters';
+import { computeStudentCycleSummary } from '@/lib/packageCycle';
 import { initTelegramApp, getTelegramWebApp } from '@/lib/telegram';
 import { Loader2, WifiOff, RotateCcw } from 'lucide-react';
 
@@ -165,38 +166,33 @@ function Dashboard() {
     };
   }, [fetchDashboardData]);
 
-  // Live recalculated attendance stats per student's individual billing period (from billing_day)
+  // Live recalculated attendance & active cycle stats per student (package balance-driven or date_to_date cycle)
   const liveStudents = useMemo(() => {
-    const now = getTashkentNow();
-    const periodMap: Record<string, { startDate: string; endDate: string }> = {};
-    for (const s of students) {
-      const p = getStudentBillingPeriod(s.billing_day || '10', now);
-      periodMap[s.id] = { startDate: p.startDate, endDate: p.endDate };
-    }
-
-    const conductedMap: Record<string, number> = {};
-    const missedMap: Record<string, number> = {};
-
+    const todayStr = getTashkentTodayStr();
+    const lessonsByStudent = new Map<string, Lesson[]>();
     for (const l of lessons) {
-      const p = periodMap[l.student_id];
-      const d = l.date.substring(0, 10);
-      if (p && (d < p.startDate || d > p.endDate)) continue;
-      if (l.status === 'completed') {
-        conductedMap[l.student_id] = (conductedMap[l.student_id] || 0) + 1;
-      } else if (
-        l.status === 'missed' ||
-        l.status === 'missed_excused' ||
-        l.status === 'missed_penalty'
-      ) {
-        missedMap[l.student_id] = (missedMap[l.student_id] || 0) + 1;
-      }
+      const list = lessonsByStudent.get(l.student_id);
+      if (list) list.push(l);
+      else lessonsByStudent.set(l.student_id, [l]);
     }
 
-    return students.map((s) => ({
-      ...s,
-      conducted_this_month: conductedMap[s.id] ?? 0,
-      missed_this_month: missedMap[s.id] ?? 0,
-    }));
+    return students.map((s) => {
+      const summary = computeStudentCycleSummary(s, lessonsByStudent.get(s.id) || [], todayStr);
+      return {
+        ...s,
+        conducted_this_month: summary.usedLessons,
+        missed_this_month: summary.excusedLessons,
+        cycle_start_date: summary.startDate,
+        cycle_end_date: summary.endDate,
+        cycle_used_lessons: summary.usedLessons,
+        cycle_total_lessons: summary.totalLessons,
+        cycle_completed_lessons: summary.completedLessons,
+        cycle_penalty_lessons: summary.penaltyLessons,
+        cycle_excused_lessons: summary.excusedLessons,
+        cycle_remaining_lessons: summary.remainingLessons,
+        cycle_prepaid_extra: summary.prepaidExtraLessons,
+      };
+    });
   }, [students, lessons]);
 
   const lowBalanceCount = useMemo(

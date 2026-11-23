@@ -42,6 +42,17 @@ export interface Student {
   makeup_debt?: number; // legacy
   conducted_this_month?: number;
   missed_this_month?: number;
+
+  // Расчетные поля активного цикла / пакета
+  cycle_start_date?: string;
+  cycle_end_date?: string | null;
+  cycle_used_lessons?: number;
+  cycle_total_lessons?: number;
+  cycle_completed_lessons?: number;
+  cycle_penalty_lessons?: number;
+  cycle_excused_lessons?: number;
+  cycle_remaining_lessons?: number;
+  cycle_prepaid_extra?: number;
 }
 
 export interface Lesson {

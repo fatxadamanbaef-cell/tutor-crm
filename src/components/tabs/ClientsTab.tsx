@@ -15,7 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
-import { WD_SHORT, getStudentBillingPeriod } from '@/lib/formatters';
+import { WD_SHORT, getStudentBillingPeriod, formatShortRuDate } from '@/lib/formatters';
 import { calculateStudentBilling } from '@/lib/storage';
 import { getTutorSettings, buildParentInvoiceMessage } from '@/lib/settings';
 import { AddPaymentModal } from '@/components/modals/AddPaymentModal';
@@ -262,17 +262,24 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
           </div>
         ) : (
           filtered.map((student) => {
-            const target = student.monthly_target_lessons || 12;
-            const conducted = student.conducted_this_month || 0;
-            const missed = student.missed_this_month || 0;
+            const total = student.cycle_total_lessons ?? student.monthly_target_lessons ?? 12;
+            const used = student.cycle_used_lessons ?? student.conducted_this_month ?? 0;
+            const excused = student.cycle_excused_lessons ?? student.missed_this_month ?? 0;
             const balance = student.lessons_balance ?? 0;
             const rate = student.lesson_rate || 300000;
             const isPkg = student.billing_type === 'package';
+            const cycleStart = student.cycle_start_date;
+            const cycleEnd = student.cycle_end_date;
+            const remaining = student.cycle_remaining_lessons ?? Math.max(0, balance);
+            const prepaidExtra = student.cycle_prepaid_extra ?? 0;
+            const isExhausted = isPkg && balance <= 0;
             const scheduleSummary = formatRecurringSummary(student.recurring_schedule);
             const isPaused = student.is_active === false;
             const tgUrl = getTelegramUrl(student.telegram);
             const billingPeriod = getStudentBillingPeriod(student.billing_day || '10');
-            const progressPct = Math.min(100, Math.round((conducted / target) * 100));
+            const progressPct = isExhausted
+              ? 100
+              : Math.min(100, Math.round((used / Math.max(1, total)) * 100));
 
             return (
               <div
@@ -323,7 +330,9 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                       <div className="text-[11px] text-slate-500 font-medium mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 tabular-nums">
                         <span>{Math.round(rate / 1000)} тыс/ур.</span>
                         <span className="text-slate-400">
-                          {isPkg ? `Пакет ${target} ур.` : 'По датам'} (с {billingPeriod.billingDay}-го числа)
+                          {isPkg
+                            ? `Пакет ${total} ур.${cycleStart ? ` с ${formatShortRuDate(cycleStart)}` : ''}`
+                            : `По датам (с ${billingPeriod.billingDay}-го числа)`}
                         </span>
                       </div>
                     </div>
@@ -377,20 +386,43 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                   </div>
                 </div>
 
-                {/* Footer: Billing Period Progress (anchored to student's payment date) + Quick Actions */}
+                {/* Footer: Active Cycle / Billing Period Progress + Quick Actions */}
                 <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium mb-1">
-                      <span className="truncate">
-                        С <b className="text-slate-700">{billingPeriod.startShort}</b> по{' '}
-                        <b className="text-slate-700">{billingPeriod.endShort}</b>:{' '}
-                        <b className="text-slate-900">{conducted}</b> из {target} ур.
-                        {missed > 0 ? ` (отм: ${missed})` : ''}
-                      </span>
+                    <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium mb-1 tabular-nums">
+                      {isPkg ? (
+                        balance <= 0 ? (
+                          <span className="truncate text-rose-700 font-semibold">
+                            Пакет завершён · {used}/{total} ур.
+                            {balance < 0 ? ` · долг ${Math.abs(balance)} ур.` : ''}
+                          </span>
+                        ) : (
+                          <span className="truncate">
+                            Пакет{cycleStart ? ` с ${formatShortRuDate(cycleStart)}` : ''}:{' '}
+                            <b className="text-slate-900">{used}</b> из {total} ур.
+                            {excused > 0 ? ` · отм: ${excused}` : ''}
+                            {cycleEnd ? ` · до ~${formatShortRuDate(cycleEnd)}` : ''}
+                            {prepaidExtra > 0 ? ` (+${prepaidExtra})` : ''}
+                          </span>
+                        )
+                      ) : (
+                        <span className="truncate">
+                          С <b className="text-slate-700">{billingPeriod.startShort}</b> по{' '}
+                          <b className="text-slate-700">{billingPeriod.endShort}</b>:{' '}
+                          <b className="text-slate-900">{used}</b> из {total} ур.
+                          {excused > 0 ? ` (отм: ${excused})` : ''}
+                        </span>
+                      )}
                     </div>
                     <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-blue-600 rounded-full transition-all"
+                        className={`h-full rounded-full transition-all ${
+                          isPkg && balance <= 0
+                            ? 'bg-rose-500'
+                            : isPkg && remaining <= 2
+                            ? 'bg-amber-500'
+                            : 'bg-blue-600'
+                        }`}
                         style={{ width: `${progressPct}%` }}
                       />
                     </div>
@@ -433,9 +465,9 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                             ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs'
                             : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/80'
                         }`}
-                        title={`Зафиксировать оплату на ${target} уроков`}
+                        title={`Зафиксировать оплату на ${total} уроков`}
                       >
-                        <span>{balance <= 2 ? `+${target} ур.` : '+ Оплата'}</span>
+                        <span>{balance <= 2 ? `+${total} ур.` : '+ Оплата'}</span>
                       </button>
                     )}
                   </div>
