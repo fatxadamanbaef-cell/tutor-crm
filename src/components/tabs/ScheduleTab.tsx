@@ -11,6 +11,10 @@ import {
   Coffee,
   AlertTriangle,
   CheckCheck,
+  Clock,
+  Check,
+  Flame,
+  Ban,
 } from 'lucide-react';
 import { hapticImpact, hapticNotification, hapticSelection } from '@/lib/telegram';
 import { getTashkentNow, getTashkentDateString, getTashkentTodayStr, isRealNote } from '@/lib/formatters';
@@ -251,24 +255,24 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
   return (
     <div
       ref={scrollContainerRef}
-      className="h-full overflow-y-auto overscroll-none bg-[#f4f5f8] pb-safe"
+      className="h-full overflow-y-auto overscroll-none bg-[#F7F5F0] pb-safe"
     >
-      {/* Non-sticky Top Header */}
+      {/* Non-sticky Compact Top Header */}
       <div
         ref={topHeaderRef}
-        className="bg-white px-3.5 pt-safe pb-2 flex items-center justify-between gap-2"
+        className="bg-white px-3.5 pt-safe pb-1.5 flex items-center justify-between gap-2"
       >
         <div className="min-w-0">
-          <h1 className="text-lg font-bold text-slate-900 tracking-tight leading-tight">
+          <h1 className="text-base font-bold text-[#1C1917] tracking-tight leading-tight">
             Расписание
           </h1>
-          <p className="text-xs font-medium text-slate-500 flex items-center gap-1.5 flex-wrap mt-0.5 tabular-nums">
+          <p className="text-[11px] font-medium text-[#78716C] flex items-center gap-1 flex-wrap tabular-nums">
             <span>
-              Уроков на день: <b className="text-slate-900 font-semibold">{dayLessons.length}</b>
+              <b className="text-[#1C1917] font-semibold">{dayLessons.length}</b> ур.
             </span>
             {dayLessons.length > 0 && (
-              <span className="text-slate-400">
-                •{' '}
+              <span className="text-[#8C857B]">
+                ·{' '}
                 {daySummary.completed > 0 ? `проведено ${daySummary.completed}` : ''}
                 {daySummary.completed > 0 && daySummary.planned > 0 ? ', ' : ''}
                 {daySummary.planned > 0 ? `осталось ${daySummary.planned}` : ''}
@@ -288,11 +292,11 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
               onClick={handleRefreshClick}
               disabled={isRefreshing}
               aria-label="Обновить расписание"
-              className="touch-hit w-9 h-9 flex items-center justify-center rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 active:scale-95 disabled:opacity-50 transition-all"
+              className="touch-hit w-8 h-8 flex items-center justify-center rounded-full bg-[#F2EFE9] text-[#44403C] hover:bg-[#EAE5DC] active:scale-95 disabled:opacity-50 transition-colors"
               title="Обновить"
             >
               <RotateCcw
-                className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-blue-600' : ''}`}
+                className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-[#2F6FED]' : ''}`}
                 aria-hidden="true"
               />
             </button>
@@ -304,7 +308,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
               hapticImpact('light');
               onAddLesson(selectedDate);
             }}
-            className="touch-hit h-9 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center gap-1 shadow-sm shadow-blue-500/20 active:scale-95 transition-all"
+            className="touch-hit h-8 px-3 rounded-full bg-[#2F6FED] hover:bg-[#255CE0] text-white font-semibold text-xs flex items-center gap-1 shadow-xs active:scale-95 transition-colors"
           >
             <Plus className="w-3.5 h-3.5 stroke-[2.5]" aria-hidden="true" />
             <span>Урок</span>
@@ -313,7 +317,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
       </div>
 
       {/* Sticky Compact Date Navigation Bar (solid white for 60 FPS mobile WebView scroll) */}
-      <div className="sticky top-0 z-20 bg-white border-b border-slate-200/80 px-3.5 py-2">
+      <div className="sticky top-0 z-20 bg-white border-b border-[#E7E2D8] px-3.5 py-1.5">
         <HorizontalDateStrip
           selectedDate={selectedDate}
           onSelectDate={setSelectedDate}
@@ -322,11 +326,11 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
         />
       </div>
 
-      {/* Main Content Area: Unmarked Past Banner + Daily Lessons Timeline */}
-      <div className="px-3.5 py-2.5 space-y-2 pb-28">
+      {/* Main Content Area: Unmarked Past Banner + Compact Daily Lessons Timeline */}
+      <div className="px-3 py-2 space-y-1.5 pb-24">
         {/* Compact Collapsible Unmarked Past Lessons Banner */}
         {unmarkedPastLessons.length > 0 && (
-          <div className="bg-amber-50/90 border border-amber-200/90 rounded-xl px-3 py-2 shadow-2xs space-y-2">
+          <div className="bg-[#FEF6E7] border border-[#F3DCAC] rounded-xl px-2.5 py-1.5 shadow-2xs space-y-2">
             <div className="flex items-center justify-between gap-2">
               <button
                 type="button"
@@ -336,29 +340,30 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                 }}
                 className="flex items-center gap-1.5 text-left min-w-0"
               >
-                <span className="text-xs font-semibold text-amber-900 tabular-nums whitespace-nowrap">
-                  ⏳ Не отмечено: {unmarkedPastLessons.length}
+                <Clock className="w-3.5 h-3.5 text-amber-700 shrink-0" aria-hidden="true" />
+                <span className="text-[11px] font-semibold text-amber-950 tabular-nums whitespace-nowrap">
+                  Не отмечено: {unmarkedPastLessons.length}
                 </span>
                 {showUnmarked ? (
-                  <ChevronUp className="w-4 h-4 text-amber-700 shrink-0" />
+                  <ChevronUp className="w-3.5 h-3.5 text-amber-700 shrink-0" />
                 ) : (
-                  <ChevronDown className="w-4 h-4 text-amber-700 shrink-0" />
+                  <ChevronDown className="w-3.5 h-3.5 text-amber-700 shrink-0" />
                 )}
               </button>
 
               <button
                 type="button"
                 onClick={handleMarkAllUnmarkedCompleted}
-                className="touch-hit px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-[11px] inline-flex items-center gap-1 shrink-0 active:scale-95 transition-all shadow-2xs"
+                className="touch-hit px-2.5 py-1 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-[11px] inline-flex items-center gap-1 shrink-0 active:scale-95 transition-colors shadow-2xs"
                 title="Отметить все прошлые уроки как проведённые"
               >
-                <CheckCheck className="w-3.5 h-3.5" />
+                <CheckCheck className="w-3 h-3" aria-hidden="true" />
                 <span>Все были</span>
               </button>
             </div>
 
             {showUnmarked && (
-              <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar pt-0.5">
+              <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar pt-0.5">
                 {unmarkedPastLessons.map((l) => {
                   const st = studentsMap.get(l.student_id);
                   const datePart = l.date.substring(0, 10);
@@ -366,7 +371,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                   return (
                     <div
                       key={l.id}
-                      className="shrink-0 bg-white border border-amber-200/90 rounded-xl p-2.5 shadow-2xs space-y-2 min-w-[152px]"
+                      className="shrink-0 bg-white border border-[#F3DCAC] rounded-xl p-2 shadow-2xs space-y-1.5 min-w-[144px]"
                     >
                       <button
                         type="button"
@@ -377,10 +382,10 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                         className="text-left w-full"
                         title="Перейти к этой дате"
                       >
-                        <div className="text-xs font-semibold text-slate-900 truncate">
+                        <div className="text-xs font-semibold text-[#1C1917] truncate">
                           {st?.name || l.student_name || 'Ученик'}
                         </div>
-                        <div className="text-[11px] font-medium text-amber-800 tabular-nums">
+                        <div className="text-[10.5px] font-medium text-amber-800 tabular-nums">
                           {format(parsed, 'd MMM, EEE', { locale: ru })} ·{' '}
                           {(l.time_str || '').split(' - ')[0]}
                         </div>
@@ -394,10 +399,10 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                             hapticNotification('success');
                             onSetLessonStatus(l.id, 'completed');
                           }}
-                          className="touch-hit flex-1 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold text-xs text-center active:scale-90"
+                          className="touch-hit flex-1 py-1.5 rounded-lg bg-[#E7F7F0] hover:bg-[#D1F0E2] text-emerald-700 flex items-center justify-center active:scale-90"
                           title="Был (-1 баланс)"
                         >
-                          ✅
+                          <Check className="w-3.5 h-3.5 stroke-[2.5]" aria-hidden="true" />
                         </button>
                         <button
                           type="button"
@@ -410,10 +415,10 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                               'Пропуск без предупреждения'
                             );
                           }}
-                          className="touch-hit flex-1 py-1.5 rounded-lg bg-orange-50 hover:bg-orange-100 text-orange-700 font-semibold text-xs text-center active:scale-90"
+                          className="touch-hit flex-1 py-1.5 rounded-lg bg-[#FDECE8] hover:bg-[#FADCD4] text-[#B93815] flex items-center justify-center active:scale-90"
                           title="Сгорел (-1 баланс)"
                         >
-                          🔥
+                          <Flame className="w-3.5 h-3.5" aria-hidden="true" />
                         </button>
                         <button
                           type="button"
@@ -422,10 +427,10 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                             hapticImpact('light');
                             onSetLessonStatus(l.id, 'missed_excused', 'Уважительная отмена');
                           }}
-                          className="touch-hit flex-1 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-xs text-center active:scale-90"
+                          className="touch-hit flex-1 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 flex items-center justify-center active:scale-90"
                           title="Отмена (баланс сохранен)"
                         >
-                          🛑
+                          <Ban className="w-3.5 h-3.5" aria-hidden="true" />
                         </button>
                       </div>
                     </div>
@@ -436,15 +441,15 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
           </div>
         )}
 
-        {/* Lessons List with Free Windows ("Окна") and Overlap Detection */}
+        {/* Lessons List with Compact Free Windows ("Окна") and Overlap Detection */}
         {dayLessons.length === 0 ? (
-          <div className="bg-white rounded-3xl p-8 text-center border border-slate-200/80 shadow-2xs space-y-3 mt-2">
-            <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto">
-              <CalendarPlus className="w-6 h-6" />
+          <div className="bento-card rounded-3xl p-7 text-center space-y-3 mt-1">
+            <div className="w-11 h-11 rounded-2xl bg-[#EEF3FE] text-[#2F6FED] flex items-center justify-center mx-auto">
+              <CalendarPlus className="w-5 h-5" aria-hidden="true" />
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-slate-900">На этот день уроков нет</h3>
-              <p className="text-xs text-slate-400 mt-0.5">Свободный день или выходной</p>
+              <h3 className="text-sm font-semibold text-[#1C1917]">На этот день уроков нет</h3>
+              <p className="text-xs text-[#78716C] mt-0.5">Свободный день или выходной</p>
             </div>
             <button
               type="button"
@@ -452,14 +457,14 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                 hapticImpact('light');
                 onAddLesson(selectedDate);
               }}
-              className="py-2.5 px-4 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs active:scale-95 transition-all inline-flex items-center gap-1.5 shadow-xs"
+              className="py-2.5 px-4 rounded-full bg-[#2F6FED] hover:bg-[#255CE0] text-white font-semibold text-xs active:scale-95 transition-colors inline-flex items-center gap-1.5 shadow-xs"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-4 h-4" aria-hidden="true" />
               <span>Запланировать урок</span>
             </button>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {dayLessons.map((lesson, idx) => {
               const student = studentsMap.get(lesson.student_id);
               const prevLesson = idx > 0 ? dayLessons[idx - 1] : null;
@@ -476,8 +481,8 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
 
                   if (gapMinutes < 0 && bothActive) {
                     gapElement = (
-                      <div className="flex items-center justify-center gap-1.5 py-1.5 px-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold tabular-nums">
-                        <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-rose-600" />
+                      <div className="flex items-center justify-center gap-1.5 py-1 px-2.5 rounded-xl bg-[#FDECE8] border border-[#F6BFA9] text-[#B93815] text-[11px] font-semibold tabular-nums">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-[#E85D3F]" aria-hidden="true" />
                         <span>
                           Накладка по времени: {prevSlot.startStr}–{prevSlot.endStr} и{' '}
                           {currSlot.startStr}–{currSlot.endStr}
@@ -486,15 +491,15 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                     );
                   } else if (gapMinutes >= 30) {
                     gapElement = (
-                      <div className="flex items-center justify-between px-3 py-1.5 min-h-[32px] rounded-xl border border-dashed border-slate-300/90 bg-slate-100/60 text-slate-500 text-xs">
+                      <div className="flex items-center justify-between px-2.5 py-1 min-h-[26px] rounded-xl border border-dashed border-[#DDD5C7] bg-[#F2EFE8]/85 text-[#78716C] text-[11px]">
                         <div className="flex items-center gap-1.5 font-medium min-w-0">
-                          <Coffee className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <Coffee className="w-3 h-3 text-[#8C857B] shrink-0" aria-hidden="true" />
                           <span className="truncate">
                             Окно{' '}
-                            <span className="text-slate-700 font-semibold">
+                            <span className="text-[#1C1917] font-semibold">
                               {formatDurationRu(gapMinutes)}
                             </span>{' '}
-                            <span className="text-slate-400 tabular-nums">
+                            <span className="text-[#8C857B] tabular-nums">
                               · {prevSlot.endStr}–{currSlot.startStr}
                             </span>
                           </span>
@@ -505,7 +510,7 @@ export const ScheduleTab: React.FC<ScheduleTabProps> = ({
                             hapticImpact('light');
                             onAddLesson(selectedDate, prevSlot.endStr);
                           }}
-                          className="touch-hit shrink-0 text-xs font-semibold text-blue-600 hover:text-blue-700 active:opacity-70 transition-opacity ml-2 px-1.5 py-0.5"
+                          className="touch-hit shrink-0 text-[11px] font-semibold text-[#2F6FED] hover:text-[#255CE0] active:opacity-70 transition-opacity ml-2 px-1"
                         >
                           + Занять
                         </button>

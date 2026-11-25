@@ -887,14 +887,14 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
             onOpenLesson(l);
           }
         }}
-        className={`p-3 rounded-2xl border transition-all cursor-pointer active:scale-[0.99] space-y-2 ${
+        className={`p-3 rounded-2xl border transition-colors cursor-pointer active:scale-[0.99] space-y-2 ${
           isCompleted
             ? 'bg-white border-emerald-200/80'
             : isPenalty
-            ? 'bg-white border-orange-200/80'
+            ? 'bg-white border-[#F6BFA9]'
             : isExcused
-            ? 'bg-slate-50/70 border-rose-200/70 opacity-85'
-            : 'bg-white border-slate-200/90 shadow-2xs'
+            ? 'bg-[#F5F3EE] border-[#E7E2D8] opacity-80'
+            : 'bento-card-soft border-[#E7E2D8]/90'
         }`}
       >
         <div className="flex items-center justify-between gap-2">
@@ -1042,9 +1042,9 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-[#f4f5f8] flex flex-col">
+    <div className="fixed inset-0 z-50 bg-[#F7F5F0] flex flex-col">
       {/* Top Bar */}
-      <div className="flex items-center justify-between px-4 pt-safe pb-3 bg-white border-b border-slate-200/80">
+      <div className="flex items-center justify-between px-4 pt-safe pb-2.5 bg-white border-b border-[#E7E2D8]">
         <button
           type="button"
           onClick={(e) => {
@@ -1052,7 +1052,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
             hapticImpact('light');
             onBack();
           }}
-          className="touch-hit w-9 h-9 flex items-center justify-center rounded-xl bg-slate-100 text-slate-700 active:scale-90 transition-transform"
+          className="touch-hit w-9 h-9 flex items-center justify-center rounded-full bg-[#F2EFE9] text-[#44403C] active:scale-90 transition-transform"
           title="Назад"
           aria-label="Назад к списку учеников"
         >
@@ -1065,11 +1065,11 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
               className="w-2.5 h-2.5 rounded-full shrink-0"
               style={{ backgroundColor: studentColor }}
             />
-            <h2 className="text-base font-semibold text-slate-900 leading-tight truncate">
+            <h2 className="text-base font-semibold text-[#1C1917] leading-tight truncate">
               {studentName}
             </h2>
           </div>
-          <span className="text-[11px] text-slate-500 font-medium block tabular-nums">
+          <span className="text-[11px] text-[#78716C] font-medium block tabular-nums">
             {lessonRate.toLocaleString('ru-RU')} сум/ур. •{' '}
             {billingType === 'package'
               ? `Пакет · с ${formatShortRuDate(cycleSummary.startDate)}`
@@ -1083,14 +1083,14 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
             type="button"
             disabled={isSaving}
             onClick={handleSaveAllSettings}
-            className="h-9 px-3 flex items-center justify-center gap-1 rounded-xl bg-blue-600 disabled:opacity-50 text-white text-xs font-bold shadow-sm shadow-blue-500/20 active:scale-90 transition-transform"
+            className="h-9 px-3.5 flex items-center justify-center gap-1 rounded-full bg-[#2F6FED] disabled:opacity-50 text-white text-xs font-semibold shadow-xs active:scale-90 transition-transform"
             title="Сохранить настройки"
           >
             {isSaving ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
               <>
-                <Check className="w-4 h-4 stroke-[3]" />
+                <Check className="w-4 h-4 stroke-[2.5]" />
                 <span>Сохранить</span>
               </>
             )}
@@ -1103,7 +1103,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="Открыть Telegram ученика"
-                className="touch-hit w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center active:scale-90 transition-transform"
+                className="touch-hit w-9 h-9 rounded-full bg-[#EEF3FE] text-[#2F6FED] flex items-center justify-center active:scale-90 transition-transform"
                 title="Открыть Telegram ученика"
               >
                 <Send className="w-4 h-4" aria-hidden="true" />
@@ -1113,7 +1113,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
               <a
                 href={`tel:${studentPhone}`}
                 aria-label="Позвонить ученику"
-                className="touch-hit w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center active:scale-90 transition-transform"
+                className="touch-hit w-9 h-9 rounded-full bg-[#E7F7F0] text-emerald-700 flex items-center justify-center active:scale-90 transition-transform"
                 title="Позвонить ученику"
               >
                 <Phone className="w-4 h-4" aria-hidden="true" />
@@ -1127,7 +1127,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                   hapticImpact('light');
                   setActiveTab('settings');
                 }}
-                className="touch-hit w-9 h-9 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center active:scale-90 transition-transform"
+                className="touch-hit w-9 h-9 rounded-full bg-[#F2EFE9] text-[#57534E] flex items-center justify-center active:scale-90 transition-transform"
                 title="Настройки профиля"
               >
                 <Settings className="w-4 h-4" aria-hidden="true" />
@@ -1138,17 +1138,17 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
       </div>
 
       {/* Tabs Switcher */}
-      <div className="flex bg-white px-4 py-2 gap-1.5 border-b border-slate-200/80">
+      <div className="flex bg-white px-4 py-2 gap-1.5 border-b border-[#E7E2D8]">
         <button
           type="button"
           onClick={() => {
             hapticImpact('light');
             setActiveTab('archive');
           }}
-          className={`flex-1 text-xs font-bold py-2 rounded-xl transition-all ${
+          className={`flex-1 text-xs font-semibold py-2 rounded-full transition-colors ${
             activeTab === 'archive'
-              ? 'bg-slate-900 text-white shadow-2xs'
-              : 'text-slate-600 bg-slate-100 hover:bg-slate-200/70'
+              ? 'bg-[#1C1917] text-white shadow-2xs'
+              : 'text-[#57534E] bg-[#F2EFE9] hover:bg-[#EAE5DC]'
           }`}
         >
           Уроки и оплата
@@ -1159,10 +1159,10 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
             hapticImpact('light');
             setActiveTab('settings');
           }}
-          className={`flex-1 text-xs font-bold py-2 rounded-xl transition-all ${
+          className={`flex-1 text-xs font-semibold py-2 rounded-full transition-colors ${
             activeTab === 'settings'
-              ? 'bg-slate-900 text-white shadow-2xs'
-              : 'text-slate-600 bg-slate-100 hover:bg-slate-200/70'
+              ? 'bg-[#1C1917] text-white shadow-2xs'
+              : 'text-[#57534E] bg-[#F2EFE9] hover:bg-[#EAE5DC]'
           }`}
         >
           Профиль и расписание
@@ -1170,11 +1170,11 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
       </div>
 
       {/* Main Content */}
-      <div className="flex-1 overflow-y-auto p-3.5 pb-24 space-y-3.5">
+      <div className="flex-1 overflow-y-auto p-3.5 pb-24 space-y-3">
         {activeTab === 'archive' && (
-          <div className="space-y-3.5">
+          <div className="space-y-3">
             {/* UNIFIED COMPACT FINANCIAL & ACTIONS CARD */}
-            <div className="bg-white rounded-2xl p-4 shadow-2xs border border-slate-200/80 space-y-3">
+            <div className="bento-card rounded-3xl p-4 space-y-3">
               {/* Row 1: Balance + Quick Top-Up Buttons */}
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2.5">
@@ -1234,7 +1234,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
               </div>
 
               {/* Row 2: Active Cycle / Package Summary Card */}
-              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200/70 space-y-2.5 tabular-nums">
+              <div className="p-3 rounded-2xl bg-[#F7F5F0] border border-[#E7E2D8] space-y-2.5 tabular-nums">
                 <div className="flex items-center justify-between gap-2 text-xs">
                   {billingType === 'package' ? (
                     <>
@@ -1600,7 +1600,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
             )}
 
             {/* Compact Payment History Block */}
-            <div className="bg-white rounded-2xl p-3.5 shadow-2xs border border-slate-200/80 space-y-2.5">
+            <div className="bento-card rounded-3xl p-3.5 space-y-2.5">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5">
                   <Receipt className="w-3.5 h-3.5 text-emerald-600" />
@@ -1803,7 +1803,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
             )}
 
             {/* SIMPLIFIED 3-TAB SCHEDULE & ARCHIVE SECTION */}
-            <div className="bg-white rounded-2xl p-3.5 shadow-2xs border border-slate-200/80 space-y-2.5">
+            <div className="bento-card rounded-3xl p-3.5 space-y-2.5">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-semibold text-slate-800">Расписание ученика</span>
                 {onAddLessonForStudent && (
@@ -2109,7 +2109,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
         {activeTab === 'settings' && (
           <div className="space-y-3.5">
             {/* Recurring Schedule Editor (Placed at top of Settings because schedule changes happen most often) */}
-            <div className="bg-white rounded-2xl p-4 shadow-2xs border border-slate-200/80 space-y-3">
+            <div className="bento-card rounded-3xl p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
                   <h4 className="text-sm font-semibold text-slate-900">Регулярное расписание</h4>
@@ -2186,7 +2186,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
             </div>
 
             {/* Student Name & Contacts */}
-            <div className="bg-white rounded-2xl p-4 shadow-2xs border border-slate-200/80 space-y-3">
+            <div className="bento-card rounded-3xl p-4 space-y-3">
               <div>
                 <label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">
                   Имя ученика
@@ -2229,7 +2229,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
             </div>
 
             {/* Billing Model & Rates */}
-            <div className="bg-white rounded-2xl p-4 shadow-2xs border border-slate-200/80 space-y-3">
+            <div className="bento-card rounded-3xl p-4 space-y-3">
               <label className="text-[11px] font-bold text-slate-400 uppercase block">
                 Модель оплаты и ставка
               </label>
@@ -2337,7 +2337,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
             </div>
 
             {/* Notes, Color & Active Status */}
-            <div className="bg-white rounded-2xl p-4 shadow-2xs border border-slate-200/80 space-y-3">
+            <div className="bento-card rounded-3xl p-4 space-y-3">
               <div>
                 <label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">
                   Заметки об ученике / Цель обучения
@@ -2405,7 +2405,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                 type="button"
                 disabled={isSaving}
                 onClick={handleSaveAllSettings}
-                className="w-full py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold shadow-md shadow-blue-500/20 flex items-center justify-center gap-2 active:scale-98 transition-all"
+                className="w-full py-3.5 rounded-2xl bg-[#2F6FED] hover:bg-[#255CE0] disabled:opacity-50 text-white text-xs font-semibold shadow-sm flex items-center justify-center gap-2 active:scale-98 transition-colors"
               >
                 {isSaving ? (
                   <>
@@ -2414,7 +2414,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
                   </>
                 ) : (
                   <>
-                    <Check className="w-4 h-4 stroke-[3]" />
+                    <Check className="w-4 h-4 stroke-[2.5]" />
                     <span>Сохранить изменения</span>
                   </>
                 )}
@@ -2423,7 +2423,7 @@ export const ClientProfileScreen: React.FC<ClientProfileScreenProps> = ({
               <button
                 type="button"
                 onClick={() => setIsDeleteConfirmOpen(true)}
-                className="w-full py-3 rounded-2xl bg-rose-50 text-rose-600 text-xs font-bold border border-rose-200/80 flex items-center justify-center gap-1.5 active:scale-98"
+                className="w-full py-3 rounded-2xl bg-[#FDECE8] text-[#B93815] text-xs font-semibold border border-[#F6BFA9] flex items-center justify-center gap-1.5 active:scale-98"
               >
                 <Trash2 className="w-4 h-4" aria-hidden="true" />
                 <span>Удалить ученика</span>

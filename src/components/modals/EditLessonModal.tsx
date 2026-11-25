@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Student, Lesson, LessonStatus } from '@/types';
-import { X, Check, Trash2, AlertTriangle, Sparkles } from 'lucide-react';
+import { X, Check, Trash2, AlertTriangle, Sparkles, Clock, Flame, Ban, FileText } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
 import { format, addDays, parseISO } from 'date-fns';
 import { ru } from 'date-fns/locale';
@@ -178,9 +178,9 @@ const EditLessonModalContent: React.FC<EditLessonModalContentProps> = ({
     currentStatus === 'missed';
 
   return (
-    <div className="fixed inset-0 z-[60] bg-[#f4f5f8] flex flex-col animate-in slide-in-from-bottom duration-200">
+    <div className="fixed inset-0 z-[60] bg-[#F7F5F0] flex flex-col animate-in slide-in-from-bottom duration-200">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 pt-safe pb-3 bg-white border-b border-slate-200">
+      <div className="flex items-center justify-between px-4 pt-safe pb-2.5 bg-white border-b border-[#E7E2D8]">
         <button
           type="button"
           aria-label="Закрыть"
@@ -188,44 +188,44 @@ const EditLessonModalContent: React.FC<EditLessonModalContentProps> = ({
             hapticImpact('light');
             onClose();
           }}
-          className="touch-hit w-9 h-9 flex items-center justify-center rounded-full bg-slate-100 text-slate-700 active:scale-90"
+          className="touch-hit w-9 h-9 flex items-center justify-center rounded-full bg-[#F2EFE9] text-[#44403C] active:scale-90"
         >
           <X className="w-5 h-5" aria-hidden="true" />
         </button>
         <div className="text-center">
-          <h2 className="text-sm font-bold text-slate-900">Урок и перенос</h2>
-          <p className="text-[11px] font-semibold text-slate-500">
+          <h2 className="text-sm font-bold text-[#1C1917]">Урок и перенос</h2>
+          <p className="text-[11px] font-semibold text-[#78716C]">
             {lesson.student_name || student?.name}
           </p>
         </div>
         <button
           onClick={handleSave}
-          className="h-9 px-3.5 flex items-center justify-center gap-1 rounded-full bg-blue-600 text-white text-xs font-bold shadow-sm shadow-blue-500/20 active:scale-90"
+          className="h-9 px-3.5 flex items-center justify-center gap-1 rounded-full bg-[#2F6FED] text-white text-xs font-semibold shadow-xs active:scale-90"
         >
-          <Check className="w-4 h-4 stroke-[3]" />
+          <Check className="w-4 h-4 stroke-[2.5]" />
           <span>Готово</span>
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3.5 pb-24">
+      <div className="flex-1 overflow-y-auto p-3.5 space-y-3 pb-24">
         {/* Student Summary Header */}
-        <div className="bg-white rounded-2xl p-3.5 shadow-2xs border border-slate-200/80 flex items-center justify-between gap-2">
+        <div className="bento-card rounded-2xl p-3.5 flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <h3 className="text-base font-semibold text-slate-900 truncate">
+            <h3 className="text-base font-semibold text-[#1C1917] truncate">
               {lesson.student_name || student?.name}
             </h3>
-            <p className="text-xs text-slate-500 font-medium mt-0.5 tabular-nums">
-              Ставка: {(student?.lesson_rate || 300000).toLocaleString('ru-RU')} сум • Норма:{' '}
+            <p className="text-xs text-[#78716C] font-medium mt-0.5 tabular-nums">
+              Ставка: {(student?.lesson_rate || 300000).toLocaleString('ru-RU')} сум · Норма:{' '}
               {student?.monthly_target_lessons || 12} ур.
             </p>
           </div>
           <span
-            className={`text-xs font-semibold px-2.5 py-1 rounded-xl shrink-0 border tabular-nums ${
+            className={`text-xs font-semibold px-2.5 py-0.5 rounded-full shrink-0 border tabular-nums ${
               (student?.lessons_balance ?? 0) <= 0
-                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                ? 'bg-[#FDECE8] text-[#B93815] border-[#F6BFA9]'
                 : (student?.lessons_balance ?? 0) <= 2
-                ? 'bg-amber-50 text-amber-800 border-amber-200'
-                : 'bg-slate-100 text-slate-700 border-slate-200'
+                ? 'bg-[#FEF6E7] text-amber-800 border-[#F3DCAC]'
+                : 'bg-[#F2EFE9] text-[#44403C] border-[#E7E2D8]'
             }`}
           >
             Баланс: {student?.lessons_balance ?? 0} ур.
@@ -233,33 +233,38 @@ const EditLessonModalContent: React.FC<EditLessonModalContentProps> = ({
         </div>
 
         {/* Status Selector (3-State Attendance + Planned) */}
-        <div className="bg-white rounded-2xl p-4 shadow-2xs border border-slate-200/80 space-y-3">
-          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wide block">
+        <div className="bento-card rounded-2xl p-4 space-y-2.5">
+          <label className="text-[11px] font-semibold text-[#78716C] uppercase tracking-wide block">
             Статус занятия
           </label>
           <div className="grid grid-cols-2 gap-2">
             {[
               {
                 id: 'completed',
-                label: '✅ Проведён (-1)',
+                label: 'Проведён (-1)',
+                Icon: Check,
                 activeClass: 'bg-emerald-600 text-white border-emerald-600',
               },
               {
                 id: 'planned',
-                label: '⏳ По плану',
-                activeClass: 'bg-blue-600 text-white border-blue-600',
+                label: 'По плану',
+                Icon: Clock,
+                activeClass: 'bg-[#2F6FED] text-white border-[#2F6FED]',
               },
               {
                 id: 'missed_penalty',
-                label: '🔥 Сгорел (-1)',
-                activeClass: 'bg-orange-600 text-white border-orange-600',
+                label: 'Сгорел (-1)',
+                Icon: Flame,
+                activeClass: 'bg-[#E85D3F] text-white border-[#E85D3F]',
               },
               {
                 id: 'missed_excused',
-                label: '🛑 Отмена (0)',
+                label: 'Отмена (0)',
+                Icon: Ban,
                 activeClass: 'bg-rose-600 text-white border-rose-600',
               },
             ].map((st) => {
+              const Icon = st.Icon;
               const isSelected =
                 currentStatus === st.id ||
                 (st.id === 'missed_penalty' && currentStatus === 'missed');
@@ -271,13 +276,14 @@ const EditLessonModalContent: React.FC<EditLessonModalContentProps> = ({
                     hapticImpact('light');
                     setCurrentStatus(st.id as LessonStatus);
                   }}
-                  className={`py-2.5 px-2 text-center text-xs font-bold rounded-xl border transition-all active:scale-95 ${
+                  className={`py-2.5 px-2 text-center text-xs font-semibold rounded-xl border transition-colors active:scale-95 flex items-center justify-center gap-1.5 ${
                     isSelected
                       ? `${st.activeClass} shadow-xs`
-                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      : 'bg-[#F7F5F0] text-[#44403C] border-[#E7E2D8] hover:bg-[#EFEBE2]'
                   }`}
                 >
-                  {st.label}
+                  <Icon className="w-3.5 h-3.5" aria-hidden="true" />
+                  <span>{st.label}</span>
                 </button>
               );
             })}
@@ -285,8 +291,8 @@ const EditLessonModalContent: React.FC<EditLessonModalContentProps> = ({
 
           {/* If missed/cancelled, show reason input */}
           {isMissedState && (
-            <div className="pt-2.5 space-y-2 border-t border-slate-100">
-              <label className="text-[11px] font-bold text-slate-500 uppercase block">
+            <div className="pt-2.5 space-y-2 border-t border-[#EFECE5]">
+              <label className="text-[11px] font-semibold text-[#78716C] uppercase block">
                 Причина пропуска / отмены
               </label>
               <div className="flex flex-wrap gap-1.5">
@@ -301,10 +307,10 @@ const EditLessonModalContent: React.FC<EditLessonModalContentProps> = ({
                     key={chip}
                     type="button"
                     onClick={() => setMissReason(chip)}
-                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-all ${
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-semibold transition-colors ${
                       missReason === chip
-                        ? 'bg-slate-800 text-white'
-                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                        ? 'bg-[#1C1917] text-white'
+                        : 'bg-[#F2EFE9] hover:bg-[#E7E2D8] text-[#44403C]'
                     }`}
                   >
                     {chip}
@@ -316,35 +322,36 @@ const EditLessonModalContent: React.FC<EditLessonModalContentProps> = ({
                 value={missReason}
                 onChange={(e) => setMissReason(e.target.value)}
                 placeholder="Или введите свою причину..."
-                className="w-full text-xs font-semibold text-slate-900 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200 focus:bg-white focus:border-blue-500 focus:outline-hidden"
+                className="w-full text-xs font-semibold text-[#1C1917] bg-[#F7F5F0] px-3 py-2 rounded-xl border border-[#E7E2D8] focus:bg-white focus:border-[#2F6FED] focus:outline-hidden"
               />
             </div>
           )}
         </div>
 
-        {/* Notes / Homework (Placed prominently so tutor can quickly write homework) */}
-        <div className="bg-white rounded-2xl p-4 shadow-2xs border border-slate-200/80 space-y-2">
-          <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wide block">
-            📝 Тема урока / Домашнее задание
+        {/* Notes / Homework */}
+        <div className="bento-card rounded-2xl p-4 space-y-2">
+          <label className="text-[11px] font-semibold text-[#78716C] uppercase tracking-wide flex items-center gap-1.5">
+            <FileText className="w-3.5 h-3.5 text-amber-600" aria-hidden="true" />
+            <span>Тема урока / Домашнее задание</span>
           </label>
           <textarea
             rows={2}
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Что прошли сегодня, что задано на следующий урок..."
-            className="w-full text-xs font-medium text-slate-900 bg-slate-50 px-3 py-2.5 rounded-xl border border-slate-200 focus:bg-white focus:border-blue-500 focus:outline-hidden"
+            className="w-full text-xs font-medium text-[#1C1917] bg-[#F7F5F0] px-3 py-2.5 rounded-xl border border-[#E7E2D8] focus:bg-white focus:border-[#2F6FED] focus:outline-hidden"
           />
         </div>
 
         {/* Date & Time Settings with Live Day Occupancy Preview */}
-        <div className="bg-white rounded-2xl p-4 shadow-2xs border border-slate-200/80 space-y-3.5">
+        <div className="bento-card rounded-2xl p-4 space-y-3.5">
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">
+              <label className="text-[11px] font-semibold text-[#78716C] uppercase tracking-wide">
                 Дата и перенос
               </label>
               {lessonDate && (
-                <span className="text-[11px] font-bold text-blue-600">
+                <span className="text-[11px] font-semibold text-[#2F6FED]">
                   {format(parseISO(`${lessonDate}T12:00:00+05:00`), 'd MMMM, EEEE', { locale: ru })}
                 </span>
               )}
@@ -359,7 +366,7 @@ const EditLessonModalContent: React.FC<EditLessonModalContentProps> = ({
                   setCurrentStatus('planned');
                 }
               }}
-              className="w-full text-xs font-bold text-slate-900 bg-slate-50 px-3 py-2.5 rounded-xl border border-slate-200 focus:bg-white focus:border-blue-500 focus:outline-hidden"
+              className="w-full text-xs font-semibold text-[#1C1917] bg-[#F7F5F0] px-3 py-2.5 rounded-xl border border-[#E7E2D8] focus:bg-white focus:border-[#2F6FED] focus:outline-hidden"
             />
 
             {/* Quick Reschedule Shortcuts */}
@@ -381,10 +388,10 @@ const EditLessonModalContent: React.FC<EditLessonModalContentProps> = ({
                       setLessonDate(targetStr);
                       setCurrentStatus('planned');
                     }}
-                    className={`py-1.5 px-2 text-[11px] font-bold rounded-xl border transition-all active:scale-95 ${
+                    className={`py-1.5 px-2 text-[11px] font-semibold rounded-xl border transition-colors active:scale-95 ${
                       isSelectedDate
-                        ? 'bg-blue-600 text-white border-blue-600'
-                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                        ? 'bg-[#2F6FED] text-white border-[#2F6FED]'
+                        : 'bg-[#F7F5F0] text-[#44403C] border-[#E7E2D8] hover:bg-[#EFEBE2]'
                     }`}
                   >
                     {btn.label}
@@ -395,8 +402,8 @@ const EditLessonModalContent: React.FC<EditLessonModalContentProps> = ({
           </div>
 
           {/* Live Occupancy Preview of Selected Date */}
-          <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/70 space-y-1.5">
-            <span className="text-[10px] font-bold text-slate-400 uppercase block">
+          <div className="p-2.5 rounded-xl bg-[#F7F5F0] border border-[#E7E2D8] space-y-1.5">
+            <span className="text-[10px] font-semibold text-[#78716C] uppercase block">
               Занятость на выбранный день ({otherDayLessons.length} ур.):
             </span>
             {otherDayLessons.length === 0 ? (
@@ -409,9 +416,9 @@ const EditLessonModalContent: React.FC<EditLessonModalContentProps> = ({
                 {otherDayLessons.map((ol) => (
                   <span
                     key={ol.id}
-                    className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-white border border-slate-200 text-slate-700"
+                    className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-white border border-[#E7E2D8] text-[#44403C]"
                   >
-                    <b className="tabular-nums text-slate-900">{ol.time_str}</b> ·{' '}
+                    <b className="tabular-nums text-[#1C1917]">{ol.time_str}</b> ·{' '}
                     {ol.student_name || 'Ученик'}
                   </span>
                 ))}
@@ -423,25 +430,25 @@ const EditLessonModalContent: React.FC<EditLessonModalContentProps> = ({
           <div className="space-y-2">
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">
+                <label className="text-[11px] font-semibold text-[#78716C] uppercase block mb-1">
                   Начало
                 </label>
                 <input
                   type="time"
                   value={startTime}
                   onChange={(e) => handleStartTimeChange(e.target.value)}
-                  className="w-full text-xs font-semibold tabular-nums text-slate-900 bg-slate-50 px-3 py-2.5 rounded-xl border border-slate-200 focus:bg-white focus:border-blue-500 focus:outline-hidden"
+                  className="w-full text-xs font-semibold tabular-nums text-[#1C1917] bg-[#F7F5F0] px-3 py-2.5 rounded-xl border border-[#E7E2D8] focus:bg-white focus:border-[#2F6FED] focus:outline-hidden"
                 />
               </div>
               <div>
-                <label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">
+                <label className="text-[11px] font-semibold text-[#78716C] uppercase block mb-1">
                   Конец ({durationMin} мин)
                 </label>
                 <input
                   type="time"
                   value={endTime}
                   onChange={(e) => handleEndTimeChange(e.target.value)}
-                  className="w-full text-xs font-semibold tabular-nums text-slate-900 bg-slate-50 px-3 py-2.5 rounded-xl border border-slate-200 focus:bg-white focus:border-blue-500 focus:outline-hidden"
+                  className="w-full text-xs font-semibold tabular-nums text-[#1C1917] bg-[#F7F5F0] px-3 py-2.5 rounded-xl border border-[#E7E2D8] focus:bg-white focus:border-[#2F6FED] focus:outline-hidden"
                 />
               </div>
             </div>
@@ -453,10 +460,10 @@ const EditLessonModalContent: React.FC<EditLessonModalContentProps> = ({
                   key={d}
                   type="button"
                   onClick={() => handleSelectDuration(d)}
-                  className={`flex-1 py-1.5 rounded-xl text-[11px] font-bold border transition-all active:scale-95 ${
+                  className={`flex-1 py-1.5 rounded-xl text-[11px] font-semibold border transition-colors active:scale-95 ${
                     durationMin === d
-                      ? 'bg-slate-900 text-white border-slate-900'
-                      : 'bg-slate-50 text-slate-600 border-slate-200'
+                      ? 'bg-[#1C1917] text-white border-[#1C1917]'
+                      : 'bg-[#F7F5F0] text-[#57534E] border-[#E7E2D8]'
                   }`}
                 >
                   {d} мин
@@ -466,7 +473,7 @@ const EditLessonModalContent: React.FC<EditLessonModalContentProps> = ({
 
             {/* Conflict Warning */}
             {conflictingLesson && (
-              <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-bold flex items-center gap-2">
+              <div className="p-2.5 rounded-xl bg-[#FEF6E7] border border-[#F3DCAC] text-amber-950 text-xs font-semibold flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                 <span>
                   Внимание: накладка с уроком «{conflictingLesson.student_name}» (
@@ -482,16 +489,16 @@ const EditLessonModalContent: React.FC<EditLessonModalContentProps> = ({
           <button
             type="button"
             onClick={handleSave}
-            className="w-full py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-500/20 flex items-center justify-center gap-1.5 active:scale-98 transition-all"
+            className="w-full py-3.5 rounded-2xl bg-[#2F6FED] hover:bg-[#255CE0] text-white text-xs font-semibold shadow-sm flex items-center justify-center gap-1.5 active:scale-98 transition-colors"
           >
-            <Check className="w-4 h-4 stroke-[3]" />
+            <Check className="w-4 h-4 stroke-[2.5]" />
             <span>Сохранить изменения</span>
           </button>
 
           <button
             type="button"
             onClick={() => setIsDeleteConfirmOpen(true)}
-            className="w-full py-3 rounded-2xl bg-rose-50 text-rose-600 text-xs font-bold border border-rose-200/80 flex items-center justify-center gap-1.5 active:scale-98"
+            className="w-full py-3 rounded-2xl bg-[#FDECE8] text-[#B93815] text-xs font-semibold border border-[#F6BFA9] flex items-center justify-center gap-1.5 active:scale-98"
           >
             <Trash2 className="w-4 h-4" aria-hidden="true" />
             <span>Удалить урок из расписания</span>

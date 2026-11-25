@@ -133,12 +133,12 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
   }, [lessons]);
 
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1">
       {/* Date Strip Header */}
       <div className="flex items-center justify-between gap-2 px-0.5">
         <div className="flex items-center gap-1.5 min-w-0">
-          <CalendarIcon className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-          <span className="text-xs font-semibold capitalize tracking-tight text-slate-800 truncate">
+          <CalendarIcon className="w-3.5 h-3.5 text-[#2F6FED] shrink-0" aria-hidden="true" />
+          <span className="text-[11px] font-semibold capitalize tracking-tight text-[#1C1917] truncate">
             {isSelectedToday
               ? `Сегодня • ${formatTashkentHeaderDate(selectedDate)}`
               : formatTashkentHeaderDate(selectedDate)}
@@ -150,7 +150,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
             <button
               type="button"
               onClick={handleTodayClick}
-              className="touch-hit h-8 text-[11px] font-semibold text-blue-700 bg-blue-50 border border-blue-200/80 px-2.5 rounded-lg active:scale-95 transition-all"
+              className="touch-hit h-7 text-[11px] font-semibold text-[#2F6FED] bg-[#EEF3FE] border border-[#2F6FED]/20 px-2.5 rounded-full active:scale-95 transition-colors"
             >
               Сегодня
             </button>
@@ -164,20 +164,20 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
               setIsMonthView(!isMonthView);
               setCurrentMonthDate(selectedDate);
             }}
-            className={`touch-hit h-8 flex items-center gap-1 text-[11px] font-semibold px-2.5 rounded-lg border transition-all active:scale-95 ${
+            className={`touch-hit h-7 flex items-center gap-1 text-[11px] font-semibold px-2.5 rounded-full border transition-colors active:scale-95 ${
               isMonthView
-                ? 'bg-slate-900 text-white border-slate-900'
-                : 'bg-slate-50/90 text-slate-700 border-slate-200 hover:bg-slate-100'
+                ? 'bg-[#1C1917] text-white border-[#1C1917]'
+                : 'bg-[#F2EFE9] text-[#57534E] border-[#E7E2D8] hover:bg-[#EAE5DC]'
             }`}
           >
             {isMonthView ? (
               <>
-                <List className="w-3.5 h-3.5" aria-hidden="true" />
+                <List className="w-3 h-3" aria-hidden="true" />
                 <span>Неделя</span>
               </>
             ) : (
               <>
-                <LayoutGrid className="w-3.5 h-3.5" aria-hidden="true" />
+                <LayoutGrid className="w-3 h-3" aria-hidden="true" />
                 <span>Месяц</span>
               </>
             )}
@@ -190,11 +190,11 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
                 hapticImpact('light');
                 onQuickAdd();
               }}
-              className="touch-hit w-8 h-8 rounded-lg bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center shadow-xs active:scale-95 transition-all shrink-0 animate-in fade-in zoom-in-95 duration-150 motion-reduce:animate-none"
+              className="touch-hit w-7 h-7 rounded-full bg-[#2F6FED] hover:bg-[#255CE0] text-white flex items-center justify-center shadow-xs active:scale-95 transition-colors shrink-0"
               title="Добавить урок"
               aria-label="Добавить урок"
             >
-              <Plus className="w-4 h-4 stroke-[2.5]" aria-hidden="true" />
+              <Plus className="w-3.5 h-3.5 stroke-[2.5]" aria-hidden="true" />
             </button>
           )}
         </div>
@@ -202,7 +202,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
 
       {/* VIEW 1: HORIZONTAL SCROLLABLE STRIP (DEFAULT) */}
       {!isMonthView && (
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 no-scrollbar">
+        <div className="flex items-center gap-1 overflow-x-auto pb-0.5 no-scrollbar">
           {daysStrip.map((day) => {
             const chip = formatCalendarChip(day);
             const dayStr = getTashkentDateString(day);
@@ -215,37 +215,37 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
                 ref={isSelected ? selectedChipRef : null}
                 aria-current={isSelected ? 'date' : undefined}
                 onClick={() => handleDayClick(day)}
-                className={`flex flex-col items-center justify-between min-w-[44px] h-[56px] py-1 px-1 rounded-xl border transition-all active:scale-95 shrink-0 relative ${
+                className={`flex flex-col items-center justify-between min-w-[40px] h-[48px] py-1 px-1 rounded-xl border transition-colors active:scale-95 shrink-0 relative ${
                   isSelected
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm shadow-blue-500/25 font-bold'
+                    ? 'bg-[#1C1917] text-white border-[#1C1917] shadow-xs font-bold'
                     : chip.isToday
-                    ? 'bg-blue-50/80 text-blue-700 border-blue-300'
-                    : 'bg-slate-50/70 text-slate-700 border-slate-200/80 hover:bg-slate-100'
+                    ? 'bg-[#EEF3FE] text-[#2F6FED] border-[#2F6FED]/30'
+                    : 'bg-[#F7F5F0] text-[#44403C] border-[#E7E2D8]/80 hover:bg-[#EFEBE2]'
                 }`}
               >
                 <span
-                  className={`text-[10px] uppercase font-semibold leading-none ${
-                    isSelected ? 'text-blue-100' : chip.isToday ? 'text-blue-600' : 'text-slate-400'
+                  className={`text-[9.5px] uppercase font-semibold leading-none ${
+                    isSelected ? 'text-[#D6D3CD]' : chip.isToday ? 'text-[#2F6FED]' : 'text-[#8C857B]'
                   }`}
                 >
                   {chip.dayOfWeek}
                 </span>
 
-                <span className="text-sm font-bold leading-none tabular-nums">{chip.dayNumber}</span>
+                <span className="text-[13px] font-bold leading-none tabular-nums">{chip.dayNumber}</span>
 
-                {/* Lesson Count / Status Pill */}
-                <div className="h-3.5 flex items-center justify-center">
+                {/* Compact Lesson Count / Status Indicator */}
+                <div className="h-2.5 flex items-center justify-center">
                   {statusSummary.total > 0 ? (
                     <span
-                      className={`text-[9px] font-semibold px-1.5 rounded-full leading-tight inline-flex items-center gap-0.5 tabular-nums ${
+                      className={`text-[8.5px] font-semibold px-1 rounded-full leading-tight inline-flex items-center tabular-nums ${
                         isSelected
                           ? 'bg-white/20 text-white'
                           : statusSummary.allDone
                           ? 'bg-emerald-100 text-emerald-700'
-                          : 'bg-slate-200/80 text-slate-600'
+                          : 'bg-[#E8DFD1] text-[#57534E]'
                       }`}
                     >
-                      <span>{statusSummary.total}</span>
+                      {statusSummary.total}
                     </span>
                   ) : (
                     <span className="w-1 h-1 rounded-full bg-transparent" />
@@ -259,7 +259,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
 
       {/* VIEW 2: EXPANDED MONTH GRID (1-31) */}
       {isMonthView && (
-        <div className="p-3 bg-white border border-slate-200 rounded-2xl space-y-2.5 animate-in fade-in zoom-in-95 duration-150 shadow-lg">
+        <div className="p-3 bento-card rounded-3xl space-y-2.5 shadow-lg">
           {/* Month Navigator */}
           <div className="flex items-center justify-between">
             <button
@@ -269,12 +269,12 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
                 hapticImpact('light');
                 setCurrentMonthDate(subMonths(currentMonthDate, 1));
               }}
-              className="touch-hit p-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 active:scale-95"
+              className="touch-hit p-2 rounded-xl bg-[#F2EFE9] text-[#44403C] hover:bg-[#E7E2D8] active:scale-95"
             >
               <ChevronLeft className="w-4 h-4" aria-hidden="true" />
             </button>
 
-            <span className="text-xs font-bold capitalize text-slate-900">
+            <span className="text-xs font-bold capitalize text-[#1C1917]">
               {format(currentMonthDate, 'LLLL yyyy', { locale: ru })}
             </span>
 
@@ -285,7 +285,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
                 hapticImpact('light');
                 setCurrentMonthDate(addMonths(currentMonthDate, 1));
               }}
-              className="touch-hit p-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 active:scale-95"
+              className="touch-hit p-2 rounded-xl bg-[#F2EFE9] text-[#44403C] hover:bg-[#E7E2D8] active:scale-95"
             >
               <ChevronRight className="w-4 h-4" aria-hidden="true" />
             </button>
@@ -294,7 +294,7 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
           {/* DOW Headers */}
           <div className="grid grid-cols-7 gap-1 text-center">
             {['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'].map((d) => (
-              <span key={d} className="text-[10px] font-semibold uppercase text-slate-400">
+              <span key={d} className="text-[10px] font-semibold uppercase text-[#8C857B]">
                 {d}
               </span>
             ))}
@@ -313,26 +313,26 @@ export const HorizontalDateStrip: React.FC<HorizontalDateStripProps> = ({
                   key={day.toISOString()}
                   onClick={() => handleDayClick(day)}
                   disabled={!isCurrentMonth}
-                  className={`h-10 rounded-xl flex flex-col items-center justify-center relative border transition-all active:scale-95 ${
+                  className={`h-9 rounded-xl flex flex-col items-center justify-center relative border transition-colors active:scale-95 ${
                     !isCurrentMonth
-                      ? 'opacity-20 pointer-events-none border-transparent text-slate-400'
+                      ? 'opacity-20 pointer-events-none border-transparent text-[#8C857B]'
                       : isSelected
-                      ? 'bg-blue-600 text-white border-blue-600 shadow-xs font-bold'
+                      ? 'bg-[#1C1917] text-white border-[#1C1917] shadow-xs font-bold'
                       : isToday
-                      ? 'bg-blue-50 text-blue-700 border-blue-300 font-semibold'
-                      : 'bg-slate-50/70 border-slate-100 text-slate-700 hover:border-slate-300'
+                      ? 'bg-[#EEF3FE] text-[#2F6FED] border-[#2F6FED]/30 font-semibold'
+                      : 'bg-[#F7F5F0] border-[#E7E2D8]/70 text-[#44403C] hover:border-[#D6CFC2]'
                   }`}
                 >
                   <span className="text-xs leading-none font-semibold tabular-nums">{format(day, 'd')}</span>
 
                   {statusSummary.total > 0 && (
                     <span
-                      className={`text-[9px] font-semibold mt-0.5 leading-none tabular-nums ${
+                      className={`text-[8.5px] font-semibold mt-0.5 leading-none tabular-nums ${
                         isSelected
-                          ? 'text-blue-100'
+                          ? 'text-[#D6D3CD]'
                           : statusSummary.allDone
                           ? 'text-emerald-600'
-                          : 'text-slate-400'
+                          : 'text-[#8C857B]'
                       }`}
                     >
                       {statusSummary.total} ур.

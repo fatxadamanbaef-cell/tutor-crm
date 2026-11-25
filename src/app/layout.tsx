@@ -20,7 +20,7 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",
-  themeColor: "#ffffff",
+  themeColor: "#F7F5F0",
 };
 
 export default function RootLayout({
@@ -36,7 +36,7 @@ export default function RootLayout({
           strategy="beforeInteractive"
         />
       </head>
-      <body className="min-h-dvh bg-[#f4f5f8] text-slate-900 antialiased select-none font-sans" suppressHydrationWarning>
+      <body className="min-h-dvh bg-[#F7F5F0] text-[#1C1917] antialiased select-none font-sans" suppressHydrationWarning>
         {children}
       </body>
     </html>

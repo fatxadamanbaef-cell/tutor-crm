@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Student, Lesson, LessonStatus } from '@/types';
-import { X, CalendarPlus, AlertTriangle } from 'lucide-react';
+import { X, CalendarPlus, AlertTriangle, Clock, Check } from 'lucide-react';
 import { hapticImpact, hapticNotification } from '@/lib/telegram';
 import { getTashkentTodayStr, dayOfWeekOf } from '@/lib/formatters';
 import { format } from 'date-fns';
@@ -218,7 +218,7 @@ const AddLessonModalContent: React.FC<Omit<AddLessonModalProps, 'isOpen'>> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/40 flex items-end justify-center animate-in fade-in duration-150"
+      className="fixed inset-0 z-50 bg-[#1C1917]/40 flex items-end justify-center animate-in fade-in duration-150"
       onClick={(e) => {
         e.stopPropagation();
         onClose();
@@ -226,13 +226,14 @@ const AddLessonModalContent: React.FC<Omit<AddLessonModalProps, 'isOpen'>> = ({
       style={{ touchAction: 'none' }}
     >
       <div
-        className="w-full max-w-md bg-white rounded-t-3xl p-5 space-y-4 max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom duration-200 text-xs text-slate-900 shadow-2xl"
+        className="w-full max-w-md bg-white rounded-t-3xl p-5 pt-3 space-y-3.5 max-h-[90vh] overflow-y-auto animate-in slide-in-from-bottom duration-200 text-xs text-[#1C1917] shadow-2xl border-t border-[#E7E2D8]"
         onClick={(e) => e.stopPropagation()}
         style={{ touchAction: 'pan-y', overscrollBehaviorY: 'contain' } as React.CSSProperties}
       >
-        <div className="flex items-center justify-between pb-2 border-b border-slate-100">
-          <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-            <CalendarPlus className="w-4 h-4 text-blue-600" />
+        <div className="w-9 h-1 rounded-full bg-[#DDD6C9] mx-auto" aria-hidden="true" />
+        <div className="flex items-center justify-between pb-2 border-b border-[#EFECE5]">
+          <h3 className="text-base font-bold text-[#1C1917] flex items-center gap-2">
+            <CalendarPlus className="w-4 h-4 text-[#2F6FED]" />
             <span>Новое занятие</span>
           </h3>
           <button
@@ -242,7 +243,7 @@ const AddLessonModalContent: React.FC<Omit<AddLessonModalProps, 'isOpen'>> = ({
               hapticImpact('light');
               onClose();
             }}
-            className="p-1.5 rounded-full text-slate-400 hover:bg-slate-100 transition-colors"
+            className="p-1.5 rounded-full bg-[#F2EFE9] text-[#78716C] hover:text-[#1C1917] transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -250,18 +251,18 @@ const AddLessonModalContent: React.FC<Omit<AddLessonModalProps, 'isOpen'>> = ({
 
         <form onSubmit={handleSubmit} className="space-y-3.5">
           <div>
-            <label className="block text-slate-500 font-semibold text-xs mb-1">
-              Ученик <span className="text-rose-500">*</span>
+            <label className="block text-[#78716C] font-semibold text-xs mb-1">
+              Ученик <span className="text-[#E85D3F]">*</span>
             </label>
             {students.length === 0 ? (
-              <div className="p-3 rounded-xl bg-orange-50 border border-orange-200 text-orange-700 font-medium">
-                Список учеников пуст. Сначала добавьте ученика во вкладке «Клиенты».
+              <div className="p-3 rounded-xl bg-[#FEF6E7] border border-[#F3DCAC] text-amber-900 font-medium">
+                Список учеников пуст. Сначала добавьте ученика во вкладке «Ученики».
               </div>
             ) : (
               <select
                 value={studentId || students[0]?.id}
                 onChange={(e) => handleStudentChange(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5 text-slate-900 font-bold focus:outline-hidden focus:border-blue-600 focus:bg-white"
+                className="w-full bg-[#F7F5F0] border border-[#E7E2D8] rounded-xl px-3 py-2.5 text-[#1C1917] font-semibold focus:outline-hidden focus:border-[#2F6FED] focus:bg-white"
               >
                 {students.map((s) => (
                   <option key={s.id} value={s.id}>
@@ -274,7 +275,7 @@ const AddLessonModalContent: React.FC<Omit<AddLessonModalProps, 'isOpen'>> = ({
 
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="block text-slate-500 font-semibold text-xs mb-1">
+              <label className="block text-[#78716C] font-semibold text-xs mb-1">
                 Дата урока
               </label>
               <input
@@ -282,12 +283,12 @@ const AddLessonModalContent: React.FC<Omit<AddLessonModalProps, 'isOpen'>> = ({
                 required
                 value={lessonDate}
                 onChange={(e) => handleDateChange(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-bold focus:outline-hidden focus:border-blue-600"
+                className="w-full bg-[#F7F5F0] border border-[#E7E2D8] rounded-xl px-3 py-2 text-[#1C1917] font-semibold focus:outline-hidden focus:border-[#2F6FED]"
               />
             </div>
 
             <div>
-              <label className="block text-slate-500 font-semibold text-xs mb-1">
+              <label className="block text-[#78716C] font-semibold text-xs mb-1">
                 Время начала
               </label>
               <input
@@ -295,24 +296,24 @@ const AddLessonModalContent: React.FC<Omit<AddLessonModalProps, 'isOpen'>> = ({
                 required
                 value={startTime}
                 onChange={(e) => setStartTime(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-bold focus:outline-hidden focus:border-blue-600"
+                className="w-full bg-[#F7F5F0] border border-[#E7E2D8] rounded-xl px-3 py-2 text-[#1C1917] font-semibold focus:outline-hidden focus:border-[#2F6FED]"
               />
             </div>
           </div>
 
           {/* Occupied Slots on Selected Date */}
           {dayOccupiedLessons.length > 0 && (
-            <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200/80 space-y-1">
-              <span className="text-[10px] font-bold text-slate-400 uppercase block">
+            <div className="p-2.5 rounded-xl bg-[#F7F5F0] border border-[#E7E2D8] space-y-1">
+              <span className="text-[10px] font-semibold text-[#78716C] uppercase block">
                 Уже стоят уроки в этот день:
               </span>
               <div className="flex flex-wrap gap-1">
                 {dayOccupiedLessons.map((ol) => (
                   <span
                     key={ol.id}
-                    className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-700"
+                    className="text-[11px] font-semibold px-2 py-0.5 rounded-lg bg-white border border-[#E7E2D8] text-[#44403C]"
                   >
-                    <b className="tabular-nums text-slate-900">{ol.time_str}</b> ·{' '}
+                    <b className="tabular-nums text-[#1C1917]">{ol.time_str}</b> ·{' '}
                     {ol.student_name || 'Ученик'}
                   </span>
                 ))}
@@ -321,7 +322,7 @@ const AddLessonModalContent: React.FC<Omit<AddLessonModalProps, 'isOpen'>> = ({
           )}
 
           {conflictingLesson && (
-            <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs font-bold flex items-center gap-2">
+            <div className="p-2.5 rounded-xl bg-[#FEF6E7] border border-[#F3DCAC] text-amber-950 text-xs font-semibold flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
               <span>
                 Накладка по времени с «{conflictingLesson.student_name}» ({conflictingLesson.time_str})
@@ -331,10 +332,10 @@ const AddLessonModalContent: React.FC<Omit<AddLessonModalProps, 'isOpen'>> = ({
 
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-slate-500 font-semibold text-xs">
+              <label className="block text-[#78716C] font-semibold text-xs">
                 Длительность
               </label>
-              <span className="text-[11px] tabular-nums text-blue-600 font-semibold">
+              <span className="text-[11px] tabular-nums text-[#2F6FED] font-semibold">
                 {startTime} – {calculateEndTime(startTime, duration)} ({duration} мин)
               </span>
             </div>
@@ -345,10 +346,10 @@ const AddLessonModalContent: React.FC<Omit<AddLessonModalProps, 'isOpen'>> = ({
                   key={d}
                   type="button"
                   onClick={() => setDuration(d)}
-                  className={`py-2 px-1 rounded-xl text-xs font-bold border transition-all ${
+                  className={`py-2 px-1 rounded-xl text-xs font-semibold border transition-colors ${
                     duration === d
-                      ? 'bg-slate-900 border-slate-900 text-white shadow-xs'
-                      : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-slate-300'
+                      ? 'bg-[#1C1917] border-[#1C1917] text-white shadow-xs'
+                      : 'bg-[#F7F5F0] border-[#E7E2D8] text-[#57534E] hover:border-[#D6CFC2]'
                   }`}
                 >
                   {d} мин
@@ -358,37 +359,39 @@ const AddLessonModalContent: React.FC<Omit<AddLessonModalProps, 'isOpen'>> = ({
           </div>
 
           <div>
-            <label className="block text-slate-500 font-semibold text-xs mb-1">
+            <label className="block text-[#78716C] font-semibold text-xs mb-1">
               Статус урока
             </label>
             <div className="grid grid-cols-2 gap-1.5">
               <button
                 type="button"
                 onClick={() => setLessonStatus('planned')}
-                className={`py-2 px-2 rounded-xl font-bold text-xs border transition-all ${
+                className={`py-2 px-2 rounded-xl font-semibold text-xs border transition-colors flex items-center justify-center gap-1.5 ${
                   lessonStatus === 'planned'
-                    ? 'bg-blue-600 border-blue-600 text-white shadow-xs'
-                    : 'bg-slate-50 border-slate-200 text-slate-600'
+                    ? 'bg-[#2F6FED] border-[#2F6FED] text-white shadow-xs'
+                    : 'bg-[#F7F5F0] border-[#E7E2D8] text-[#57534E]'
                 }`}
               >
-                ⏳ Запланирован
+                <Clock className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>Запланирован</span>
               </button>
               <button
                 type="button"
                 onClick={() => setLessonStatus('completed')}
-                className={`py-2 px-2 rounded-xl font-bold text-xs border transition-all ${
+                className={`py-2 px-2 rounded-xl font-semibold text-xs border transition-colors flex items-center justify-center gap-1.5 ${
                   lessonStatus === 'completed'
                     ? 'bg-emerald-600 border-emerald-600 text-white shadow-xs'
-                    : 'bg-slate-50 border-slate-200 text-slate-600'
+                    : 'bg-[#F7F5F0] border-[#E7E2D8] text-[#57534E]'
                 }`}
               >
-                ✅ Проведён (-1)
+                <Check className="w-3.5 h-3.5 stroke-[2.5]" aria-hidden="true" />
+                <span>Проведён (-1)</span>
               </button>
             </div>
           </div>
 
           <div>
-            <label className="block text-slate-500 font-semibold text-xs mb-1">
+            <label className="block text-[#78716C] font-semibold text-xs mb-1">
               Тема / Заметка к уроку
             </label>
             <input
@@ -396,14 +399,14 @@ const AddLessonModalContent: React.FC<Omit<AddLessonModalProps, 'isOpen'>> = ({
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Необязательно: тема или ДЗ..."
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 focus:outline-hidden focus:border-blue-600 focus:bg-white"
+              className="w-full bg-[#F7F5F0] border border-[#E7E2D8] rounded-xl px-3 py-2 text-[#1C1917] focus:outline-hidden focus:border-[#2F6FED] focus:bg-white"
             />
           </div>
 
           <button
             type="submit"
             disabled={students.length === 0}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold py-3.5 px-4 rounded-2xl shadow-md shadow-blue-500/25 active:scale-[0.98] transition-all"
+            className="w-full bg-[#2F6FED] hover:bg-[#255CE0] disabled:opacity-50 text-white font-semibold py-3.5 px-4 rounded-2xl shadow-sm active:scale-[0.98] transition-colors"
           >
             + Поставить в расписание
           </button>

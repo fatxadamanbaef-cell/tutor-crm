@@ -145,38 +145,37 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#f4f5f8] pb-28">
+    <div className="flex flex-col h-full bg-[#F7F5F0] pb-28">
       {/* Header */}
-      <div className="px-4 pt-safe pb-3 bg-white border-b border-slate-200/80 sticky top-0 z-10 space-y-2.5 shadow-2xs">
+      <div className="px-4 pt-safe pb-2.5 bg-white border-b border-[#E7E2D8] sticky top-0 z-10 space-y-2">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-lg font-bold text-slate-900 tracking-tight leading-none">
+            <h1 className="text-lg font-bold text-[#1C1917] tracking-tight leading-none">
               Ученики
             </h1>
-            <p className="text-xs text-slate-500 font-medium mt-1 tabular-nums">
-              Активных: <b className="text-slate-900 font-semibold">{activeStudents.length}</b>
+            <p className="text-xs text-[#78716C] font-medium mt-1 tabular-nums">
+              Активных: <b className="text-[#1C1917] font-semibold">{activeStudents.length}</b>
               {lowBalanceCount > 0 && (
-                <span className="text-rose-600 font-semibold"> • К оплате: {lowBalanceCount}</span>
+                <span className="text-[#B93815] font-semibold"> · К оплате: {lowBalanceCount}</span>
               )}
-              {inactiveStudents.length > 0 ? ` • Пауза: ${inactiveStudents.length}` : ''}
+              {inactiveStudents.length > 0 ? ` · Пауза: ${inactiveStudents.length}` : ''}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <button
               type="button"
               onClick={() => {
                 hapticImpact('light');
                 setSortMode((prev) => (prev === 'name' ? 'balance' : 'name'));
               }}
-              className={`h-9 px-3 rounded-xl border text-xs font-bold flex items-center gap-1 active:scale-95 transition-all ${
-                sortMode === 'balance'
-                  ? 'bg-amber-50 border-amber-300 text-amber-800'
-                  : 'bg-slate-100 border-slate-200 text-slate-700'
-              }`}
+              className={`h-8 px-2.5 rounded-full border text-xs font-semibold flex items-center gap-1 active:scale-95 transition-colors ${sortMode === 'balance'
+                  ? 'bg-[#FEF6E7] border-[#F3DCAC] text-amber-900'
+                  : 'bg-[#F2EFE9] border-[#E7E2D8] text-[#44403C]'
+                }`}
               title="Переключить сортировку"
             >
-              <ArrowUpDown className="w-3.5 h-3.5" />
-              <span>{sortMode === 'balance' ? 'По балансу' : 'А–Я'}</span>
+              <ArrowUpDown className="w-3.5 h-3.5" aria-hidden="true" />
+              <span>{sortMode === 'balance' ? 'Баланс' : 'А–Я'}</span>
             </button>
             <button
               type="button"
@@ -185,9 +184,9 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                 hapticImpact('light');
                 onAddStudent();
               }}
-              className="h-9 px-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1 shadow-sm shadow-blue-500/20 active:scale-95 transition-all"
+              className="h-8 px-3 rounded-full bg-[#2F6FED] hover:bg-[#255CE0] text-white font-semibold text-xs flex items-center gap-1 shadow-xs active:scale-95 transition-colors"
             >
-              <Plus className="w-4 h-4 stroke-[2.5]" />
+              <Plus className="w-3.5 h-3.5 stroke-[2.5]" aria-hidden="true" />
               <span>Ученик</span>
             </button>
           </div>
@@ -196,11 +195,11 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
         {/* Search Bar */}
         <div className="relative">
           <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Search className="h-4 w-4 text-slate-400" aria-hidden="true" />
+            <Search className="h-4 w-4 text-[#8C857B]" aria-hidden="true" />
           </div>
           <input
             type="text"
-            className="block w-full pl-9 pr-9 py-2 bg-slate-100 border border-transparent rounded-xl text-xs font-semibold text-slate-900 placeholder-slate-400 focus:outline-hidden focus:bg-white focus:border-blue-500 transition-all"
+            className="block w-full pl-9 pr-9 py-2 bg-[#F2EFE9] border border-transparent rounded-xl text-xs font-semibold text-[#1C1917] placeholder-[#8C857B] focus:outline-hidden focus:bg-white focus:border-[#2F6FED] transition-colors"
             placeholder="Поиск по имени ученика..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -210,7 +209,7 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
               type="button"
               onClick={() => setSearchQuery('')}
               aria-label="Очистить поиск"
-              className="touch-hit absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600"
+              className="touch-hit absolute inset-y-0 right-0 pr-2.5 flex items-center text-[#8C857B] hover:text-[#44403C]"
             >
               <X className="w-4 h-4" aria-hidden="true" />
             </button>
@@ -238,13 +237,12 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                 hapticImpact('light');
                 setFilterMode(chip.id as FilterMode);
               }}
-              className={`shrink-0 px-3 py-1 rounded-xl text-[11px] font-bold border transition-all active:scale-95 ${
-                filterMode === chip.id
+              className={`shrink-0 px-3 py-1 rounded-full text-[11px] font-semibold border transition-colors active:scale-95 ${filterMode === chip.id
                   ? chip.id === 'low_balance'
-                    ? 'bg-rose-600 text-white border-rose-600 shadow-2xs'
-                    : 'bg-slate-900 text-white border-slate-900 shadow-2xs'
-                  : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
-              }`}
+                    ? 'bg-[#E85D3F] text-white border-[#E85D3F]'
+                    : 'bg-[#1C1917] text-white border-[#1C1917]'
+                  : 'bg-[#F7F5F0] text-[#57534E] border-[#E7E2D8] hover:bg-[#EFEBE2]'
+                }`}
             >
               {chip.label}
             </button>
@@ -253,9 +251,9 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
       </div>
 
       {/* Students List */}
-      <div className="flex-1 px-3.5 py-3.5 space-y-2.5 overflow-y-auto">
+      <div className="flex-1 px-3 py-2.5 space-y-2 overflow-y-auto">
         {filtered.length === 0 ? (
-          <div className="text-center py-16 text-slate-400 text-xs font-semibold">
+          <div className="text-center py-16 text-[#8C857B] text-xs font-semibold">
             {students.length === 0
               ? 'У вас пока нет учеников. Добавьте первого!'
               : 'По выбранному фильтру учеников нет'}
@@ -280,6 +278,7 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
             const progressPct = isExhausted
               ? 100
               : Math.min(100, Math.round((used / Math.max(1, total)) * 100));
+            const avatarColor = student.color || '#2F6FED';
 
             return (
               <div
@@ -288,48 +287,50 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                   hapticImpact('light');
                   onOpenStudent(student);
                 }}
-                className={`w-full bg-white rounded-2xl p-3.5 shadow-2xs border overflow-hidden cursor-pointer active:scale-[0.99] transition-all hover:border-slate-300 space-y-2.5 ${
-                  isPaused
-                    ? 'border-slate-200 opacity-70'
+                className={`w-full bento-card rounded-2xl p-3 overflow-hidden cursor-pointer active:scale-[0.99] transition-colors hover:border-[#D6CFC2] space-y-2 ${isPaused
+                    ? 'border-[#E7E2D8] opacity-70'
                     : balance <= 0
-                    ? 'border-rose-200/90'
-                    : 'border-slate-200/80'
-                }`}
+                      ? 'border-[#F6BFA9]'
+                      : 'border-[#E7E2D8]/90'
+                  }`}
               >
                 <div className="flex items-start justify-between gap-2.5">
-                  <div className="flex items-start gap-3 min-w-0">
+                  <div className="flex items-start gap-2.5 min-w-0">
                     <div
-                      className="w-9 h-9 rounded-xl flex items-center justify-center text-white font-bold text-sm shadow-2xs shrink-0 mt-0.5"
-                      style={{ backgroundColor: student.color || '#3B82F6' }}
+                      className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5"
+                      style={{
+                        backgroundColor: `${avatarColor}1F`,
+                        color: avatarColor,
+                      }}
                     >
                       {student.name.charAt(0).toUpperCase()}
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <h3 className="text-[15px] font-semibold text-slate-900 leading-snug truncate">
+                        <h3 className="text-[14px] font-semibold text-[#1C1917] leading-snug truncate">
                           {student.name}
                         </h3>
                         {isPaused && (
-                          <span className="px-1.5 py-0.5 rounded-md bg-slate-200 text-slate-700 text-[9px] font-semibold uppercase">
+                          <span className="px-1.5 py-0.5 rounded-full bg-[#EFECE5] text-[#57534E] text-[9px] font-semibold uppercase">
                             Пауза
                           </span>
                         )}
                       </div>
 
                       {scheduleSummary ? (
-                        <div className="text-xs text-slate-700 font-medium flex items-center gap-1 mt-0.5 truncate tabular-nums">
-                          <CalendarClock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                        <div className="text-xs text-[#44403C] font-medium flex items-center gap-1 mt-0.5 truncate tabular-nums">
+                          <CalendarClock className="w-3.5 h-3.5 text-[#2F6FED] shrink-0" aria-hidden="true" />
                           <span className="truncate">{scheduleSummary}</span>
                         </div>
                       ) : (
-                        <div className="text-[11px] text-slate-400 mt-0.5">
+                        <div className="text-[11px] text-[#8C857B] mt-0.5">
                           Расписание не задано
                         </div>
                       )}
 
-                      <div className="text-[11px] text-slate-500 font-medium mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 tabular-nums">
+                      <div className="text-[11px] text-[#78716C] font-medium mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 tabular-nums">
                         <span>{Math.round(rate / 1000)} тыс/ур.</span>
-                        <span className="text-slate-400">
+                        <span className="text-[#8C857B]">
                           {isPkg
                             ? `Пакет ${total} ур.${cycleStart ? ` с ${formatShortRuDate(cycleStart)}` : ''}`
                             : `По датам (с ${billingPeriod.billingDay}-го числа)`}
@@ -341,22 +342,21 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                   {/* Right: Balance Badge + Contact Quick Links */}
                   <div className="flex flex-col items-end gap-1.5 shrink-0">
                     <span
-                      className={`text-xs font-semibold px-2.5 py-1 rounded-xl border inline-flex items-center gap-1 tabular-nums ${
-                        balance <= 0
-                          ? 'bg-rose-50 text-rose-700 border-rose-200'
+                      className={`text-xs font-semibold px-2.5 py-0.5 rounded-full border inline-flex items-center gap-1 tabular-nums ${balance <= 0
+                          ? 'bg-[#FDECE8] text-[#B93815] border-[#F6BFA9]'
                           : balance <= 2
-                          ? 'bg-amber-50 text-amber-800 border-amber-200'
-                          : 'bg-emerald-50/80 text-emerald-800 border-emerald-200/80'
-                      }`}
+                            ? 'bg-[#FEF6E7] text-amber-800 border-[#F3DCAC]'
+                            : 'bg-[#E7F7F0] text-emerald-800 border-emerald-200/80'
+                        }`}
                     >
-                      {balance <= 0 && <AlertCircle className="w-3.5 h-3.5 text-rose-600" />}
+                      {balance <= 0 && <AlertCircle className="w-3 h-3 text-[#E85D3F]" aria-hidden="true" />}
                       <span>{balance} ур.</span>
                     </span>
 
                     {/* 1-Tap Contact Icons */}
                     {(tgUrl || student.phone) && (
                       <div
-                        className="flex items-center gap-1.5"
+                        className="flex items-center gap-1"
                         onClick={(e) => e.stopPropagation()}
                       >
                         {tgUrl && (
@@ -365,20 +365,20 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                             target="_blank"
                             rel="noopener noreferrer"
                             aria-label={`Написать в Telegram: ${student.name}`}
-                            className="touch-hit w-8 h-8 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center justify-center active:scale-90 transition-all"
+                            className="touch-hit w-7 h-7 rounded-full bg-[#EEF3FE] text-[#2F6FED] hover:bg-[#E2EBFC] flex items-center justify-center active:scale-90 transition-colors"
                             title="Написать в Telegram"
                           >
-                            <Send className="w-3.5 h-3.5" aria-hidden="true" />
+                            <Send className="w-3 h-3" aria-hidden="true" />
                           </a>
                         )}
                         {student.phone && (
                           <a
                             href={`tel:${student.phone}`}
                             aria-label={`Позвонить: ${student.name}`}
-                            className="touch-hit w-8 h-8 rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 flex items-center justify-center active:scale-90 transition-all"
+                            className="touch-hit w-7 h-7 rounded-full bg-[#F2EFE9] text-[#57534E] hover:bg-[#EAE5DC] flex items-center justify-center active:scale-90 transition-colors"
                             title="Позвонить"
                           >
-                            <Phone className="w-3.5 h-3.5" aria-hidden="true" />
+                            <Phone className="w-3 h-3" aria-hidden="true" />
                           </a>
                         )}
                       </div>
@@ -387,19 +387,19 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                 </div>
 
                 {/* Footer: Active Cycle / Billing Period Progress + Quick Actions */}
-                <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                <div className="pt-2 border-t border-[#EFECE5] flex items-center justify-between gap-2">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium mb-1 tabular-nums">
+                    <div className="flex items-center justify-between text-[11px] text-[#78716C] font-medium mb-1 tabular-nums">
                       {isPkg ? (
                         balance <= 0 ? (
-                          <span className="truncate text-rose-700 font-semibold">
+                          <span className="truncate text-[#B93815] font-semibold">
                             Пакет завершён · {used}/{total} ур.
                             {balance < 0 ? ` · долг ${Math.abs(balance)} ур.` : ''}
                           </span>
                         ) : (
                           <span className="truncate">
                             Пакет{cycleStart ? ` с ${formatShortRuDate(cycleStart)}` : ''}:{' '}
-                            <b className="text-slate-900">{used}</b> из {total} ур.
+                            <b className="text-[#1C1917]">{used}</b> из {total} ур.
                             {excused > 0 ? ` · отм: ${excused}` : ''}
                             {cycleEnd ? ` · до ~${formatShortRuDate(cycleEnd)}` : ''}
                             {prepaidExtra > 0 ? ` (+${prepaidExtra})` : ''}
@@ -407,22 +407,21 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                         )
                       ) : (
                         <span className="truncate">
-                          С <b className="text-slate-700">{billingPeriod.startShort}</b> по{' '}
-                          <b className="text-slate-700">{billingPeriod.endShort}</b>:{' '}
-                          <b className="text-slate-900">{used}</b> из {total} ур.
+                          С <b className="text-[#44403C]">{billingPeriod.startShort}</b> по{' '}
+                          <b className="text-[#44403C]">{billingPeriod.endShort}</b>:{' '}
+                          <b className="text-[#1C1917]">{used}</b> из {total} ур.
                           {excused > 0 ? ` (отм: ${excused})` : ''}
                         </span>
                       )}
                     </div>
-                    <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                    <div className="w-full h-1.5 bg-[#EFECE5] rounded-full overflow-hidden">
                       <div
-                        className={`h-full rounded-full transition-all ${
-                          isPkg && balance <= 0
-                            ? 'bg-rose-500'
+                        className={`h-full rounded-full transition-all ${isPkg && balance <= 0
+                            ? 'bg-[#E85D3F]'
                             : isPkg && remaining <= 2
-                            ? 'bg-amber-500'
-                            : 'bg-blue-600'
-                        }`}
+                              ? 'bg-amber-500'
+                              : 'bg-[#2F6FED]'
+                          }`}
                         style={{ width: `${progressPct}%` }}
                       />
                     </div>
@@ -436,11 +435,10 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                     <button
                       type="button"
                       onClick={(e) => handleQuickCopyInvoice(e, student)}
-                      className={`touch-hit h-8 px-2.5 rounded-lg text-[11px] font-bold border inline-flex items-center gap-1 active:scale-95 transition-all ${
-                        copiedId === student.id
+                      className={`touch-hit h-7 px-2.5 rounded-full text-[11px] font-semibold border inline-flex items-center gap-1 active:scale-95 transition-colors ${copiedId === student.id
                           ? 'bg-emerald-600 text-white border-emerald-600'
-                          : 'bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200'
-                      }`}
+                          : 'bg-[#F7F5F0] hover:bg-[#EFEBE2] text-[#44403C] border-[#E7E2D8]'
+                        }`}
                       title="Скопировать счёт на оплату для родителей"
                     >
                       {copiedId === student.id ? (
@@ -450,7 +448,7 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                         </>
                       ) : (
                         <>
-                          <Copy className="w-3 h-3 text-slate-400" aria-hidden="true" />
+                          <Copy className="w-3 h-3 text-[#8C857B]" aria-hidden="true" />
                           <span>Счёт</span>
                         </>
                       )}
@@ -460,11 +458,10 @@ export const ClientsTab: React.FC<ClientsTabProps> = ({
                       <button
                         type="button"
                         onClick={(e) => handleOpenQuickPayment(e, student)}
-                        className={`touch-hit h-8 px-2.5 rounded-lg text-[11px] font-bold inline-flex items-center gap-0.5 active:scale-95 transition-all tabular-nums ${
-                          balance <= 2
+                        className={`touch-hit h-7 px-2.5 rounded-full text-[11px] font-semibold inline-flex items-center gap-0.5 active:scale-95 transition-colors tabular-nums ${balance <= 2
                             ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs'
-                            : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200/80'
-                        }`}
+                            : 'bg-[#E7F7F0] hover:bg-[#D1F0E2] text-emerald-800 border border-emerald-200/80'
+                          }`}
                         title={`Зафиксировать оплату на ${total} уроков`}
                       >
                         <span>{balance <= 2 ? `+${total} ур.` : '+ Оплата'}</span>

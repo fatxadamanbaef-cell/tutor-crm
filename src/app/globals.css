@@ -1,13 +1,25 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f4f5f8;
-  --foreground: #0f172a;
+  --background: #F7F5F0;
+  --foreground: #1C1917;
+  --surface-card: #FFFFFF;
+  --surface-subtle: #F2EFE9;
+  --border-warm: #E7E2D8;
+  --ink-secondary: #78716C;
+  --accent-cobalt: #2F6FED;
+  --accent-terracotta: #E85D3F;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface-card: var(--surface-card);
+  --color-surface-subtle: var(--surface-subtle);
+  --color-border-warm: var(--border-warm);
+  --color-ink-secondary: var(--ink-secondary);
+  --color-accent-cobalt: var(--accent-cobalt);
+  --color-accent-terracotta: var(--accent-terracotta);
   --font-sans: var(--font-inter), system-ui, -apple-system, sans-serif;
 }
 
@@ -62,13 +74,15 @@ p {
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
+.bento-card {
+  background: var(--surface-card);
+  border: 1px solid rgba(231, 226, 216, 0.85);
+  box-shadow: 0 1px 2px rgba(28, 25, 23, 0.04), 0 4px 12px rgba(28, 25, 23, 0.025);
+}
+
+.bento-card-soft {
+  background: var(--surface-card);
+  box-shadow: 0 1px 2px rgba(28, 25, 23, 0.04), 0 2px 8px rgba(28, 25, 23, 0.02);
 }
 
 /* Perf: prevent iOS elastic bounce on fixed overlays */
@@ -83,13 +97,33 @@ p {
   will-change: transform;
 }
 
-/* Native modal dialog scroll containment & backdrop */
+/* Native modal dialog scroll containment, backdrop & compositor-only entry */
 dialog:modal {
   overscroll-behavior: contain;
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  dialog:modal {
+    opacity: 1;
+    transform: translateY(0);
+    transition:
+      opacity 0.2s ease-out,
+      transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+      display 0.2s,
+      overlay 0.2s;
+    transition-behavior: allow-discrete;
+  }
+
+  @starting-style {
+    dialog:modal {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+  }
+}
+
 dialog::backdrop {
-  background: rgba(15, 23, 42, 0.45);
+  background: rgba(28, 25, 23, 0.42);
   overflow: hidden;
   overscroll-behavior: contain;
 }

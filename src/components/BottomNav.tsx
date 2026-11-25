@@ -27,7 +27,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
   return (
     <nav
       aria-label="Основная навигация"
-      className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200/80 pb-safe z-40"
+      className="fixed bottom-0 left-0 right-0 bg-white/95 border-t border-[#E7E2D8] pb-safe z-40"
     >
       <div className="flex items-center justify-around max-w-md mx-auto px-2 py-1">
         {tabs.map((tab) => {
@@ -42,29 +42,29 @@ export const BottomNav: React.FC<BottomNavProps> = ({
                 if (!isActive) hapticImpact('light');
                 onChangeTab(tab.id);
               }}
-              className={`relative flex flex-col items-center justify-center w-20 h-11 rounded-2xl transition-all active:scale-95 ${
+              className={`relative flex flex-col items-center justify-center w-20 h-10 rounded-2xl transition-colors active:scale-95 ${
                 isActive
-                  ? 'bg-blue-50/90 text-blue-600'
-                  : 'text-slate-400 hover:text-slate-600'
+                  ? 'bg-[#EEF3FE] text-[#2F6FED]'
+                  : 'text-[#8C857B] hover:text-[#44403C]'
               }`}
             >
               <div className="relative">
                 <Icon
-                  className={`w-5 h-5 mb-0.5 transition-transform ${
+                  className={`w-[19px] h-[19px] mb-0.5 transition-transform ${
                     isActive ? 'scale-105' : ''
                   }`}
-                  strokeWidth={isActive ? 2.5 : 2}
+                  strokeWidth={isActive ? 2.4 : 1.9}
                   aria-hidden="true"
                 />
                 {'badge' in tab && tab.badge > 0 && (
-                  <span className="absolute -top-1 -right-2.5 min-w-[15px] h-[15px] px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold tabular-nums flex items-center justify-center leading-none">
+                  <span className="absolute -top-1 -right-2.5 min-w-[15px] h-[15px] px-1 rounded-full bg-[#E85D3F] text-white text-[9px] font-bold tabular-nums flex items-center justify-center leading-none">
                     {tab.badge}
                   </span>
                 )}
               </div>
               <span
-                className={`text-[10px] tracking-tight ${
-                  isActive ? 'font-semibold text-blue-600' : 'font-medium'
+                className={`text-[10px] tracking-tight leading-none ${
+                  isActive ? 'font-semibold text-[#2F6FED]' : 'font-medium'
                 }`}
               >
                 {tab.label}

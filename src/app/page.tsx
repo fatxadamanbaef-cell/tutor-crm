@@ -21,7 +21,7 @@ import {
 import { getTashkentNow, getTashkentTodayStr } from '@/lib/formatters';
 import { computeStudentCycleSummary } from '@/lib/packageCycle';
 import { initTelegramApp, getTelegramWebApp } from '@/lib/telegram';
-import { Loader2, WifiOff, RotateCcw } from 'lucide-react';
+import { WifiOff, RotateCcw } from 'lucide-react';
 
 import { BottomNav, TabType } from '@/components/BottomNav';
 import { ToastProvider, useToast } from '@/components/ui/ToastProvider';
@@ -462,21 +462,74 @@ function Dashboard() {
 
   if (loading) {
     return (
-      <div className="min-h-dvh bg-[#f4f5f8] flex items-center justify-center">
-        <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
+      <div className="h-dvh bg-[#F7F5F0] flex flex-col justify-between overflow-hidden">
+        <div>
+          {/* Skeleton Header & Date Strip */}
+          <div className="bg-white border-b border-[#E7E2D8] px-3.5 pt-safe pb-2 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="space-y-1.5">
+                <div className="h-4 w-28 rounded-full bg-[#EFECE5] motion-safe:animate-pulse" />
+                <div className="h-3 w-36 rounded-full bg-[#F5F2EB] motion-safe:animate-pulse" />
+              </div>
+              <div className="h-8 w-20 rounded-full bg-[#EFECE5] motion-safe:animate-pulse" />
+            </div>
+            <div className="flex items-center gap-1.5 overflow-hidden">
+              {Array.from({ length: 7 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="h-12 w-10 rounded-xl bg-[#F2EFE9] shrink-0 motion-safe:animate-pulse"
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Skeleton Lesson Cards */}
+          <div className="px-3 py-2.5 space-y-1.5">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div
+                key={i}
+                className="bento-card-soft rounded-2xl px-3 py-2.5 flex items-center gap-2.5"
+              >
+                <div className="w-1 h-8 rounded-full bg-[#EFECE5]" />
+                <div className="w-10 space-y-1">
+                  <div className="h-3.5 w-9 rounded bg-[#EFECE5] motion-safe:animate-pulse" />
+                  <div className="h-2.5 w-8 rounded bg-[#F5F2EB] motion-safe:animate-pulse" />
+                </div>
+                <div className="w-7 h-7 rounded-full bg-[#EFECE5] shrink-0 motion-safe:animate-pulse" />
+                <div className="flex-1 space-y-1.5">
+                  <div className="h-3.5 w-32 rounded bg-[#EFECE5] motion-safe:animate-pulse" />
+                  <div className="h-2.5 w-20 rounded bg-[#F5F2EB] motion-safe:animate-pulse" />
+                </div>
+                <div className="h-7 w-14 rounded-full bg-[#F2EFE9] shrink-0 motion-safe:animate-pulse" />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Skeleton Bottom Nav */}
+        <div className="bg-white/95 border-t border-[#E7E2D8] pb-safe">
+          <div className="flex items-center justify-around max-w-md mx-auto px-2 py-2">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div
+                key={i}
+                className="h-8 w-16 rounded-2xl bg-[#F2EFE9] motion-safe:animate-pulse"
+              />
+            ))}
+          </div>
+        </div>
       </div>
     );
   }
 
   if (loadError && students.length === 0 && lessons.length === 0) {
     return (
-      <div className="min-h-dvh bg-[#f4f5f8] flex flex-col items-center justify-center px-6 text-center gap-3">
-        <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center">
+      <div className="min-h-dvh bg-[#F7F5F0] flex flex-col items-center justify-center px-6 text-center gap-3">
+        <div className="w-12 h-12 rounded-2xl bg-[#FDECE8] border border-[#F6BFA9] text-[#B93815] flex items-center justify-center">
           <WifiOff className="w-6 h-6" aria-hidden="true" />
         </div>
         <div className="space-y-1 max-w-xs">
-          <h2 className="text-base font-bold text-slate-900">Не удалось загрузить CRM</h2>
-          <p className="text-xs text-slate-500">{loadError}</p>
+          <h2 className="text-base font-bold text-[#1C1917]">Не удалось загрузить CRM</h2>
+          <p className="text-xs text-[#78716C]">{loadError}</p>
         </div>
         <button
           type="button"
@@ -484,7 +537,7 @@ function Dashboard() {
             setLoading(true);
             void refreshData();
           }}
-          className="px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm active:scale-95 transition-all"
+          className="px-4 py-2.5 rounded-full bg-[#2F6FED] hover:bg-[#255CE0] text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-sm active:scale-95 transition-colors"
         >
           <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" />
           <span>Повторить</span>
@@ -499,7 +552,7 @@ function Dashboard() {
   const hasProfile = Boolean(selectedStudent);
 
   return (
-    <div className="h-dvh bg-[#f4f5f8] overflow-hidden relative selection:bg-blue-100">
+    <div className="h-dvh bg-[#F7F5F0] overflow-hidden relative selection:bg-[#EEF3FE]">
       {/* Telegram BackButton controller */}
       <TelegramBackButtonController
         hasProfile={hasProfile}

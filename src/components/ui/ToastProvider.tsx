@@ -39,10 +39,10 @@ export function useToast(): ToastContextValue {
 }
 
 const TONE_CLASSES: Record<ToastTone, string> = {
-  default: 'bg-slate-900/95 text-white border-slate-800',
-  success: 'bg-slate-900/95 text-white border-slate-800',
+  default: 'bg-[#1C1917]/95 text-[#F7F5F0] border-[#292524]',
+  success: 'bg-[#1C1917]/95 text-[#F7F5F0] border-[#292524]',
   warning: 'bg-amber-950/95 text-amber-50 border-amber-800',
-  error: 'bg-rose-700 text-white border-rose-600',
+  error: 'bg-[#B93815] text-white border-[#9A2D10]',
 };
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {

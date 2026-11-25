@@ -7,15 +7,12 @@ import { ru } from 'date-fns/locale';
 import { getTashkentTodayStr } from '@/lib/formatters';
 import { getLessonsByRange, getPaymentsByRange } from '@/lib/storage';
 import {
-  CheckCircle2,
+  Check,
   Flame,
   Ban,
   Clock,
   Copy,
-  Check,
   Download,
-  Wallet,
-  Banknote,
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
@@ -142,6 +139,8 @@ export const StatsTab: React.FC<StatsTabProps> = ({
     totalDebtUzs,
     lowBalanceStudents,
     studentBreakdown,
+    chartBars,
+    chartMaxVal,
   } = useMemo(() => {
     const effectiveLessons = isArchiveMonth ? (archiveLessons ?? []) : lessons;
     const activeStudents = students.filter((s) => s.is_active !== false);
@@ -191,6 +190,33 @@ export const StatsTab: React.FC<StatsTabProps> = ({
       ensureEntry(s);
     }
 
+    const buckets: Array<{ label: string; accrued: number; cash: number }> =
+      period === 'month'
+        ? [
+            { label: '1 нед', accrued: 0, cash: 0 },
+            { label: '2 нед', accrued: 0, cash: 0 },
+            { label: '3 нед', accrued: 0, cash: 0 },
+            { label: '4 нед', accrued: 0, cash: 0 },
+          ]
+        : ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map((label) => ({
+            label,
+            accrued: 0,
+            cash: 0,
+          }));
+
+    const getBucketIndex = (isoDate: string): number => {
+      const dStr = isoDate.substring(0, 10);
+      if (period === 'month') {
+        const dayNum = Number(dStr.substring(8, 10));
+        if (isNaN(dayNum) || dayNum <= 7) return 0;
+        if (dayNum <= 14) return 1;
+        if (dayNum <= 21) return 2;
+        return 3;
+      }
+      const dow = parseISO(`${dStr}T12:00:00+05:00`).getDay();
+      return dow === 0 ? 6 : dow - 1;
+    };
+
     for (const l of periodLessons) {
       const st = studentMap.get(l.student_id);
       const rate = st?.lesson_rate || 300000;
@@ -199,6 +225,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
       if (l.status === 'completed') {
         conducted++;
         earned += rate;
+        buckets[getBucketIndex(l.date)].accrued += rate;
         if (entry) {
           entry.conducted++;
           entry.earnedUzs += rate;
@@ -206,6 +233,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
       } else if (l.status === 'missed_penalty' || (l.status === 'missed' && !l.needs_makeup)) {
         burned++;
         earned += rate;
+        buckets[getBucketIndex(l.date)].accrued += rate;
         if (entry) {
           entry.burned++;
           entry.earnedUzs += rate;
@@ -225,6 +253,10 @@ export const StatsTab: React.FC<StatsTabProps> = ({
     for (const p of periodPayments) {
       cashTotal += p.amount_uzs || 0;
       paidLessonsSum += p.lessons_added || 0;
+      if (p.paid_at) {
+        const idx = getBucketIndex(p.paid_at);
+        if (buckets[idx]) buckets[idx].cash += p.amount_uzs || 0;
+      }
       const st = studentMap.get(p.student_id);
       if (st) {
         const entry = ensureEntry(st);
@@ -232,6 +264,11 @@ export const StatsTab: React.FC<StatsTabProps> = ({
         entry.paidCount += 1;
       }
     }
+
+    const maxBar = buckets.reduce(
+      (mx, b) => Math.max(mx, b.accrued, b.cash),
+      0
+    );
 
     const totalTarget =
       period === 'month'
@@ -284,6 +321,8 @@ export const StatsTab: React.FC<StatsTabProps> = ({
       totalDebtUzs: debtSum,
       lowBalanceStudents: lowBal,
       studentBreakdown: breakdown,
+      chartBars: buckets,
+      chartMaxVal: maxBar,
     };
   }, [archiveLessons, lessons, periodPayments, students, period, startStr, endStr, isArchiveMonth]);
 
@@ -342,27 +381,31 @@ export const StatsTab: React.FC<StatsTabProps> = ({
     showToast({ message: `Отчёт ${fileName} скачан`, tone: 'success' });
   };
 
+  const ringRadius = 26;
+  const ringCircumference = 2 * Math.PI * ringRadius;
+  const ringOffset = ringCircumference * (1 - completionRate / 100);
+
   return (
-    <div className="flex flex-col h-full bg-[#f4f5f8] pb-28 px-4 pt-safe overflow-y-auto space-y-3.5">
+    <div className="flex flex-col h-full bg-[#F7F5F0] pb-28 px-3.5 pt-safe overflow-y-auto space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <h1 className="text-lg font-bold text-slate-900 tracking-tight leading-tight">
-            Аналитика и доход
+          <h1 className="text-lg font-bold text-[#1C1917] tracking-tight leading-tight">
+            Доход
           </h1>
-          <p className="text-xs text-slate-500 font-semibold mt-0.5 truncate">{periodTitle}</p>
+          <p className="text-xs text-[#78716C] font-medium mt-0.5 truncate">{periodTitle}</p>
         </div>
 
         {/* Period Switcher */}
-        <div className="bg-slate-200/80 p-0.5 rounded-xl flex shrink-0">
+        <div className="bg-[#EBE7DF] p-0.5 rounded-full flex shrink-0">
           <button
             type="button"
             onClick={() => {
               hapticImpact('light');
               setPeriod('week');
             }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              period === 'week' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
+            className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
+              period === 'week' ? 'bg-white text-[#1C1917] shadow-xs' : 'text-[#78716C]'
             }`}
           >
             Неделя
@@ -373,8 +416,8 @@ export const StatsTab: React.FC<StatsTabProps> = ({
               hapticImpact('light');
               setPeriod('month');
             }}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              period === 'month' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
+            className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
+              period === 'month' ? 'bg-white text-[#1C1917] shadow-xs' : 'text-[#78716C]'
             }`}
           >
             Месяц
@@ -384,7 +427,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
 
       {/* Month Archive Switcher (Visible in Month mode) */}
       {period === 'month' && (
-        <div className="bg-white rounded-2xl p-1.5 shadow-xs border border-gray-200/80 flex items-center justify-between gap-2">
+        <div className="bento-card rounded-2xl p-1.5 flex items-center justify-between gap-2">
           <button
             type="button"
             onClick={() => {
@@ -392,16 +435,16 @@ export const StatsTab: React.FC<StatsTabProps> = ({
               setMonthOffset((prev) => prev - 1);
             }}
             aria-label="Предыдущий месяц"
-            className="w-9 h-9 rounded-xl bg-gray-50 hover:bg-gray-100 text-gray-700 flex items-center justify-center active:scale-95 transition-all shrink-0"
+            className="w-8 h-8 rounded-xl bg-[#F2EFE9] hover:bg-[#EAE5DC] text-[#44403C] flex items-center justify-center active:scale-95 transition-colors shrink-0"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
 
           <div className="flex items-center justify-center gap-2 min-w-0">
-            <span className="text-sm font-bold text-gray-900 tabular-nums truncate">
+            <span className="text-sm font-bold text-[#1C1917] tabular-nums truncate">
               {monthLabel}
             </span>
-            {isLoadingRange && <Loader2 className="w-3.5 h-3.5 text-blue-600 animate-spin shrink-0" />}
+            {isLoadingRange && <Loader2 className="w-3.5 h-3.5 text-[#2F6FED] animate-spin shrink-0" />}
             {monthOffset < 0 && !isLoadingRange && (
               <button
                 type="button"
@@ -409,7 +452,7 @@ export const StatsTab: React.FC<StatsTabProps> = ({
                   hapticImpact('light');
                   setMonthOffset(0);
                 }}
-                className="px-2 py-0.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-semibold inline-flex items-center gap-1 active:scale-95 transition-all shrink-0"
+                className="px-2 py-0.5 rounded-full bg-[#EEF3FE] hover:bg-[#E2EBFC] text-[#2F6FED] text-[11px] font-semibold inline-flex items-center gap-1 active:scale-95 transition-colors shrink-0"
                 title="Вернуться к текущему месяцу"
               >
                 <RotateCcw className="w-3 h-3" />
@@ -426,139 +469,171 @@ export const StatsTab: React.FC<StatsTabProps> = ({
               setMonthOffset((prev) => Math.min(0, prev + 1));
             }}
             aria-label="Следующий месяц"
-            className="w-9 h-9 rounded-xl bg-gray-50 hover:bg-gray-100 disabled:opacity-35 disabled:hover:bg-gray-50 text-gray-700 flex items-center justify-center active:scale-95 transition-all shrink-0"
+            className="w-8 h-8 rounded-xl bg-[#F2EFE9] hover:bg-[#EAE5DC] disabled:opacity-35 disabled:hover:bg-[#F2EFE9] text-[#44403C] flex items-center justify-center active:scale-95 transition-colors shrink-0"
           >
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
       )}
 
-      {/* Dual Financial Metrics: Cash Flow vs Accrued by Lessons */}
-      <div className="space-y-2.5">
-        <div className="grid grid-cols-2 gap-2.5">
-          {/* Card 1: Received Cash Flow */}
-          <div className="bg-white rounded-3xl p-3.5 shadow-xs border border-emerald-200/80 space-y-2 flex flex-col justify-between">
-            <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] font-semibold text-emerald-700 uppercase leading-tight">
-                Получено (касса)
-              </span>
-              <div className="w-7 h-7 rounded-xl bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0">
-                <Banknote className="w-3.5 h-3.5" />
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-baseline gap-x-1">
-              <span className="text-[17px] font-bold text-gray-900 tabular-nums leading-tight">
+      {/* Hero Revenue Bento Card with Bar Chart */}
+      <div className="bento-card rounded-3xl p-4 space-y-3">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <div className="flex flex-wrap items-baseline gap-x-1.5">
+              <span className="text-2xl font-bold text-[#1C1917] tabular-nums tracking-tight leading-none">
                 {cashFlowUzs.toLocaleString('ru-RU')}
               </span>
-              <span className="text-[11px] font-semibold text-gray-500">сум</span>
+              <span className="text-sm font-semibold text-[#78716C]">сум</span>
             </div>
-
-            <div className="text-[11px] font-semibold text-emerald-700 bg-emerald-50/80 border border-emerald-200/70 px-2 py-0.5 rounded-lg inline-flex items-center gap-1 self-start tabular-nums">
-              <span>
-                {paymentsCount} {getPaymentsPlural(paymentsCount)}
-              </span>
-              {paymentsLessonsTotal > 0 && (
-                <span className="text-emerald-600/80">· +{paymentsLessonsTotal} ур.</span>
-              )}
-            </div>
+            <p className="text-xs font-medium text-[#78716C] mt-1 tabular-nums">
+              Получено в кассу · {paymentsCount} {getPaymentsPlural(paymentsCount)}
+              {paymentsLessonsTotal > 0 ? ` (+${paymentsLessonsTotal} ур.)` : ''}
+            </p>
           </div>
 
-          {/* Card 2: Accrued by Lessons */}
-          <div className="bg-white rounded-3xl p-3.5 shadow-xs border border-gray-200/80 space-y-2 flex flex-col justify-between">
-            <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] font-semibold text-gray-500 uppercase leading-tight">
-                Начислено по урокам
-              </span>
-              <div className="w-7 h-7 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600 shrink-0">
-                <Wallet className="w-3.5 h-3.5" />
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-baseline gap-x-1">
-              <span className="text-[17px] font-bold text-gray-900 tabular-nums leading-tight">
-                {earnedUzs.toLocaleString('ru-RU')}
-              </span>
-              <span className="text-[11px] font-semibold text-gray-500">сум</span>
-            </div>
-
-            <div className="text-[11px] font-semibold text-blue-700 bg-blue-50/80 border border-blue-200/70 px-2 py-0.5 rounded-lg inline-flex items-center self-start tabular-nums">
-              {conductedCount + burnedCount} опл. ур.
-            </div>
+          <div className="flex items-center gap-2 text-[10px] font-semibold text-[#78716C] shrink-0 pt-0.5">
+            <span className="inline-flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-[#2F6FED]" />
+              Уроки
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-[#D8C7AE]" />
+              Касса
+            </span>
           </div>
         </div>
 
-        {/* Monthly Plan & Balance Debt */}
-        <div className="bg-white rounded-3xl p-3 shadow-xs border border-gray-100 grid grid-cols-2 gap-2">
-          <div className="bg-blue-50/70 rounded-2xl p-2.5 border border-blue-100">
-            <span className="text-[10px] font-semibold text-blue-700 uppercase block">План на месяц</span>
-            <span className="text-xs font-bold text-blue-900 mt-0.5 block tabular-nums">
-              {expectedMonthUzs.toLocaleString('ru-RU')} сум
+        {/* Pure CSS Bar Chart */}
+        <div className="h-20 flex items-end justify-between gap-2 pt-1">
+          {chartBars.map((bar) => {
+            const accruedPct =
+              chartMaxVal > 0 && bar.accrued > 0
+                ? Math.max(10, Math.round((bar.accrued / chartMaxVal) * 100))
+                : 6;
+            const cashPct =
+              chartMaxVal > 0 && bar.cash > 0
+                ? Math.max(10, Math.round((bar.cash / chartMaxVal) * 100))
+                : 6;
+
+            return (
+              <div key={bar.label} className="flex-1 h-full flex flex-col items-center justify-end gap-1">
+                <div className="w-full flex-1 flex items-end justify-center gap-1">
+                  <div
+                    className={`w-2.5 sm:w-3 rounded-t-md transition-all duration-300 ${
+                      bar.accrued > 0 ? 'bg-[#2F6FED]' : 'bg-[#EFECE5]'
+                    }`}
+                    style={{ height: `${accruedPct}%` }}
+                    title={`Начислено: ${bar.accrued.toLocaleString('ru-RU')} сум`}
+                  />
+                  <div
+                    className={`w-2.5 sm:w-3 rounded-t-md transition-all duration-300 ${
+                      bar.cash > 0 ? 'bg-[#D8C7AE]' : 'bg-[#F2EFE9]'
+                    }`}
+                    style={{ height: `${cashPct}%` }}
+                    title={`Касса: ${bar.cash.toLocaleString('ru-RU')} сум`}
+                  />
+                </div>
+                <span className="text-[10px] font-medium text-[#78716C] tabular-nums leading-none">
+                  {bar.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Signature 2-Column Bento Row: Completion Ring + 3 Pastel Status Pills */}
+      <div className="grid grid-cols-2 gap-2.5">
+        <div className="bento-card rounded-3xl p-3.5 flex flex-col items-center justify-center text-center space-y-2">
+          <div className="relative w-16 h-16 flex items-center justify-center">
+            <svg className="w-16 h-16 -rotate-90" viewBox="0 0 64 64" aria-hidden="true">
+              <circle
+                cx="32"
+                cy="32"
+                r={ringRadius}
+                fill="none"
+                stroke="#EFECE5"
+                strokeWidth="6"
+              />
+              <circle
+                cx="32"
+                cy="32"
+                r={ringRadius}
+                fill="none"
+                stroke="#2F6FED"
+                strokeWidth="6"
+                strokeLinecap="round"
+                strokeDasharray={ringCircumference}
+                strokeDashoffset={ringOffset}
+                className="transition-all duration-500"
+              />
+            </svg>
+            <span className="absolute text-sm font-bold text-[#1C1917] tabular-nums">
+              {completionRate}%
             </span>
           </div>
-          <div
-            className={`rounded-2xl p-2.5 border ${
-              totalDebtUzs > 0
-                ? 'bg-rose-50/80 border-rose-200'
-                : 'bg-gray-50 border-gray-200/80'
-            }`}
-          >
-            <span
-              className={`text-[10px] font-semibold uppercase block ${
-                totalDebtUzs > 0 ? 'text-rose-700' : 'text-gray-500'
-              }`}
-            >
-              Долг по балансу
+          <div className="text-[11px] text-[#78716C] font-semibold tabular-nums leading-tight">
+            Проведено <b className="text-[#1C1917]">{conductedCount}/{targetCount}</b>
+          </div>
+        </div>
+
+        <div className="bento-card rounded-3xl p-3 flex flex-col justify-center gap-1.5">
+          <div className="flex items-center justify-between bg-[#FDECE8] px-2.5 py-1.5 rounded-xl">
+            <span className="text-[11px] font-semibold text-[#B93815] flex items-center gap-1.5">
+              <Flame className="w-3.5 h-3.5 text-[#E85D3F]" aria-hidden="true" /> Сгорело
             </span>
-            <span
-              className={`text-xs font-bold mt-0.5 block tabular-nums ${
-                totalDebtUzs > 0 ? 'text-rose-800' : 'text-gray-700'
-              }`}
-            >
-              {totalDebtUzs.toLocaleString('ru-RU')} сум
+            <span className="text-xs font-bold text-[#B93815] tabular-nums">{burnedCount}</span>
+          </div>
+          <div className="flex items-center justify-between bg-[#F6EBD8] px-2.5 py-1.5 rounded-xl">
+            <span className="text-[11px] font-semibold text-[#92400E] flex items-center gap-1.5">
+              <Ban className="w-3.5 h-3.5 text-amber-700" aria-hidden="true" /> Отменено
             </span>
+            <span className="text-xs font-bold text-[#92400E] tabular-nums">{excusedCount}</span>
+          </div>
+          <div className="flex items-center justify-between bg-[#EEF3FE] px-2.5 py-1.5 rounded-xl">
+            <span className="text-[11px] font-semibold text-[#1D4ED8] flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-[#2F6FED]" aria-hidden="true" /> В плане
+            </span>
+            <span className="text-xs font-bold text-[#1D4ED8] tabular-nums">{plannedCount}</span>
           </div>
         </div>
       </div>
 
-      {/* 3-State Attendance + Planned Grid */}
+      {/* Compact 2-Column Financial Bento Strip */}
       <div className="grid grid-cols-2 gap-2.5">
-        <div className="bg-white rounded-3xl p-3.5 shadow-xs border border-gray-100 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-semibold text-emerald-700 uppercase">Проведено</span>
-            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+        <div className="bento-card rounded-2xl p-3 space-y-1">
+          <span className="text-[10px] font-semibold text-[#78716C] uppercase block">
+            Начислено по урокам
+          </span>
+          <div className="flex flex-wrap items-baseline gap-x-1">
+            <span className="text-sm font-bold text-[#1C1917] tabular-nums">
+              {earnedUzs.toLocaleString('ru-RU')}
+            </span>
+            <span className="text-[11px] font-medium text-[#78716C]">сум</span>
           </div>
-          <div className="text-2xl font-bold text-gray-900 tabular-nums">{conductedCount}</div>
-          <div className="text-[10px] text-gray-500 font-semibold tabular-nums">
-            План: {targetCount} ({completionRate}%)
-          </div>
-          <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden">
-            <div
-              className="bg-emerald-500 h-full rounded-full transition-all duration-500"
-              style={{ width: `${completionRate}%` }}
-            />
-          </div>
+          <span className="text-[10.5px] font-semibold text-[#2F6FED] tabular-nums block">
+            {conductedCount + burnedCount} опл. ур.
+          </span>
         </div>
 
-        <div className="bg-white rounded-3xl p-3.5 shadow-xs border border-gray-100 grid grid-rows-3 gap-1.5">
-          <div className="flex items-center justify-between bg-orange-50/70 px-2.5 py-1 rounded-xl">
-            <span className="text-[11px] font-semibold text-orange-800 flex items-center gap-1">
-              <Flame className="w-3.5 h-3.5 text-orange-600" /> Сгорело
+        <div className="bento-card rounded-2xl p-3 space-y-1">
+          <span className="text-[10px] font-semibold text-[#78716C] uppercase block">
+            План и долг
+          </span>
+          <div className="flex flex-wrap items-baseline gap-x-1">
+            <span className="text-sm font-bold text-[#1C1917] tabular-nums">
+              {expectedMonthUzs.toLocaleString('ru-RU')}
             </span>
-            <span className="text-xs font-bold text-orange-900 tabular-nums">{burnedCount}</span>
+            <span className="text-[11px] font-medium text-[#78716C]">сум</span>
           </div>
-          <div className="flex items-center justify-between bg-rose-50/70 px-2.5 py-1 rounded-xl">
-            <span className="text-[11px] font-semibold text-rose-800 flex items-center gap-1">
-              <Ban className="w-3.5 h-3.5 text-rose-600" /> Отменено
-            </span>
-            <span className="text-xs font-bold text-rose-900 tabular-nums">{excusedCount}</span>
-          </div>
-          <div className="flex items-center justify-between bg-blue-50/70 px-2.5 py-1 rounded-xl">
-            <span className="text-[11px] font-semibold text-blue-800 flex items-center gap-1">
-              <Clock className="w-3.5 h-3.5 text-blue-600" /> В плане
-            </span>
-            <span className="text-xs font-bold text-blue-900 tabular-nums">{plannedCount}</span>
-          </div>
+          <span
+            className={`text-[10.5px] font-semibold tabular-nums block ${
+              totalDebtUzs > 0 ? 'text-[#B93815]' : 'text-[#78716C]'
+            }`}
+          >
+            Долг: {totalDebtUzs.toLocaleString('ru-RU')} сум
+          </span>
         </div>
       </div>
 
@@ -567,16 +642,16 @@ export const StatsTab: React.FC<StatsTabProps> = ({
         <button
           type="button"
           onClick={handleCopySummary}
-          className="py-3 px-3 rounded-2xl bg-white border border-gray-200 text-gray-800 text-xs font-bold shadow-xs flex items-center justify-center gap-1.5 active:scale-98 transition-all"
+          className="bento-card py-2.5 px-3 rounded-2xl text-[#1C1917] text-xs font-semibold flex items-center justify-center gap-1.5 active:scale-98 transition-colors"
         >
           {copied ? (
             <>
               <Check className="w-4 h-4 text-emerald-600" />
-              <span className="text-emerald-600">Скопировано!</span>
+              <span className="text-emerald-700">Скопировано!</span>
             </>
           ) : (
             <>
-              <Copy className="w-4 h-4 text-gray-500" />
+              <Copy className="w-3.5 h-3.5 text-[#78716C]" />
               <span>Скопировать сводку</span>
             </>
           )}
@@ -585,19 +660,19 @@ export const StatsTab: React.FC<StatsTabProps> = ({
         <button
           type="button"
           onClick={handleDownloadCsv}
-          className="py-3 px-3 rounded-2xl bg-blue-600 text-white text-xs font-bold shadow-md shadow-blue-500/20 flex items-center justify-center gap-1.5 active:scale-98 transition-all"
+          className="py-2.5 px-3 rounded-2xl bg-[#2F6FED] hover:bg-[#255CE0] text-white text-xs font-semibold shadow-sm flex items-center justify-center gap-1.5 active:scale-98 transition-colors"
         >
-          <Download className="w-4 h-4" />
-          <span>Скачать CSV (Excel)</span>
+          <Download className="w-3.5 h-3.5" />
+          <span>Скачать CSV</span>
         </button>
       </div>
 
       {/* Low Balance / Payment Alerts */}
       {lowBalanceStudents.length > 0 && (
-        <div className="bg-white rounded-3xl p-4 shadow-xs border border-amber-200/80 space-y-2.5">
-          <h3 className="text-xs font-semibold text-amber-800 uppercase tracking-wide flex items-center gap-1.5">
-            <AlertTriangle className="w-4 h-4 text-amber-600" />
-            <span>Требуют оплаты / Низкий баланс ({lowBalanceStudents.length})</span>
+        <div className="bento-card rounded-3xl p-3.5 border-[#F3DCAC] space-y-2">
+          <h3 className="text-[11px] font-semibold text-amber-900 uppercase tracking-wide flex items-center gap-1.5">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-600" aria-hidden="true" />
+            <span>Требуют оплаты ({lowBalanceStudents.length})</span>
           </h3>
 
           <div className="space-y-1.5">
@@ -611,23 +686,23 @@ export const StatsTab: React.FC<StatsTabProps> = ({
                     hapticImpact('light');
                     onOpenStudent?.(s);
                   }}
-                  className="w-full p-2.5 rounded-2xl bg-amber-50/60 hover:bg-amber-100/70 border border-amber-200/60 flex items-center justify-between text-left transition-all active:scale-[0.99]"
+                  className="w-full p-2.5 rounded-2xl bg-[#FEF9EE] hover:bg-[#FDF2D8] border border-[#F3DCAC]/80 flex items-center justify-between text-left transition-colors active:scale-[0.99]"
                 >
-                  <div>
-                    <div className="text-xs font-semibold text-gray-900">{s.name}</div>
-                    <div className="text-[10px] text-gray-500 font-medium tabular-nums">
-                      {s.billing_type === 'package' ? 'Пакет' : `Оплата: ${s.billing_day || '10'}`} · Ставка {(s.lesson_rate || 300000).toLocaleString('ru-RU')} сум
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-[#1C1917] truncate">{s.name}</div>
+                    <div className="text-[10.5px] text-[#78716C] font-medium tabular-nums">
+                      {s.billing_type === 'package' ? 'Пакет' : `Оплата: ${s.billing_day || '10'}`} · {(s.lesson_rate || 300000).toLocaleString('ru-RU')} сум
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 shrink-0">
                     <span
-                      className={`text-xs font-semibold px-2 py-0.5 rounded-lg tabular-nums ${
-                        bal <= 0 ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-800'
+                      className={`text-xs font-semibold px-2 py-0.5 rounded-full tabular-nums ${
+                        bal <= 0 ? 'bg-[#FDECE8] text-[#B93815]' : 'bg-amber-100 text-amber-800'
                       }`}
                     >
                       {bal} ур.
                     </span>
-                    {onOpenStudent && <ChevronRight className="w-4 h-4 text-gray-400" />}
+                    {onOpenStudent && <ChevronRight className="w-4 h-4 text-[#8C857B]" />}
                   </div>
                 </button>
               );
@@ -636,56 +711,86 @@ export const StatsTab: React.FC<StatsTabProps> = ({
         </div>
       )}
 
-      {/* Breakdown by Student */}
-      <div className="bg-white rounded-3xl p-4 shadow-xs border border-gray-100 space-y-2.5">
+      {/* Breakdown by Student ("Топ ученики / Детализация") */}
+      <div className="bento-card rounded-3xl p-3.5 space-y-2.5">
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-semibold text-gray-700 uppercase tracking-wide tabular-nums">
+          <h3 className="text-[11px] font-semibold text-[#78716C] uppercase tracking-wide tabular-nums">
             Детализация по ученикам ({studentBreakdown.length})
           </h3>
-          {isLoadingRange && <Loader2 className="w-3.5 h-3.5 text-gray-400 animate-spin" />}
+          {isLoadingRange && <Loader2 className="w-3.5 h-3.5 text-[#8C857B] animate-spin" />}
         </div>
 
         {studentBreakdown.length === 0 ? (
-          <p className="text-xs text-gray-400 py-3 text-center font-medium">
+          <p className="text-xs text-[#8C857B] py-3 text-center font-medium">
             Нет данных за выбранный период
           </p>
         ) : (
-          <div className="space-y-2">
-            {studentBreakdown.map((item) => (
-              <div
-                key={item.student.id}
-                onClick={() => {
-                  if (onOpenStudent) {
-                    hapticImpact('light');
-                    onOpenStudent(item.student);
-                  }
-                }}
-                className="p-2.5 rounded-2xl bg-gray-50 flex items-center justify-between gap-2 cursor-pointer hover:bg-gray-100/80 transition-colors"
-              >
-                <div className="min-w-0">
-                  <div className="text-xs font-semibold text-gray-900 truncate">{item.student.name}</div>
-                  <div className="text-[10px] text-gray-500 font-medium flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5 tabular-nums">
-                    <span className="text-emerald-700 font-semibold">✅ {item.conducted}</span>
-                    {item.burned > 0 && <span className="text-orange-700 font-semibold">🔥 {item.burned}</span>}
-                    {item.excused > 0 && <span className="text-rose-700 font-semibold">🛑 {item.excused}</span>}
-                    {item.paidUzs > 0 && (
-                      <span className="text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-1.5 rounded-md font-semibold">
-                        Касса: +{item.paidUzs.toLocaleString('ru-RU')}
-                      </span>
-                    )}
+          <div className="space-y-1.5">
+            {studentBreakdown.map((item) => {
+              const avatarColor = item.student.color || '#2F6FED';
+              return (
+                <div
+                  key={item.student.id}
+                  onClick={() => {
+                    if (onOpenStudent) {
+                      hapticImpact('light');
+                      onOpenStudent(item.student);
+                    }
+                  }}
+                  className="p-2.5 rounded-2xl bg-[#F7F5F0] hover:bg-[#EFEBE2] flex items-center justify-between gap-2.5 cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0"
+                      style={{
+                        backgroundColor: `${avatarColor}1F`,
+                        color: avatarColor,
+                      }}
+                      aria-hidden="true"
+                    >
+                      {item.student.name.trim().charAt(0).toUpperCase() || 'У'}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-[#1C1917] truncate">
+                        {item.student.name}
+                      </div>
+                      <div className="text-[10.5px] text-[#78716C] font-medium flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5 tabular-nums">
+                        <span className="text-emerald-700 font-semibold inline-flex items-center gap-0.5">
+                          <Check className="w-3 h-3 stroke-[2.5]" aria-hidden="true" />
+                          {item.conducted}
+                        </span>
+                        {item.burned > 0 && (
+                          <span className="text-[#B93815] font-semibold inline-flex items-center gap-0.5">
+                            <Flame className="w-3 h-3" aria-hidden="true" />
+                            {item.burned}
+                          </span>
+                        )}
+                        {item.excused > 0 && (
+                          <span className="text-rose-700 font-semibold inline-flex items-center gap-0.5">
+                            <Ban className="w-3 h-3" aria-hidden="true" />
+                            {item.excused}
+                          </span>
+                        )}
+                        {item.paidUzs > 0 && (
+                          <span className="text-emerald-800 bg-[#E7F7F0] px-1.5 rounded-full font-semibold">
+                            +{item.paidUzs.toLocaleString('ru-RU')}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
 
-                <div className="text-right shrink-0">
-                  <div className="text-xs font-bold text-gray-900 tabular-nums">
-                    {item.earnedUzs.toLocaleString('ru-RU')} сум
-                  </div>
-                  <div className="text-[10px] text-gray-400 font-semibold tabular-nums">
-                    Баланс: {item.student.lessons_balance ?? 0} ур.
+                  <div className="text-right shrink-0">
+                    <div className="text-xs font-bold text-[#1C1917] tabular-nums">
+                      {item.earnedUzs.toLocaleString('ru-RU')} сум
+                    </div>
+                    <div className="text-[10px] text-[#78716C] font-medium tabular-nums">
+                      Баланс: {item.student.lessons_balance ?? 0} ур.
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

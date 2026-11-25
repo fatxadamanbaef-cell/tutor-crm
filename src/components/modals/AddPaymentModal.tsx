@@ -99,7 +99,7 @@ export const AddPaymentModal: React.FC<AddPaymentModalProps> = ({
       aria-labelledby={titleId}
       onClose={handleDialogClose}
       {...({ closedby: 'any' } as Record<string, string>)}
-      className="m-auto mb-0 sm:mb-auto w-full max-w-md rounded-t-3xl sm:rounded-3xl p-0 border border-slate-200/80 bg-white text-slate-900 shadow-2xl open:flex open:flex-col max-h-[90vh] overflow-hidden"
+      className="m-auto mb-0 sm:mb-auto w-full max-w-md rounded-t-3xl sm:rounded-3xl p-0 border border-[#E7E2D8] bg-white text-[#1C1917] shadow-2xl open:flex open:flex-col max-h-[90vh] overflow-hidden"
     >
       {isOpen && student && (
         <AddPaymentModalBody
@@ -255,18 +255,19 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
   };
 
   return (
-    <div className="flex flex-col max-h-[90vh] overflow-y-auto p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] sm:pb-5 space-y-4 text-xs">
+    <div className="flex flex-col max-h-[90vh] overflow-y-auto p-5 pt-3 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] sm:pb-5 space-y-4 text-xs">
+          <div className="w-9 h-1 rounded-full bg-[#DDD6C9] mx-auto sm:hidden" aria-hidden="true" />
           {/* Header */}
-          <div className="flex items-start justify-between gap-2 pb-2.5 border-b border-slate-100">
+          <div className="flex items-start justify-between gap-2 pb-2.5 border-b border-[#EFECE5]">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="w-9 h-9 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0">
+              <div className="w-9 h-9 rounded-full bg-[#E7F7F0] flex items-center justify-center text-emerald-700 shrink-0">
                 <Wallet className="w-4 h-4" />
               </div>
               <div className="min-w-0">
-                <h3 id={titleId} className="text-base font-bold text-slate-900 leading-tight truncate">
+                <h3 id={titleId} className="text-base font-bold text-[#1C1917] leading-tight truncate">
                   Оплата · {student.name}
                 </h3>
-                <p className="text-[11px] font-medium text-slate-500 tabular-nums mt-0.5">
+                <p className="text-[11px] font-medium text-[#78716C] tabular-nums mt-0.5">
                   Ставка {lessonRate.toLocaleString('ru-RU')} сум · Баланс: {currentBalance} ур.
                 </p>
               </div>
@@ -278,7 +279,7 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
                 onClose();
               }}
               aria-label="Закрыть окно оплаты"
-              className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 transition-colors shrink-0"
+              className="w-8 h-8 rounded-full bg-[#F2EFE9] hover:bg-[#EAE5DC] flex items-center justify-center text-[#78716C] transition-colors shrink-0"
             >
               <X className="w-4 h-4" />
             </button>
@@ -291,7 +292,7 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
               <div className="flex items-center justify-between gap-2">
                 <label
                   htmlFor={lessonsInputId}
-                  className="text-[11px] font-semibold text-slate-600 uppercase tracking-wide"
+                  className="text-[11px] font-semibold text-[#57534E] uppercase tracking-wide"
                 >
                   Количество уроков
                 </label>
@@ -301,10 +302,10 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
                       key={preset}
                       type="button"
                       onClick={() => handleSelectLessonPreset(preset)}
-                      className={`px-2 py-0.5 rounded-lg text-[11px] font-semibold tabular-nums border transition-all active:scale-95 ${
+                      className={`px-2 py-0.5 rounded-full text-[11px] font-semibold tabular-nums border transition-colors active:scale-95 ${
                         lessonsCount === preset
-                          ? 'bg-slate-900 text-white border-slate-900'
-                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100'
+                          ? 'bg-[#1C1917] text-white border-[#1C1917]'
+                          : 'bg-[#F7F5F0] text-[#57534E] border-[#E7E2D8] hover:bg-[#EFEBE2]'
                       }`}
                     >
                       +{preset}
@@ -324,7 +325,7 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
                 value={lessonsStr}
                 onChange={(e) => handleLessonsChange(e.target.value)}
                 placeholder="12"
-                className="w-full px-3.5 py-2.5 text-base sm:text-sm font-bold tabular-nums text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-emerald-600 focus:outline-hidden transition-colors"
+                className="w-full px-3.5 py-2.5 text-base sm:text-sm font-bold tabular-nums text-[#1C1917] bg-[#F7F5F0] border border-[#E7E2D8] rounded-xl focus:bg-white focus:border-emerald-600 focus:outline-hidden transition-colors"
               />
             </div>
 
@@ -333,7 +334,7 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
               <div className="flex items-center justify-between gap-2">
                 <label
                   htmlFor={amountInputId}
-                  className="text-[11px] font-semibold text-slate-600 uppercase tracking-wide"
+                  className="text-[11px] font-semibold text-[#57534E] uppercase tracking-wide"
                 >
                   Сумма (UZS)
                 </label>
@@ -341,7 +342,7 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
                   <button
                     type="button"
                     onClick={handleResetAmountAuto}
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:text-blue-700 tabular-nums"
+                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#2F6FED] hover:text-[#255CE0] tabular-nums"
                   >
                     <RotateCcw className="w-3 h-3" />
                     <span>По ставке: {autoAmount.toLocaleString('ru-RU')}</span>
@@ -363,13 +364,13 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
                 value={amountStr}
                 onChange={(e) => handleAmountChange(e.target.value)}
                 placeholder="3600000"
-                className="w-full px-3.5 py-2.5 text-base sm:text-sm font-bold tabular-nums text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-emerald-600 focus:outline-hidden transition-colors"
+                className="w-full px-3.5 py-2.5 text-base sm:text-sm font-bold tabular-nums text-[#1C1917] bg-[#F7F5F0] border border-[#E7E2D8] rounded-xl focus:bg-white focus:border-emerald-600 focus:outline-hidden transition-colors"
               />
             </div>
 
-            {/* Payment Method Chips (Semantic radio group inside fieldset) */}
+            {/* Payment Method Chips */}
             <fieldset className="space-y-1.5">
-              <legend className="text-[11px] font-semibold text-slate-600 uppercase tracking-wide">
+              <legend className="text-[11px] font-semibold text-[#57534E] uppercase tracking-wide">
                 Способ оплаты
               </legend>
               <div className="grid grid-cols-4 gap-1.5">
@@ -392,10 +393,10 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
                       />
                       <label
                         htmlFor={radioId}
-                        className={`flex items-center justify-center py-2 px-1 rounded-xl text-[11px] font-semibold border cursor-pointer transition-all select-none peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500 peer-focus-visible:ring-offset-1 active:scale-95 ${
+                        className={`flex items-center justify-center py-2 px-1 rounded-xl text-[11px] font-semibold border cursor-pointer transition-colors select-none peer-focus-visible:ring-2 peer-focus-visible:ring-[#2F6FED] peer-focus-visible:ring-offset-1 active:scale-95 ${
                           checked
                             ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
-                            : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                            : 'bg-[#F7F5F0] text-[#44403C] border-[#E7E2D8] hover:bg-[#EFEBE2]'
                         }`}
                       >
                         {method.label}
@@ -411,7 +412,7 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
               <div>
                 <label
                   htmlFor={dateInputId}
-                  className="block text-[11px] font-semibold text-slate-600 uppercase tracking-wide mb-1"
+                  className="block text-[11px] font-semibold text-[#57534E] uppercase tracking-wide mb-1"
                 >
                   Дата оплаты
                 </label>
@@ -428,14 +429,14 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
                     setPaidDate(e.target.value);
                     setErrorMsg(null);
                   }}
-                  className="w-full px-3 py-2 text-xs font-semibold tabular-nums text-slate-900 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-emerald-600 focus:outline-hidden"
+                  className="w-full px-3 py-2 text-xs font-semibold tabular-nums text-[#1C1917] bg-[#F7F5F0] border border-[#E7E2D8] rounded-xl focus:bg-white focus:border-emerald-600 focus:outline-hidden"
                 />
               </div>
 
               <div>
                 <label
                   htmlFor={noteInputId}
-                  className="block text-[11px] font-semibold text-slate-600 uppercase tracking-wide mb-1"
+                  className="block text-[11px] font-semibold text-[#57534E] uppercase tracking-wide mb-1"
                 >
                   Заметка
                 </label>
@@ -447,14 +448,14 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   placeholder="Необязательно"
-                  className="w-full px-3 py-2 text-xs font-medium text-slate-900 bg-slate-50 border border-slate-200 rounded-xl placeholder:text-slate-400 focus:bg-white focus:border-emerald-600 focus:outline-hidden"
+                  className="w-full px-3 py-2 text-xs font-medium text-[#1C1917] bg-[#F7F5F0] border border-[#E7E2D8] rounded-xl placeholder:text-[#8C857B] focus:bg-white focus:border-emerald-600 focus:outline-hidden"
                 />
               </div>
             </div>
 
             {/* Start New Package Toggle (for package students) */}
             {isPackageStudent && lessonsCount > 0 && (
-              <label className="flex items-start gap-2.5 p-3 rounded-xl bg-indigo-50/70 border border-indigo-200/80 cursor-pointer select-none">
+              <label className="flex items-start gap-2.5 p-3 rounded-xl bg-[#EEF3FE] border border-[#2F6FED]/20 cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={startNewPackage}
@@ -462,13 +463,13 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
                     hapticImpact('light');
                     setStartNewPackage(e.target.checked);
                   }}
-                  className="mt-0.5 w-4 h-4 rounded border-indigo-300 text-indigo-600 focus:ring-indigo-500 shrink-0"
+                  className="mt-0.5 w-4 h-4 rounded border-[#2F6FED]/40 text-[#2F6FED] focus:ring-[#2F6FED] shrink-0"
                 />
                 <div className="min-w-0">
-                  <span className="text-xs font-semibold text-indigo-950 block">
+                  <span className="text-xs font-semibold text-[#1C1917] block">
                     Начать новый пакет с {formatShortRuDate(paidDate)}
                   </span>
-                  <span className="text-[11px] text-indigo-700/90 leading-snug block mt-0.5">
+                  <span className="text-[11px] text-[#57534E] leading-snug block mt-0.5">
                     {startNewPackage
                       ? `Счётчик пакета обновится: ${lessonsCount} ур. с ${formatShortRuDate(paidDate)}`
                       : `Текущий пакет (ост. ${currentBalance} ур.) продолжит считаться до закрытия`}
@@ -478,7 +479,7 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
             )}
 
             {/* Balance Preview Strip */}
-            <div className="px-3 py-2 rounded-xl bg-emerald-50/70 border border-emerald-200/70 flex items-center justify-between text-xs tabular-nums">
+            <div className="px-3 py-2 rounded-xl bg-[#E7F7F0] border border-emerald-200/80 flex items-center justify-between text-xs tabular-nums">
               <span className="text-emerald-900 font-medium">Баланс после оплаты</span>
               <span className="font-bold text-emerald-800">
                 {currentBalance} ур. → {projectedBalance} ур.
@@ -491,7 +492,7 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
                 id={errorId}
                 role="alert"
                 aria-live="polite"
-                className="px-3 py-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold"
+                className="px-3 py-2 rounded-xl bg-[#FDECE8] border border-[#F6BFA9] text-[#B93815] text-xs font-semibold"
               >
                 {errorMsg}
               </div>
@@ -505,14 +506,14 @@ const AddPaymentModalBody: React.FC<AddPaymentModalBodyProps> = ({
                   hapticImpact('light');
                   onClose();
                 }}
-                className="px-4 py-3 rounded-2xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 active:scale-95 transition-all"
+                className="px-4 py-3 rounded-2xl border border-[#E7E2D8] bg-[#F7F5F0] text-[#44403C] font-semibold text-xs hover:bg-[#EFEBE2] active:scale-95 transition-colors"
               >
                 Отмена
               </button>
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="flex-1 py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-bold text-xs shadow-md shadow-emerald-600/20 flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all tabular-nums"
+                className="flex-1 py-3 px-4 rounded-2xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-semibold text-xs shadow-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-colors tabular-nums"
               >
                 {isSubmitting ? (
                   <>

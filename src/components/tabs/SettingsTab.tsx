@@ -219,30 +219,30 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#f4f5f8] pb-28 overflow-y-auto">
-      <div className="px-4 pt-safe pb-3 bg-white border-b border-slate-200/80 sticky top-0 z-10">
-        <h1 className="text-lg font-bold text-slate-900 tracking-tight leading-tight">Настройки</h1>
-        <p className="text-xs text-slate-500 font-semibold mt-0.5">Реквизиты для счетов и управление ботом</p>
+    <div className="flex flex-col h-full bg-[#F7F5F0] pb-28 overflow-y-auto">
+      <div className="px-4 pt-safe pb-2.5 bg-white border-b border-[#E7E2D8] sticky top-0 z-10">
+        <h1 className="text-lg font-bold text-[#1C1917] tracking-tight leading-tight">Настройки</h1>
+        <p className="text-xs text-[#78716C] font-medium mt-0.5">Реквизиты для счетов и управление ботом</p>
       </div>
 
-      <div className="p-4 space-y-4">
+      <div className="p-3.5 space-y-3">
         {/* Payment Details Form */}
-        <form onSubmit={handleSaveSettings} className="bg-white rounded-2xl p-4 shadow-2xs border border-slate-200/80 space-y-3">
+        <form onSubmit={handleSaveSettings} className="bento-card rounded-3xl p-4 space-y-3">
           <div className="flex items-center justify-between gap-2 pb-1">
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600">
+              <div className="w-8 h-8 rounded-full bg-[#EEF3FE] flex items-center justify-center text-[#2F6FED]">
                 <CreditCard className="w-4 h-4" />
               </div>
               <div>
-                <h2 className="text-sm font-semibold text-gray-900">Реквизиты для оплаты</h2>
-                <p className="text-[11px] text-gray-500">Хранятся в базе и подставляются в счета и бота</p>
+                <h2 className="text-sm font-semibold text-[#1C1917]">Реквизиты для оплаты</h2>
+                <p className="text-[11px] text-[#78716C]">Хранятся в базе и подставляются в счета и бота</p>
               </div>
             </div>
-            {isLoadingSettings && <Loader2 className="w-4 h-4 text-gray-400 animate-spin shrink-0" />}
+            {isLoadingSettings && <Loader2 className="w-4 h-4 text-[#8C857B] animate-spin shrink-0" />}
           </div>
 
           {needsMigration && (
-            <div className="px-3 py-2 rounded-2xl bg-amber-50 border border-amber-200/80 text-amber-900 text-[11px] font-medium flex items-center gap-2">
+            <div className="px-3 py-2 rounded-2xl bg-[#FEF6E7] border border-[#F3DCAC] text-amber-950 text-[11px] font-medium flex items-center gap-2">
               <CloudUpload className="w-4 h-4 text-amber-600 shrink-0" />
               <span>Локальные реквизиты подставлены в форму — нажмите «Сохранить реквизиты» для переноса в базу.</span>
             </div>
@@ -252,7 +252,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
             <div>
               <label
                 htmlFor={`${baseId}-tutorName`}
-                className="text-[10px] font-bold text-gray-400 uppercase block mb-1"
+                className="text-[10px] font-semibold text-[#78716C] uppercase block mb-1"
               >
                 Имя репетитора
               </label>
@@ -262,13 +262,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
                 type="text"
                 value={settings.tutorName}
                 onChange={(e) => setSettings((p) => ({ ...p, tutorName: e.target.value }))}
-                className="w-full text-xs font-bold text-gray-900 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 focus:outline-hidden focus:border-blue-500"
+                className="w-full text-xs font-semibold text-[#1C1917] bg-[#F7F5F0] px-3 py-2 rounded-xl border border-[#E7E2D8] focus:bg-white focus:outline-hidden focus:border-[#2F6FED]"
               />
             </div>
             <div>
               <label
                 htmlFor={`${baseId}-bankName`}
-                className="text-[10px] font-bold text-gray-400 uppercase block mb-1"
+                className="text-[10px] font-semibold text-[#78716C] uppercase block mb-1"
               >
                 Банк / Сервис
               </label>
@@ -279,7 +279,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
                 value={settings.bankName}
                 onChange={(e) => setSettings((p) => ({ ...p, bankName: e.target.value }))}
                 placeholder="Payme / Click / Uzcard"
-                className="w-full text-xs font-bold text-gray-900 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 focus:outline-hidden focus:border-blue-500"
+                className="w-full text-xs font-semibold text-[#1C1917] bg-[#F7F5F0] px-3 py-2 rounded-xl border border-[#E7E2D8] focus:bg-white focus:outline-hidden focus:border-[#2F6FED]"
               />
             </div>
           </div>
@@ -287,7 +287,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
           <div>
             <label
               htmlFor={`${baseId}-cardNumber`}
-              className="text-[10px] font-bold text-gray-400 uppercase block mb-1"
+              className="text-[10px] font-semibold text-[#78716C] uppercase block mb-1"
             >
               Номер карты
             </label>
@@ -299,14 +299,14 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
               value={settings.cardNumber}
               onChange={(e) => setSettings((p) => ({ ...p, cardNumber: e.target.value }))}
               placeholder="8600 0000 0000 0000"
-              className="w-full text-xs font-semibold tabular-nums text-gray-900 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 focus:outline-hidden focus:border-blue-500"
+              className="w-full text-xs font-semibold tabular-nums text-[#1C1917] bg-[#F7F5F0] px-3 py-2 rounded-xl border border-[#E7E2D8] focus:bg-white focus:outline-hidden focus:border-[#2F6FED]"
             />
           </div>
 
           <div>
             <label
               htmlFor={`${baseId}-cardHolder`}
-              className="text-[10px] font-bold text-gray-400 uppercase block mb-1"
+              className="text-[10px] font-semibold text-[#78716C] uppercase block mb-1"
             >
               Получатель (ФИО на карте)
             </label>
@@ -317,12 +317,12 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
               value={settings.cardHolder}
               onChange={(e) => setSettings((p) => ({ ...p, cardHolder: e.target.value }))}
               placeholder="Имя Фамилия"
-              className="w-full text-xs font-bold text-gray-900 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200 focus:outline-hidden focus:border-blue-500"
+              className="w-full text-xs font-semibold text-[#1C1917] bg-[#F7F5F0] px-3 py-2 rounded-xl border border-[#E7E2D8] focus:bg-white focus:outline-hidden focus:border-[#2F6FED]"
             />
           </div>
 
           <div>
-            <span className="text-[10px] font-bold text-gray-400 uppercase block mb-1.5">
+            <span className="text-[10px] font-semibold text-[#78716C] uppercase block mb-1.5">
               Напоминание до урока (мин)
             </span>
             <div className="grid grid-cols-4 gap-1.5">
@@ -334,9 +334,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
                     hapticImpact('light');
                     setSettings((p) => ({ ...p, reminderMinutesBefore: min }));
                   }}
-                  className={`py-1.5 rounded-xl text-xs font-semibold tabular-nums border transition-all active:scale-95 ${settings.reminderMinutesBefore === min
-                    ? 'bg-slate-900 text-white border-slate-900'
-                    : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
+                  className={`py-1.5 rounded-xl text-xs font-semibold tabular-nums border transition-colors active:scale-95 ${settings.reminderMinutesBefore === min
+                    ? 'bg-[#1C1917] text-white border-[#1C1917]'
+                    : 'bg-[#F7F5F0] text-[#44403C] border-[#E7E2D8] hover:bg-[#EFEBE2]'
                     }`}
                 >
                   {min} мин
@@ -349,7 +349,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
             <div
               role="alert"
               aria-live="polite"
-              className="px-3 py-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-semibold"
+              className="px-3 py-2 rounded-xl bg-[#FDECE8] border border-[#F6BFA9] text-[#B93815] text-[11px] font-semibold"
             >
               {saveError}
             </div>
@@ -358,9 +358,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
           <button
             type="submit"
             disabled={isSavingSettings}
-            className={`w-full py-2.5 rounded-2xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all active:scale-98 disabled:opacity-60 ${savedNotice
+            className={`w-full py-2.5 rounded-2xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors active:scale-98 disabled:opacity-60 ${savedNotice
               ? 'bg-emerald-600 text-white shadow-sm'
-              : 'bg-blue-600 hover:bg-blue-700 text-white shadow-md shadow-blue-500/20'
+              : 'bg-[#2F6FED] hover:bg-[#255CE0] text-white shadow-sm'
               }`}
           >
             {isSavingSettings ? (
@@ -378,8 +378,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
         </form>
 
         {/* Automation & Bot Controls */}
-        <div className="bg-white rounded-2xl p-4 shadow-2xs border border-slate-200/80 space-y-2.5">
-          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+        <div className="bento-card rounded-3xl p-4 space-y-2">
+          <h2 className="text-[11px] font-semibold text-[#78716C] uppercase tracking-wide">
             Управление расписанием и ботом
           </h2>
 
@@ -387,23 +387,23 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
             type="button"
             disabled={isExtending}
             onClick={handleExtendSchedule}
-            className="w-full p-3 rounded-2xl bg-blue-50 hover:bg-blue-100 border border-blue-200/80 text-blue-800 text-xs font-bold flex items-center justify-between active:scale-98 transition-all disabled:opacity-60"
+            className="w-full p-3 rounded-2xl bg-[#EEF3FE] hover:bg-[#E2EBFC] border border-[#2F6FED]/20 text-[#1D4ED8] text-xs font-semibold flex items-center justify-between active:scale-98 transition-colors disabled:opacity-60"
           >
             <span className="flex items-center gap-2">
-              <CalendarClock className="w-4 h-4 text-blue-600" />
+              <CalendarClock className="w-4 h-4 text-[#2F6FED]" />
               <span>Продлить регулярное расписание на 9 недель</span>
             </span>
             {isExtending && <Loader2 className="w-4 h-4 animate-spin" />}
           </button>
           {extendResult && (
-            <p className="text-[11px] font-semibold text-gray-700 px-1">{extendResult}</p>
+            <p className="text-[11px] font-semibold text-[#44403C] px-1">{extendResult}</p>
           )}
 
           <button
             type="button"
             disabled={isSendingDigest}
             onClick={handleSendDigest}
-            className="w-full p-3 rounded-2xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 text-emerald-800 text-xs font-bold flex items-center justify-between active:scale-98 transition-all disabled:opacity-60"
+            className="w-full p-3 rounded-2xl bg-[#E7F7F0] hover:bg-[#D1F0E2] border border-emerald-200/80 text-emerald-800 text-xs font-semibold flex items-center justify-between active:scale-98 transition-colors disabled:opacity-60"
           >
             <span className="flex items-center gap-2">
               <Send className="w-4 h-4 text-emerald-600" />
@@ -412,33 +412,33 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
             {isSendingDigest && <Loader2 className="w-4 h-4 animate-spin" />}
           </button>
           {digestResult && (
-            <p className="text-[11px] font-semibold text-gray-700 px-1">{digestResult}</p>
+            <p className="text-[11px] font-semibold text-[#44403C] px-1">{digestResult}</p>
           )}
 
           <button
             type="button"
             disabled={isCheckingBot}
             onClick={handleCheckAndFixBot}
-            className="w-full p-3 rounded-2xl bg-indigo-50 hover:bg-indigo-100 border border-indigo-200/80 text-indigo-900 text-xs font-bold flex items-center justify-between active:scale-98 transition-all disabled:opacity-60"
+            className="w-full p-3 rounded-2xl bg-[#F6EBD8]/70 hover:bg-[#F6EBD8] border border-[#E7D8BE] text-amber-950 text-xs font-semibold flex items-center justify-between active:scale-98 transition-colors disabled:opacity-60"
           >
             <span className="flex items-center gap-2">
-              <BellRing className="w-4 h-4 text-indigo-600" />
+              <BellRing className="w-4 h-4 text-amber-700" />
               <span>Проверить и починить уведомления бота</span>
             </span>
             {isCheckingBot && <Loader2 className="w-4 h-4 animate-spin" />}
           </button>
           {botStatusResult && (
-            <p className="text-[11px] font-semibold text-gray-700 px-1">{botStatusResult}</p>
+            <p className="text-[11px] font-semibold text-[#44403C] px-1">{botStatusResult}</p>
           )}
 
           <button
             type="button"
             disabled={isExporting}
             onClick={handleExportMonthlyCsv}
-            className="w-full p-3 rounded-2xl bg-gray-50 hover:bg-gray-100 border border-gray-200 text-gray-800 text-xs font-bold flex items-center justify-between active:scale-98 transition-all disabled:opacity-60"
+            className="w-full p-3 rounded-2xl bg-[#F7F5F0] hover:bg-[#EFEBE2] border border-[#E7E2D8] text-[#1C1917] text-xs font-semibold flex items-center justify-between active:scale-98 transition-colors disabled:opacity-60"
           >
             <span className="flex items-center gap-2">
-              <Download className="w-4 h-4 text-gray-600" />
+              <Download className="w-4 h-4 text-[#78716C]" />
               <span>Скачать финансовый отчёт за месяц (CSV)</span>
             </span>
             {isExporting && <Loader2 className="w-4 h-4 animate-spin" />}
@@ -446,27 +446,27 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ onRefresh }) => {
         </div>
 
         {/* About & Support */}
-        <div className="bg-white rounded-2xl shadow-2xs border border-slate-200/80 divide-y divide-slate-100">
-          <div className="p-4 flex items-center justify-between">
+        <div className="bento-card rounded-3xl divide-y divide-[#EFECE5]">
+          <div className="p-3.5 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
-                <Info className="w-4 h-4 text-green-600" />
+              <div className="w-8 h-8 rounded-full bg-[#E7F7F0] flex items-center justify-center">
+                <Info className="w-4 h-4 text-emerald-700" />
               </div>
               <div>
-                <span className="text-xs font-bold text-gray-900 block">Версия CRM</span>
-                <span className="text-[11px] text-gray-400">Tutor Tracker · Hybrid Billing</span>
+                <span className="text-xs font-semibold text-[#1C1917] block">Версия CRM</span>
+                <span className="text-[11px] text-[#78716C]">Tutor Tracker · Warm Bento</span>
               </div>
             </div>
-            <span className="text-xs text-gray-500 font-bold tabular-nums">2.0</span>
+            <span className="text-xs text-[#78716C] font-semibold tabular-nums">2.0</span>
           </div>
-          <a href="https://t.me/farxad_dev" target="_blank" rel="noopener noreferrer" className="p-4 flex items-center justify-between">
+          <a href="https://t.me/farxad_dev" target="_blank" rel="noopener noreferrer" className="p-3.5 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
-                <ExternalLink className="w-4 h-4 text-blue-600" />
+              <div className="w-8 h-8 rounded-full bg-[#EEF3FE] flex items-center justify-center">
+                <ExternalLink className="w-4 h-4 text-[#2F6FED]" />
               </div>
-              <span className="text-xs font-bold text-gray-900">Поддержка</span>
+              <span className="text-xs font-semibold text-[#1C1917]">Поддержка</span>
             </div>
-            <span className="text-xs text-blue-600 font-bold">Telegram →</span>
+            <span className="text-xs text-[#2F6FED] font-semibold">Telegram →</span>
           </a>
         </div>
       </div>

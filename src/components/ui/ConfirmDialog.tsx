@@ -90,24 +90,25 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       aria-labelledby={titleId}
       onClose={handleDialogClose}
       {...({ closedby: 'any' } as Record<string, string>)}
-      className="m-auto mb-0 sm:mb-auto w-full max-w-sm rounded-t-3xl sm:rounded-3xl p-0 border border-slate-200/80 bg-white text-slate-900 shadow-2xl overflow-hidden"
+      className="m-auto mb-0 sm:mb-auto w-full max-w-sm rounded-t-3xl sm:rounded-3xl p-0 border border-[#E7E2D8] bg-white text-[#1C1917] shadow-2xl overflow-hidden"
     >
       {isOpen && (
-        <div className="p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] sm:pb-5 space-y-4">
+        <div className="p-5 pt-3 pb-[calc(1.25rem+env(safe-area-inset-bottom,0px))] sm:pb-5 space-y-4">
+          <div className="w-9 h-1 rounded-full bg-[#DDD6C9] mx-auto sm:hidden" aria-hidden="true" />
           <div className="flex items-start gap-3">
             <div
-              className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${
-                danger ? 'bg-rose-50 text-rose-600' : 'bg-blue-50 text-blue-600'
+              className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                danger ? 'bg-[#FDECE8] text-[#B93815]' : 'bg-[#EEF3FE] text-[#2F6FED]'
               }`}
             >
               <AlertTriangle className="w-5 h-5" aria-hidden="true" />
             </div>
             <div className="min-w-0">
-              <h3 id={titleId} className="text-base font-bold text-slate-900 leading-snug">
+              <h3 id={titleId} className="text-base font-bold text-[#1C1917] leading-snug">
                 {title}
               </h3>
               {description && (
-                <p className="text-xs text-slate-600 font-medium mt-1 leading-relaxed">
+                <p className="text-xs text-[#78716C] font-medium mt-1 leading-relaxed">
                   {description}
                 </p>
               )}
@@ -122,7 +123,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
                 hapticImpact('light');
                 onClose();
               }}
-              className="flex-1 py-3 rounded-2xl border border-slate-200 text-slate-700 font-semibold text-xs hover:bg-slate-50 active:scale-95 transition-all disabled:opacity-50"
+              className="flex-1 py-3 rounded-2xl border border-[#E7E2D8] bg-[#F7F5F0] text-[#44403C] font-semibold text-xs hover:bg-[#EFEBE2] active:scale-95 transition-colors disabled:opacity-50"
             >
               {cancelLabel}
             </button>
@@ -133,10 +134,10 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
                 hapticImpact('medium');
                 void onConfirm();
               }}
-              className={`flex-1 py-3 rounded-2xl text-white font-bold text-xs shadow-sm flex items-center justify-center gap-1.5 active:scale-95 transition-all disabled:opacity-60 ${
+              className={`flex-1 py-3 rounded-2xl text-white font-semibold text-xs shadow-sm flex items-center justify-center gap-1.5 active:scale-95 transition-colors disabled:opacity-60 ${
                 danger
-                  ? 'bg-rose-600 hover:bg-rose-700 shadow-rose-500/20'
-                  : 'bg-blue-600 hover:bg-blue-700 shadow-blue-500/20'
+                  ? 'bg-[#E85D3F] hover:bg-[#D14C30]'
+                  : 'bg-[#2F6FED] hover:bg-[#255CE0]'
               }`}
             >
               {isLoading && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
